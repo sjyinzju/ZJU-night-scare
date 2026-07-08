@@ -18,6 +18,7 @@ const MAP_W = 42;
 const MAP_D = 34;
 const PLAYER_SPEED = 4.2;
 const ROAD_SNAP_RADIUS = 0.72;
+const ROAD_JUNCTION_RADIUS = 1.12;
 const WORLD_BOUNDS = { x: -1200, y: 0, width: 4300, height: 2200 };
 
 type KeySet = {
@@ -32,6 +33,40 @@ type KeySet = {
   e: Phaser.Input.Keyboard.Key;
 };
 
+type InputVector = {
+  screen: IsoPoint;
+  iso: IsoPoint;
+};
+
+type RoadProjection = {
+  point: IsoPoint;
+  distance: number;
+  roadId: string;
+  segmentIndex: number;
+  segmentStart: IsoPoint;
+  segmentEnd: IsoPoint;
+  direction: IsoPoint;
+  screenDirection: IsoPoint;
+  length: number;
+  t: number;
+};
+
+type JunctionDirection = {
+  node: IsoPoint;
+  segmentStart: IsoPoint;
+  segmentEnd: IsoPoint;
+  direction: IsoPoint;
+  screenDirection: IsoPoint;
+};
+
+type RailDirection = {
+  origin: IsoPoint;
+  segmentStart: IsoPoint;
+  segmentEnd: IsoPoint;
+  direction: IsoPoint;
+  screenDirection: IsoPoint;
+};
+
 export type GameHudEvent = {
   place: string;
   prompt: string;
@@ -43,7 +78,7 @@ export class CampusScene extends Phaser.Scene {
   private keys?: KeySet;
   private player!: Phaser.GameObjects.Container;
   private playerBody!: Phaser.GameObjects.Ellipse;
-  private playerIso = { x: 8.3, y: 28.7 };
+  private playerIso = { x: 16.2, y: 30.6 };
   private activeTask?: CampusTask;
   private completed = new Set<string>();
   private lastInteract = 0;
@@ -66,6 +101,8 @@ export class CampusScene extends Phaser.Scene {
     this.drawBuildings();
     this.drawTaskMarkers();
     this.drawLampPosts();
+    this.drawOrientationLabels();
+    this.snapPlayerToRoad();
     this.createPlayer();
     this.createFog();
 
@@ -251,6 +288,11 @@ export class CampusScene extends Phaser.Scene {
 
   private drawBuildings() {
     campusBuildings.forEach((building) => {
+      if (building.id === "east-track") {
+        this.drawTrackField(building);
+        return;
+      }
+
       const g = this.add.graphics();
       this.drawIsoPrism(g, building);
       const center = this.toScreen({
@@ -258,6 +300,9 @@ export class CampusScene extends Phaser.Scene {
         y: building.y + building.d / 2,
       });
       g.setDepth(center.y + building.h * 26);
+      if (building.id === "admin-center") {
+        this.drawAdminEyeRoof(building, center.y + building.h * 26 + 1);
+      }
 
       const label = this.add
         .text(center.x, center.y - building.h * 35 + (building.labelOffset ?? 0), building.name, {
@@ -270,6 +315,75 @@ export class CampusScene extends Phaser.Scene {
         .setOrigin(0.5);
       label.setDepth(center.y + building.h * 26 + 2);
     });
+  }
+
+  private drawTrackField(building: CampusBuilding) {
+    const center = this.toScreen({ x: building.x + building.w / 2, y: building.y + building.d / 2 });
+    const g = this.add.graphics();
+    const outerW = building.w * 62;
+    const outerH = building.d * 42;
+    const innerW = building.w * 50;
+    const innerH = building.d * 28;
+    const fieldW = building.w * 30;
+    const fieldH = building.d * 16;
+
+    g.fillStyle(0x0d1412, 0.5);
+    g.fillEllipse(center.x + 8, center.y + 12, outerW + 16, outerH + 14);
+    g.fillStyle(0x842f28, 0.98);
+    g.fillEllipse(center.x, center.y, outerW, outerH);
+    g.fillStyle(0x5d1f1b, 0.92);
+    g.fillEllipse(center.x, center.y, outerW * 0.92, outerH * 0.88);
+    g.fillStyle(0x2e5a3e, 0.98);
+    g.fillEllipse(center.x, center.y, innerW, innerH);
+    g.lineStyle(4, 0xf3e4ca, 0.9);
+    g.strokeEllipse(center.x, center.y, innerW, innerH);
+    g.lineStyle(2, 0xe6d7c0, 0.78);
+    g.strokeEllipse(center.x, center.y, fieldW + 12, fieldH + 8);
+    g.strokeEllipse(center.x, center.y, fieldW, fieldH);
+    g.setDepth(center.y + 28);
+
+    const label = this.add
+      .text(center.x, center.y - 34, building.name, {
+        fontFamily: "Microsoft YaHei, sans-serif",
+        fontSize: "15px",
+        color: "#d9e6d6",
+        backgroundColor: "rgba(8, 14, 13, 0.62)",
+        padding: { x: 8, y: 4 },
+      })
+      .setOrigin(0.5);
+    label.setDepth(center.y + 30);
+  }
+
+  private drawAdminEyeRoof(building: CampusBuilding, depth: number) {
+    const center = this.toScreen({ x: building.x + building.w / 2, y: building.y + building.d / 2 });
+    const topY = center.y - building.h * 26 - 2;
+    const eye = this.add.graphics();
+    eye.lineStyle(4, 0xd7ded1, 0.72);
+    eye.strokeEllipse(center.x, topY, 52, 20);
+    eye.lineStyle(2, 0x8b9f99, 0.82);
+    eye.strokeEllipse(center.x, topY, 24, 10);
+    eye.fillStyle(0x0b1110, 0.92);
+    eye.fillCircle(center.x, topY, 5);
+    eye.setDepth(depth);
+  }
+
+  private drawOrientationLabels() {
+    const north = this.toScreen({ x: 8.0, y: 2.0 });
+    const south = this.toScreen({ x: 6.0, y: 31.8 });
+    const makeLabel = (point: { x: number; y: number }, text: string, depth: number) => {
+      const label = this.add
+        .text(point.x, point.y, text, {
+          fontFamily: "Microsoft YaHei, sans-serif",
+          fontSize: "18px",
+          color: "#f1f7ee",
+          backgroundColor: "rgba(8, 14, 13, 0.68)",
+          padding: { x: 10, y: 6 },
+        })
+        .setOrigin(0.5);
+      label.setDepth(depth);
+    };
+    makeLabel(north, "北 N", 90000);
+    makeLabel(south, "南 S", 90000);
   }
 
   private drawIsoPrism(g: Phaser.GameObjects.Graphics, b: CampusBuilding) {
@@ -399,6 +513,11 @@ export class CampusScene extends Phaser.Scene {
     this.player.setDepth(p.y + 40);
   }
 
+  private snapPlayerToRoad() {
+    const nearest = this.nearestRoadPoint(this.playerIso);
+    if (nearest) this.playerIso = nearest.point;
+  }
+
   private createFog() {
     this.fog = this.add.graphics();
     this.fog.setScrollFactor(0);
@@ -408,24 +527,10 @@ export class CampusScene extends Phaser.Scene {
   private movePlayer() {
     if (!this.keys) return;
 
-    let dx = 0;
-    let dy = 0;
-    if (this.keys.left.isDown || this.keys.a.isDown) dx -= 1;
-    if (this.keys.right.isDown || this.keys.d.isDown) dx += 1;
-    if (this.keys.up.isDown || this.keys.w.isDown) dy -= 1;
-    if (this.keys.down.isDown || this.keys.s.isDown) dy += 1;
+    const input = this.getInputVector();
 
-    if (dx !== 0 || dy !== 0) {
-      const length = Math.hypot(dx, dy);
-      const stepX = (dx / length) * 0.075 * PLAYER_SPEED;
-      const stepY = (dy / length) * 0.075 * PLAYER_SPEED;
-      const next = {
-        x: Phaser.Math.Clamp(this.playerIso.x + stepX, 1.5, MAP_W - 2),
-        y: Phaser.Math.Clamp(this.playerIso.y + stepY, 1.5, MAP_D - 2),
-      };
-      const nextX = { x: next.x, y: this.playerIso.y };
-      const nextY = { x: this.playerIso.x, y: next.y };
-      const resolved = this.resolveWalkablePoint(next) ?? this.resolveWalkablePoint(nextX) ?? this.resolveWalkablePoint(nextY);
+    if (input) {
+      const resolved = this.resolveMovement(input, 0.075 * PLAYER_SPEED);
 
       if (resolved) {
         this.playerIso = resolved;
@@ -439,12 +544,133 @@ export class CampusScene extends Phaser.Scene {
     }
   }
 
+  private getInputVector(): InputVector | null {
+    if (!this.keys) return null;
+
+    let screenX = 0;
+    let screenY = 0;
+    if (this.keys.left.isDown || this.keys.a.isDown) screenX -= 1;
+    if (this.keys.right.isDown || this.keys.d.isDown) screenX += 1;
+    if (this.keys.up.isDown || this.keys.w.isDown) screenY -= 1;
+    if (this.keys.down.isDown || this.keys.s.isDown) screenY += 1;
+    if (screenX === 0 && screenY === 0) return null;
+
+    const screenLength = Math.hypot(screenX, screenY);
+    const screen = { x: screenX / screenLength, y: screenY / screenLength };
+    const iso = this.normalize({
+      x: screen.x / TILE_W + screen.y / TILE_H,
+      y: screen.y / TILE_H - screen.x / TILE_W,
+    });
+
+    return { screen, iso };
+  }
+
+  private resolveMovement(input: InputVector, stepDistance: number) {
+    const nearest = this.nearestRoadProjection(this.playerIso);
+    if (nearest && nearest.distance <= ROAD_SNAP_RADIUS) {
+      return this.resolveRailMovement(input, stepDistance, nearest);
+    }
+
+    if (this.isInPlaza(this.playerIso) && !this.isBlocked(this.playerIso)) {
+      const next = this.clampToMap({
+        x: this.playerIso.x + input.iso.x * stepDistance,
+        y: this.playerIso.y + input.iso.y * stepDistance,
+      });
+      return this.resolveWalkablePoint(next);
+    }
+
+    const next = this.clampToMap({
+      x: this.playerIso.x + input.iso.x * stepDistance,
+      y: this.playerIso.y + input.iso.y * stepDistance,
+    });
+    return this.resolveWalkablePoint(next);
+  }
+
+  private resolveRailMovement(input: InputVector, stepDistance: number, nearest: RoadProjection) {
+    const options = this.currentRailDirections(nearest);
+    let bestOption = options[0];
+    let bestScore = Number.NEGATIVE_INFINITY;
+    for (const option of options) {
+      const score = this.dot(input.screen, option.screenDirection);
+      if (score > bestScore) {
+        bestOption = option;
+        bestScore = score;
+      }
+    }
+
+    const nextOnSegment = this.projectToSegment(
+      {
+        x: bestOption.origin.x + bestOption.direction.x * stepDistance,
+        y: bestOption.origin.y + bestOption.direction.y * stepDistance,
+      },
+      bestOption.segmentStart,
+      bestOption.segmentEnd,
+    ).point;
+    const next = this.clampToMap(nextOnSegment);
+    if (this.isOutOfMap(next)) return null;
+    return next;
+  }
+
+  private currentRailDirections(nearest: RoadProjection) {
+    const reverseDirection = { x: -nearest.direction.x, y: -nearest.direction.y };
+    const directions: RailDirection[] = [];
+
+    if (nearest.t < 0.985) {
+      directions.push({
+        origin: nearest.point,
+        segmentStart: nearest.segmentStart,
+        segmentEnd: nearest.segmentEnd,
+        direction: nearest.direction,
+        screenDirection: nearest.screenDirection,
+      });
+    }
+
+    if (nearest.t > 0.015) {
+      directions.push({
+        origin: nearest.point,
+        segmentStart: nearest.segmentStart,
+        segmentEnd: nearest.segmentEnd,
+        direction: reverseDirection,
+        screenDirection: this.normalize(this.toScreenDelta(reverseDirection)),
+      });
+    }
+
+    this.nearbyJunctionDirections(nearest.point).forEach((junction) => {
+      directions.push({
+        origin: junction.node,
+        segmentStart: junction.segmentStart,
+        segmentEnd: junction.segmentEnd,
+        direction: junction.direction,
+        screenDirection: junction.screenDirection,
+      });
+    });
+
+    if (directions.length) return directions;
+
+    return [
+      {
+        origin: nearest.point,
+        segmentStart: nearest.segmentStart,
+        segmentEnd: nearest.segmentEnd,
+        direction: nearest.direction,
+        screenDirection: nearest.screenDirection,
+      },
+      {
+        origin: nearest.point,
+        segmentStart: nearest.segmentStart,
+        segmentEnd: nearest.segmentEnd,
+        direction: reverseDirection,
+        screenDirection: this.normalize(this.toScreenDelta(reverseDirection)),
+      },
+    ];
+  }
+
   private resolveWalkablePoint(point: IsoPoint) {
     if (this.isOutOfMap(point)) return null;
     if (this.isInPlaza(point) && !this.isBlocked(point)) return point;
 
     const nearest = this.nearestRoadPoint(point);
-    if (nearest && nearest.distance <= ROAD_SNAP_RADIUS && !this.isBlocked(nearest.point)) {
+    if (nearest && nearest.distance <= ROAD_SNAP_RADIUS) {
       return nearest.point;
     }
     return null;
@@ -482,16 +708,73 @@ export class CampusScene extends Phaser.Scene {
   }
 
   private nearestRoadPoint(point: IsoPoint): { point: IsoPoint; distance: number } | null {
-    let best: { point: IsoPoint; distance: number } | null = null;
+    const nearest = this.nearestRoadProjection(point);
+    if (!nearest) return null;
+    return { point: nearest.point, distance: nearest.distance };
+  }
+
+  private nearestRoadProjection(point: IsoPoint): RoadProjection | null {
+    let best: RoadProjection | null = null;
     for (const road of campusRoads) {
       for (let index = 0; index < road.points.length - 1; index += 1) {
-        const candidate = this.projectToSegment(point, road.points[index], road.points[index + 1]);
+        const segmentStart = road.points[index];
+        const segmentEnd = road.points[index + 1];
+        const segmentVector = { x: segmentEnd.x - segmentStart.x, y: segmentEnd.y - segmentStart.y };
+        const length = Math.hypot(segmentVector.x, segmentVector.y);
+        if (length === 0) continue;
+
+        const candidate = this.projectToSegment(point, segmentStart, segmentEnd);
         if (!best || candidate.distance < best.distance) {
-          best = candidate;
+          const direction = { x: segmentVector.x / length, y: segmentVector.y / length };
+          best = {
+            ...candidate,
+            roadId: road.id,
+            segmentIndex: index,
+            segmentStart,
+            segmentEnd,
+            direction,
+            screenDirection: this.normalize(this.toScreenDelta(direction)),
+            length,
+          };
         }
       }
     }
-    return best;
+    return best as RoadProjection | null;
+  }
+
+  private nearbyJunctionDirections(point: IsoPoint) {
+    const directions: JunctionDirection[] = [];
+    campusRoads.forEach((road) => {
+      for (let index = 0; index < road.points.length - 1; index += 1) {
+        const start = road.points[index];
+        const end = road.points[index + 1];
+        const vector = { x: end.x - start.x, y: end.y - start.y };
+        const length = Math.hypot(vector.x, vector.y);
+        if (length === 0) continue;
+
+        const direction = { x: vector.x / length, y: vector.y / length };
+        if (Math.hypot(point.x - start.x, point.y - start.y) <= ROAD_JUNCTION_RADIUS) {
+          directions.push({
+            node: start,
+            segmentStart: start,
+            segmentEnd: end,
+            direction,
+            screenDirection: this.normalize(this.toScreenDelta(direction)),
+          });
+        }
+        if (Math.hypot(point.x - end.x, point.y - end.y) <= ROAD_JUNCTION_RADIUS) {
+          const reverse = { x: -direction.x, y: -direction.y };
+          directions.push({
+            node: end,
+            segmentStart: start,
+            segmentEnd: end,
+            direction: reverse,
+            screenDirection: this.normalize(this.toScreenDelta(reverse)),
+          });
+        }
+      }
+    });
+    return directions;
   }
 
   private projectToSegment(point: IsoPoint, a: IsoPoint, b: IsoPoint) {
@@ -501,11 +784,35 @@ export class CampusScene extends Phaser.Scene {
     const wy = point.y - a.y;
     const lengthSq = vx * vx + vy * vy;
     if (lengthSq === 0) {
-      return { point: a, distance: Math.hypot(point.x - a.x, point.y - a.y) };
+      return { point: a, distance: Math.hypot(point.x - a.x, point.y - a.y), t: 0 };
     }
     const t = Phaser.Math.Clamp((wx * vx + wy * vy) / lengthSq, 0, 1);
     const projection = { x: a.x + t * vx, y: a.y + t * vy };
-    return { point: projection, distance: Math.hypot(point.x - projection.x, point.y - projection.y) };
+    return { point: projection, distance: Math.hypot(point.x - projection.x, point.y - projection.y), t };
+  }
+
+  private clampToMap(point: IsoPoint) {
+    return {
+      x: Phaser.Math.Clamp(point.x, 1.5, MAP_W - 2),
+      y: Phaser.Math.Clamp(point.y, 1.5, MAP_D - 2),
+    };
+  }
+
+  private toScreenDelta(point: IsoPoint) {
+    return {
+      x: (point.x - point.y) * (TILE_W / 2),
+      y: (point.x + point.y) * (TILE_H / 2),
+    };
+  }
+
+  private normalize(point: IsoPoint) {
+    const length = Math.hypot(point.x, point.y);
+    if (length === 0) return { x: 0, y: 0 };
+    return { x: point.x / length, y: point.y / length };
+  }
+
+  private dot(a: IsoPoint, b: IsoPoint) {
+    return a.x * b.x + a.y * b.y;
   }
 
   private pointInPolygon(point: IsoPoint, polygon: IsoPoint[]) {
