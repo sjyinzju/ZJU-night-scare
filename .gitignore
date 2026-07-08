@@ -1,0 +1,16 @@
+﻿node_modules/
+dist/
+.dist/
+review_assets/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+*.log
+.DS_Store
+
+# Reference materials kept local unless explicitly requested
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.webp
