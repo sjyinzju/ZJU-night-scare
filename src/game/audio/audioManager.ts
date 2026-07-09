@@ -134,13 +134,8 @@ function applyMix(volume: number, duration = FADE_MS) {
 }
 
 function getMix(state: SceneAudioState) {
-  if (state.ending === "death") {
-    return 0;
-  }
-
-  if (state.ending) {
-    return 0.18;
-  }
+  if (state.ending === "death") return 0;
+  if (state.ending) return 0.18;
 
   const lowSanity = state.sanity <= 30;
   const storyDuck = state.activeStory ? 0.58 : 1;

@@ -2219,7 +2219,9 @@ export class CampusScene extends Phaser.Scene {
   }
 
   private updateGhost(time: number) {
-    if (!this.ghost || this.dead) return;
+    if (!this.ghost || this.dead) {
+      return;
+    }
     if (this.storyOpen) {
       this.ghost.container.setVisible(false);
       this.ghost.nextSpawnAt = time + GHOST_SPAWN_DELAY;
