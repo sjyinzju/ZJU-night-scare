@@ -410,7 +410,7 @@ function App() {
         }));
         setActiveSceneId("death_sanity");
         playGhostHit();
-        triggerEffect("jumpscare");
+        triggerEffect("jumpscare", "ghost_caught");
         return;
       }
 
@@ -431,7 +431,7 @@ function App() {
         setActiveSceneId("death_sanity");
       }
       playGhostHit();
-      triggerEffect("jumpscare", "ghost_close");
+      triggerEffect("jumpscare", becameDead ? "ghost_caught" : "ghost_close");
     };
 
     window.addEventListener("zju-horror-ghost-hit", handleGhostHit);

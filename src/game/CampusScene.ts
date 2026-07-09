@@ -2420,7 +2420,6 @@ export class CampusScene extends Phaser.Scene {
       this.cameras.main.shake(620, 0.018);
       this.flashScreen(0.72, 700);
       useGameStore.getState().setGhost({ visible: false });
-      useGameStore.getState().setJumpscareText("抓到你了");
       window.dispatchEvent(new CustomEvent("zju-horror-ghost-hit", { detail: { type: "death" } }));
       return;
     }
@@ -2429,7 +2428,6 @@ export class CampusScene extends Phaser.Scene {
       this.cameras.main.shake(260, 0.006);
       this.flashScreen(0.24, 320);
       useGameStore.getState().setGhost({ fsm: "chasing" });
-      useGameStore.getState().setJumpscareText("它就在身后");
       window.dispatchEvent(new CustomEvent("zju-horror-ghost-hit", { detail: { type: "sanity", amount: -5 } }));
     }
   }

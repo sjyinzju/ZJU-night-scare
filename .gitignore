@@ -14,3 +14,5 @@ vite.config.d.ts
 *.jpg
 *.jpeg
 *.webp
+
+/ppt
