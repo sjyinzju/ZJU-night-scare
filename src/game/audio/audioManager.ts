@@ -1,5 +1,16 @@
 import { Howl, Howler } from "howler";
 import type { HorrorEffect, StoryScene } from "../storyData";
+import {
+  unlockProcedural,
+  updateHeartbeat,
+  playFootstep,
+  playTextAppear,
+  playJumpscareScream,
+  updateGhostBreath,
+  stopGhostBreath,
+  resetProcedural,
+  type FootSurface,
+} from "./proceduralAudio";
 
 type EndingKind = NonNullable<StoryScene["ending"]>;
 type LoopKey = "night" | "lowSanity" | "ending" | "wind" | "electric" | "lake";
@@ -141,6 +152,7 @@ export const audioManager = {
   unlock() {
     if (unlocked) return;
     unlocked = true;
+    unlockProcedural();
     Howler.volume(0.86);
     applyMix(getMix(currentSceneState), 1200);
   },
@@ -159,11 +171,23 @@ export const audioManager = {
       playOneShot(state.ending === "death" ? "death" : "ending");
     }
     lastEnding = state.ending;
+
+    // ── 理智驱动心跳 ──
+    updateHeartbeat(state.sanity);
   },
 
   playEffect(effect?: HorrorEffect) {
     if (!effect || !unlocked) return;
+    // whisper / reveal → 程序化低沉轻响，不再播放 WAV 弹簧音
+    if (effect === "whisper" || effect === "reveal") {
+      playTextAppear();
+      return;
+    }
     playOneShot(effect);
+    // jump scare 叠加程序化合成的嘶吼层
+    if (effect === "jumpscare") {
+      playJumpscareScream("extreme");
+    }
   },
 
   playChoice() {
@@ -176,10 +200,27 @@ export const audioManager = {
     playOneShot("item");
   },
 
+  /** 播放程序化脚步声 (从 Phaser 调用) */
+  playFootstep(surface?: FootSurface) {
+    if (!unlocked) return;
+    playFootstep(surface);
+  },
+
+  /** 更新鬼接近呼吸声 (从 Phaser updateGhost 调用) */
+  updateGhostBreath(distance: number) {
+    if (!unlocked) return;
+    if (distance > 6) {
+      stopGhostBreath();
+      return;
+    }
+    updateGhostBreath(distance);
+  },
+
   reset() {
     lastEnding = undefined;
     lastMixKey = "";
     currentSceneState = { sanity: 100, activeStory: false };
+    resetProcedural();
     if (!unlocked) return;
     applyMix(getMix(currentSceneState), 800);
   },

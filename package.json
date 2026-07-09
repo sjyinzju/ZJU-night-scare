@@ -10,7 +10,6 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",
-    "howler": "^2.2.4",
     "lucide-react": "^0.468.0",
     "phaser": "^3.87.0",
     "react": "^19.0.0",
@@ -21,6 +20,7 @@
   "devDependencies": {
     "@types/howler": "^2.2.13",
     "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3"
+    "@types/react-dom": "^19.2.3",
+    "howler": "^2.2.4"
   }
 }

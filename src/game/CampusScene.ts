@@ -18,6 +18,7 @@ import {
   type StoryStage,
 } from "./horrorConfig";
 import { storyHotspots, type HorrorEffect, type HotspotId, type StoryHotspot, type StorySceneId } from "./storyData";
+import { audioManager } from "./audio/audioManager";
 
 const TILE_W = 96;
 const TILE_H = 48;
@@ -1572,6 +1573,12 @@ export class CampusScene extends Phaser.Scene {
 
       if (resolved) {
         this.playerIso = resolved;
+        // ── 程序化脚步声 ──
+        const nearLake = this.zoneFactor("lake", this.playerIso);
+        const nearSwamp = this.zoneFactor("swamp", this.playerIso);
+        const onPlaza = this.isInPlaza(this.playerIso);
+        const surface = nearLake > 0.3 || nearSwamp > 0.3 ? "squish" : onPlaza ? "concrete" : "gravel";
+        audioManager.playFootstep(surface);
       }
 
       const p = this.toScreen(this.playerIso);
@@ -2219,15 +2226,20 @@ export class CampusScene extends Phaser.Scene {
   }
 
   private updateGhost(time: number) {
-    if (!this.ghost || this.dead) return;
+    if (!this.ghost || this.dead) {
+      audioManager.updateGhostBreath(999);
+      return;
+    }
     if (this.storyOpen) {
       this.ghost.container.setVisible(false);
       this.ghost.nextSpawnAt = time + GHOST_SPAWN_DELAY;
       this.ghost.shouldRespawn = true;
+      audioManager.updateGhostBreath(999);
       return;
     }
     if (time < this.ghost.nextSpawnAt) {
       this.ghost.container.setVisible(false);
+      audioManager.updateGhostBreath(999);
       return;
     }
     if (this.ghost.shouldRespawn) {
@@ -2268,6 +2280,8 @@ export class CampusScene extends Phaser.Scene {
     this.ghost.container.setPosition(p.x, p.y);
     this.ghost.container.setDepth(p.y + 52);
     const playerDistance = Math.hypot(this.ghost.iso.x - this.playerIso.x, this.ghost.iso.y - this.playerIso.y);
+    // ── 鬼接近呼吸声 ──
+    audioManager.updateGhostBreath(playerDistance);
     if (playerDistance <= GHOST_CAUGHT_RADIUS) {
       this.dead = true;
       this.ghost.container.setVisible(false);
