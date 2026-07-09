@@ -19,7 +19,6 @@ import {
   clampStat,
   getHotspotById,
   getSceneHotspot,
-  initialStoryState,
   itemCatalog,
   storyHotspots,
   storyScenes,
@@ -34,6 +33,14 @@ import {
 import { useGameAudio } from "./game/audio/useGameAudio";
 import { useGameStore } from "./game/store";
 import { pickJumpscareText, contextForHotspot, textVariantClass, type JumpscareContext } from "./game/jumpscareTexts";
+import {
+  advanceStory,
+  appendStoryLog,
+  createStoryState,
+  isChoiceLocked,
+  useStoryInventoryItem,
+  visitStoryHotspot,
+} from "./game/storyEngine";
 
 const initialHud: GameHudEvent = {
   place: "",
@@ -55,32 +62,12 @@ type NextObjectiveCue = {
   objective: string;
 };
 
-function createStoryState(): StoryState {
-  return {
-    ...initialStoryState,
-    stats: { ...initialStoryState.stats },
-    inventory: [...initialStoryState.inventory],
-    flags: { ...initialStoryState.flags },
-    visitedHotspots: [...initialStoryState.visitedHotspots],
-    completedHotspots: [...initialStoryState.completedHotspots],
-    log: [...initialStoryState.log],
-  };
-}
-
 const statMeta: Record<StatKey, { label: string; icon: typeof Brain; dangerBelow?: number }> = {
   sanity: { label: "理智", icon: Brain, dangerBelow: 30 },
   stamina: { label: "体力", icon: Footprints, dangerBelow: 25 },
   clues: { label: "线索", icon: Search },
   trust: { label: "信任", icon: HandHeart },
 };
-
-function uniqueValues<T extends string>(items: T[]) {
-  return Array.from(new Set(items));
-}
-
-function appendLog(log: string[], line: string) {
-  return [line, ...log].slice(0, 6);
-}
 
 function statDeltaText(changes?: Partial<Record<StatKey, number>>) {
   if (!changes) return "";
@@ -94,29 +81,6 @@ function storyTone(paragraph: string) {
   if (/砰|血|死|刀|尖叫|抓|崩溃|绳子仍在收紧|贴到背后/.test(paragraph)) return "shock";
   if (/突然|黑暗|警告|不要|不该|恐惧|没有|空无一人|很轻|低声/.test(paragraph)) return "tense";
   return "";
-}
-
-function isChoiceLocked(choice: StoryChoice, state: StoryState) {
-  if (choice.requireItem && !state.inventory.includes(choice.requireItem)) return true;
-  if (choice.requireFlag && !state.flags[choice.requireFlag]) return true;
-  return false;
-}
-
-function applyStatChanges(state: StoryState, changes?: Partial<Record<StatKey, number>>) {
-  const nextStats = { ...state.stats };
-  const nextInventory = [...state.inventory];
-  let blockedByTalisman = false;
-
-  (Object.entries(changes ?? {}) as Array<[StatKey, number]>).forEach(([key, value]) => {
-    if (key === "sanity" && value < -5 && nextInventory.includes("talisman")) {
-      nextInventory.splice(nextInventory.indexOf("talisman"), 1);
-      blockedByTalisman = true;
-      return;
-    }
-    nextStats[key] = clampStat(nextStats[key] + value);
-  });
-
-  return { stats: nextStats, inventory: nextInventory, blockedByTalisman };
 }
 
 function drawMiniMap(canvas: HTMLCanvasElement, snapshot: MiniMapSnapshot) {
@@ -317,11 +281,7 @@ function App() {
       const sceneId = currentScene.locationId === detail.hotspotId ? storyState.currentSceneId : detail.sceneId;
       const scene = storyScenes[sceneId];
 
-      setStoryState((previous) => ({
-        ...previous,
-        visitedHotspots: uniqueValues([...previous.visitedHotspots, scene.locationId]),
-        log: appendLog(previous.log, `抵达 ${getHotspotById(scene.locationId)?.place ?? scene.title}`),
-      }));
+      setStoryState((previous) => visitStoryHotspot(previous, scene));
       setActiveSceneId(sceneId);
       playEffect(scene.effect ?? "whisper");
       window.dispatchEvent(new CustomEvent("zju-horror-effect", { detail: { effect: scene.effect ?? "whisper" } }));
@@ -436,7 +396,7 @@ function App() {
           ...previous,
           currentSceneId: "death_sanity",
           stats: { ...previous.stats, sanity: 0 },
-          log: appendLog(previous.log, "红色鬼影贴到背后，你被拖进了地图外侧的黑暗。"),
+          log: appendStoryLog(previous.log, "红色鬼影贴到背后，你被拖进了地图外侧的黑暗。"),
         }));
         setActiveSceneId("death_sanity");
         playGhostHit();
@@ -453,7 +413,7 @@ function App() {
           ...previous,
           currentSceneId: dead ? "death_sanity" : previous.currentSceneId,
           stats: { ...previous.stats, sanity: nextSanity },
-          log: appendLog(previous.log, "红色鬼影靠得太近，理智被撕下一截。"),
+          log: appendStoryLog(previous.log, "红色鬼影靠得太近，理智被撕下一截。"),
         };
       });
       if (becameDead) {
@@ -472,19 +432,13 @@ function App() {
     (itemId: ItemId) => {
       if (itemId !== "medicine" && itemId !== "energy") return;
       playItem();
+      let used = false;
       setStoryState((previous) => {
-        if (!previous.inventory.includes(itemId)) return previous;
-        const inventory = previous.inventory.filter((id) => id !== itemId);
-        const stats = { ...previous.stats };
-        if (itemId === "medicine") stats.sanity = clampStat(stats.sanity + 20);
-        if (itemId === "energy") stats.stamina = clampStat(stats.stamina + 30);
-        return {
-          ...previous,
-          stats,
-          inventory,
-          log: appendLog(previous.log, itemId === "medicine" ? "服用镇定药，理智恢复。" : "饮用能量饮料，体力恢复。"),
-        };
+        const result = useStoryInventoryItem(previous, itemId);
+        used = result.used;
+        return result.nextState;
       });
+      if (!used) return;
       triggerEffect("reveal");
     },
     [playItem, triggerEffect],
@@ -495,58 +449,16 @@ function App() {
       if (!activeScene || isChoiceLocked(choice, storyState)) return;
       playChoice();
 
-      const currentLocation = activeScene.locationId;
-      const applied = applyStatChanges(storyState, choice.statChanges);
-      const gainedItems = uniqueValues([
-        ...applied.inventory,
-        ...(choice.gainItem ? [choice.gainItem] : []),
-        ...(choice.gainItems ?? []),
-      ]);
-      let nextSceneId = choice.next;
-      const nextFlags = { ...storyState.flags };
-      if (choice.setFlag) nextFlags[choice.setFlag] = true;
+      const transition = advanceStory(storyState, activeScene, choice);
+      if (!transition) return;
+      const { nextState, nextScene, nextHotspot, changesLocation, effect } = transition;
 
-      let nextStats = applied.stats;
-      if (nextStats.sanity <= 0) nextSceneId = "death_sanity";
-      if (nextSceneId.startsWith("ending") && nextStats.sanity <= 20 && nextStats.clues >= 15) {
-        nextSceneId = "ending_nightmare";
-      }
+      setStoryState(nextState);
+      triggerEffect(effect);
 
-      const nextScene = storyScenes[nextSceneId];
-      const nextHotspot = getHotspotById(nextScene.locationId);
-      const changesLocation = nextScene.locationId !== currentLocation;
-      const completedHotspots = uniqueValues(
-        changesLocation || nextScene.ending
-          ? [...storyState.completedHotspots, currentLocation]
-          : storyState.completedHotspots,
-      );
-
-      const itemLine = choice.gainItem
-        ? `获得「${itemCatalog[choice.gainItem].name}」。`
-        : choice.gainItems?.length
-          ? `获得${choice.gainItems.map((id) => `「${itemCatalog[id].name}」`).join("、")}。`
-          : "";
-      const talismanLine = applied.blockedByTalisman ? "护身符发烫，替你挡下了一次精神侵蚀。" : "";
-
-      nextStats = { ...nextStats };
-      const nextPlaceLine = changesLocation && !nextScene.ending && nextHotspot ? `下一站：${nextHotspot.place}` : "";
-
-      setStoryState({
-        ...storyState,
-        currentSceneId: nextSceneId,
-        stats: nextStats,
-        inventory: gainedItems,
-        flags: nextFlags,
-        visitedHotspots: uniqueValues([...storyState.visitedHotspots, currentLocation]),
-        completedHotspots,
-        log: appendLog(storyState.log, [choice.text, talismanLine, itemLine, nextPlaceLine].filter(Boolean).join(" ")),
-      });
-
-      triggerEffect(choice.effect ?? nextScene.effect);
-
-      if (nextScene.ending || nextScene.locationId === currentLocation) {
+      if (nextScene.ending || !changesLocation) {
         setNextObjectiveCue(null);
-        setActiveSceneId(nextSceneId);
+        setActiveSceneId(nextScene.id);
       } else {
         if (nextHotspot) {
           setNextObjectiveCue({ place: nextHotspot.place, objective: nextHotspot.objective });

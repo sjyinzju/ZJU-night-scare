@@ -20,6 +20,9 @@ import {
 import { storyHotspots, type HorrorEffect, type HotspotId, type StoryHotspot, type StorySceneId } from "./storyData";
 import { audioManager } from "./audio/audioManager";
 import { useGameStore, getStore, type GhostFSM } from "./store";
+import { campusRoadGraph, type RoadProjection } from "./mapGraph";
+import { decideGhostAction } from "./horrorDirector";
+import { HORROR_POST_FX_KEY, HorrorPostFxPipeline } from "./visualFxPipeline";
 
 const TILE_W = 96;
 const TILE_H = 48;
@@ -63,19 +66,6 @@ type InputVector = {
   iso: IsoPoint;
 };
 
-type RoadProjection = {
-  point: IsoPoint;
-  distance: number;
-  roadId: string;
-  segmentIndex: number;
-  segmentStart: IsoPoint;
-  segmentEnd: IsoPoint;
-  direction: IsoPoint;
-  screenDirection: IsoPoint;
-  length: number;
-  t: number;
-};
-
 type BuildingScreenShape = {
   a: IsoPoint;
   east: IsoPoint;
@@ -103,11 +93,6 @@ type MapStateEvent = {
   visitedHotspotIds: HotspotId[];
   sanity: number;
   activeStory: boolean;
-};
-
-type RouteEdge = {
-  to: number;
-  distance: number;
 };
 
 type GhostState = {
@@ -192,6 +177,10 @@ export class CampusScene extends Phaser.Scene {
   private sceneReady = false;
   private hotspotMarkers = new Map<HotspotId, HotspotMarker>();
   private lightBeams: Phaser.GameObjects.Arc[] = [];
+  private horrorPostFx?: HorrorPostFxPipeline;
+  private tilemapLayer?: Phaser.Tilemaps.TilemapLayer;
+  private tilemapFrame = 0;
+  private nextTilemapFrameAt = 0;
 
   constructor() {
     super("CampusScene");
@@ -204,6 +193,7 @@ export class CampusScene extends Phaser.Scene {
     this.drawGround();
     this.drawSwampField();
     this.drawWater();
+    this.createLocalTilemapLayer();
     this.drawLakeMemoryEffects();
     this.drawPlazas();
     this.drawRoads();
@@ -224,6 +214,7 @@ export class CampusScene extends Phaser.Scene {
     this.createGhost();
     this.createFog();
     this.createScreenEffects();
+    this.installHorrorPostFx();
 
     this.keys = this.input.keyboard!.addKeys({
       up: Phaser.Input.Keyboard.KeyCodes.UP,
@@ -259,6 +250,8 @@ export class CampusScene extends Phaser.Scene {
     this.updateDepth();
     this.updatePlayerLight(time);
     this.updateAtmosphere(time);
+    this.updateVisualPipelines(time);
+    this.updateTilemapLayer(time);
     this.updateHotspotRange(time);
     this.updateGuideLine(time);
     this.updateFog(time);
@@ -406,6 +399,54 @@ export class CampusScene extends Phaser.Scene {
         });
       }
     });
+  }
+
+  private createLocalTilemapLayer() {
+    const textureKey = "horror-local-tiles";
+    if (!this.textures.exists(textureKey)) {
+      const texture = this.textures.createCanvas(textureKey, 128, 32);
+      if (!texture) return;
+      const ctx = texture.getContext();
+      const palettes = [
+        ["rgba(35, 87, 91, 0.28)", "rgba(154, 220, 205, 0.18)"],
+        ["rgba(47, 72, 64, 0.24)", "rgba(222, 71, 61, 0.12)"],
+        ["rgba(19, 52, 59, 0.32)", "rgba(192, 225, 210, 0.2)"],
+        ["rgba(73, 39, 45, 0.2)", "rgba(240, 58, 50, 0.18)"],
+      ];
+      palettes.forEach(([base, accent], index) => {
+        const x = index * 32;
+        ctx.fillStyle = base;
+        ctx.fillRect(x, 0, 32, 32);
+        ctx.strokeStyle = accent;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x + 3, 18);
+        ctx.bezierCurveTo(x + 9, 10, x + 18, 25, x + 29, 13);
+        ctx.stroke();
+        ctx.fillStyle = accent;
+        ctx.fillRect(x + 12, 6 + (index % 2) * 9, 3, 3);
+      });
+      texture.refresh();
+    }
+
+    const data = [
+      [-1, 0, 1, 2, 1, 0, -1, -1],
+      [0, 1, 2, 3, 2, 1, 0, -1],
+      [1, 2, 3, 2, 3, 2, 1, 0],
+      [-1, 1, 2, 3, 2, 1, 0, -1],
+      [-1, -1, 0, 1, 0, -1, -1, -1],
+    ];
+    const map = this.make.tilemap({ data, tileWidth: 32, tileHeight: 32 });
+    const tileset = map.addTilesetImage(textureKey, textureKey, 32, 32, 0, 0);
+    if (!tileset) return;
+    const anchor = this.toScreen({ x: 14.1, y: 14.2 });
+    const layer = map.createLayer(0, tileset, anchor.x - 116, anchor.y - 42);
+    if (!layer) return;
+    layer.setDepth(anchor.y - 12);
+    layer.setAlpha(0.44);
+    layer.setScale(1.04, 0.72);
+    layer.setBlendMode(Phaser.BlendModes.ADD);
+    this.tilemapLayer = layer;
   }
 
   private drawLakeMemoryEffects() {
@@ -1945,44 +1986,10 @@ export class CampusScene extends Phaser.Scene {
     point: IsoPoint,
     nearest: RoadProjection,
   ): { direction: IsoPoint; screenDirection: IsoPoint }[] {
-    const result: { direction: IsoPoint; screenDirection: IsoPoint }[] = [];
-    const seen = new Set<string>();
-
-    const add = (dir: IsoPoint) => {
-      const key = `${dir.x.toFixed(4)},${dir.y.toFixed(4)}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      result.push({ direction: dir, screenDirection: this.normalize(this.toScreenDelta(dir)) });
-    };
-
-    // Current road — forward / reverse, but only when the player is
-    // not at a segment endpoint (t ≈ 0 or t ≈ 1). At endpoints the
-    // junction-node logic below supplies the valid continuation.
-    if (nearest.t < 0.98) add(nearest.direction);
-    if (nearest.t > 0.02) add({ x: -nearest.direction.x, y: -nearest.direction.y });
-
-    // Connecting segments at nearby junction nodes.
-    for (const road of campusRoads) {
-      for (const rp of road.points) {
-        if (Math.hypot(point.x - rp.x, point.y - rp.y) > JUNCTION_RADIUS) continue;
-        // rp is a junction node near the player — add every segment
-        // that starts or ends at this node.
-        for (const other of campusRoads) {
-          for (let i = 0; i < other.points.length - 1; i += 1) {
-            const a = other.points[i];
-            const b = other.points[i + 1];
-            if (Math.hypot(rp.x - a.x, rp.y - a.y) < 0.05) {
-              add(this.normalize({ x: b.x - a.x, y: b.y - a.y }));
-            }
-            if (Math.hypot(rp.x - b.x, rp.y - b.y) < 0.05) {
-              add(this.normalize({ x: a.x - b.x, y: a.y - b.y }));
-            }
-          }
-        }
-      }
-    }
-
-    return result;
+    return campusRoadGraph.availableDirections(point, nearest, JUNCTION_RADIUS).map((direction) => ({
+      direction,
+      screenDirection: this.normalize(this.toScreenDelta(direction)),
+    }));
   }
 
   private resolveWalkablePoint(point: IsoPoint) {
@@ -2037,52 +2044,11 @@ export class CampusScene extends Phaser.Scene {
   }
 
   private nearestRoadPoint(point: IsoPoint): { point: IsoPoint; distance: number } | null {
-    const nearest = this.nearestRoadProjection(point);
-    if (!nearest) return null;
-    return { point: nearest.point, distance: nearest.distance };
+    return campusRoadGraph.nearestPoint(point);
   }
 
   private nearestRoadProjection(point: IsoPoint): RoadProjection | null {
-    let best: RoadProjection | null = null;
-    for (const road of campusRoads) {
-      for (let index = 0; index < road.points.length - 1; index += 1) {
-        const segmentStart = road.points[index];
-        const segmentEnd = road.points[index + 1];
-        const segmentVector = { x: segmentEnd.x - segmentStart.x, y: segmentEnd.y - segmentStart.y };
-        const length = Math.hypot(segmentVector.x, segmentVector.y);
-        if (length === 0) continue;
-
-        const candidate = this.projectToSegment(point, segmentStart, segmentEnd);
-        if (!best || candidate.distance < best.distance) {
-          const direction = { x: segmentVector.x / length, y: segmentVector.y / length };
-          best = {
-            ...candidate,
-            roadId: road.id,
-            segmentIndex: index,
-            segmentStart,
-            segmentEnd,
-            direction,
-            screenDirection: this.normalize(this.toScreenDelta(direction)),
-            length,
-          };
-        }
-      }
-    }
-    return best as RoadProjection | null;
-  }
-
-  private projectToSegment(point: IsoPoint, a: IsoPoint, b: IsoPoint) {
-    const vx = b.x - a.x;
-    const vy = b.y - a.y;
-    const wx = point.x - a.x;
-    const wy = point.y - a.y;
-    const lengthSq = vx * vx + vy * vy;
-    if (lengthSq === 0) {
-      return { point: a, distance: Math.hypot(point.x - a.x, point.y - a.y), t: 0 };
-    }
-    const t = Phaser.Math.Clamp((wx * vx + wy * vy) / lengthSq, 0, 1);
-    const projection = { x: a.x + t * vx, y: a.y + t * vy };
-    return { point: projection, distance: Math.hypot(point.x - projection.x, point.y - projection.y), t };
+    return campusRoadGraph.nearestProjection(point);
   }
 
   private clampToMap(point: IsoPoint) {
@@ -2311,6 +2277,45 @@ export class CampusScene extends Phaser.Scene {
     this.effectFlash.setDepth(100001);
   }
 
+  private installHorrorPostFx() {
+    if (this.game.renderer.type !== Phaser.WEBGL) return;
+    try {
+      const manager = (this.game.renderer as Phaser.Renderer.WebGL.WebGLRenderer).pipelines;
+      if (!manager.has(HORROR_POST_FX_KEY)) {
+        manager.addPostPipeline(HORROR_POST_FX_KEY, HorrorPostFxPipeline);
+      }
+      this.cameras.main.setPostPipeline(HORROR_POST_FX_KEY);
+      const pipeline = this.cameras.main.getPostPipeline(HORROR_POST_FX_KEY);
+      this.horrorPostFx = (Array.isArray(pipeline) ? pipeline[0] : pipeline) as HorrorPostFxPipeline | undefined;
+    } catch {
+      this.horrorPostFx = undefined;
+    }
+  }
+
+  private updateVisualPipelines(time: number) {
+    const lowSanityBoost = this.sanity <= 30 ? 0.36 : this.sanity <= 55 ? 0.16 : 0;
+    const storyBoost = this.storyOpen ? 0.08 : 0;
+    this.horrorPostFx?.setDistortion(Phaser.Math.Clamp(this.realityDistortion * 0.64 + lowSanityBoost + storyBoost, 0, 1));
+
+    if (this.effectFlash) {
+      this.effectFlash.setSize(this.cameras.main.width, this.cameras.main.height);
+    }
+    if (time % 9000 < 120 && this.realityDistortion > 0.58 && !this.storyOpen) {
+      this.flashScreen(0.08 + this.realityDistortion * 0.08, 180);
+    }
+  }
+
+  private updateTilemapLayer(time: number) {
+    if (!this.tilemapLayer || time < this.nextTilemapFrameAt) return;
+    this.nextTilemapFrameAt = time + 260;
+    this.tilemapFrame = (this.tilemapFrame + 1) % 4;
+    this.tilemapLayer.forEachTile((tile) => {
+      if (tile.index < 0) return;
+      tile.index = (this.tilemapFrame + tile.x + tile.y) % 4;
+    });
+    this.tilemapLayer.setAlpha(0.34 + this.realityDistortion * 0.18);
+  }
+
   private updateGhost(time: number) {
     if (!this.ghost || this.dead) {
       audioManager.updateGhostBreath(999);
@@ -2338,52 +2343,45 @@ export class CampusScene extends Phaser.Scene {
 
     const playerDistance = Math.hypot(this.ghost.iso.x - this.playerIso.x, this.ghost.iso.y - this.playerIso.y);
 
-    // ── 鬼 FSM 状态转换 ──
     const currentFsm = getStore().ghost.fsm;
-    let nextFsm: GhostFSM = currentFsm;
+    const director = decideGhostAction(
+      {
+        currentFsm,
+        playerIso: this.playerIso,
+        ghostIso: this.ghost.iso,
+        activeHotspot: this.activeHotspot,
+        sanity: this.sanity,
+        storyStage: this.storyStage,
+        lastSanityHitAt: this.ghost.lastSanityHitAt,
+        time,
+      },
+      {
+        baseSpeed: GHOST_SPEED,
+        chaseSpeed: GHOST_CHASE_SPEED,
+        stalkSpeed: GHOST_STALK_SPEED,
+        caughtRadius: GHOST_CAUGHT_RADIUS,
+        chaseDistance: FSM_CHASE_DIST,
+        stalkDistance: FSM_STALK_DIST,
+        retreatDuration: FSM_RETREAT_DURATION,
+        routeRefreshMs: GHOST_ROUTE_REFRESH_INTERVAL,
+      },
+    );
 
-    if (playerDistance <= GHOST_CAUGHT_RADIUS) {
-      nextFsm = "chasing";
-    } else if (playerDistance <= FSM_CHASE_DIST) {
-      nextFsm = "chasing";
-    } else if (playerDistance <= FSM_STALK_DIST) {
-      nextFsm = currentFsm === "chasing" ? "chasing" : "stalking";
-    } else if (this.activeHotspot && currentFsm === "stalking") {
-      nextFsm = "ambush";
-    } else if (currentFsm === "retreating") {
-      const elapsed = time - (this.ghost.lastSanityHitAt || time);
-      nextFsm = elapsed > FSM_RETREAT_DURATION ? "stalking" : "retreating";
-    } else {
-      nextFsm = "stalking";
+    if (director.fsm !== currentFsm) {
+      useGameStore.getState().setGhost({ fsm: director.fsm, lastStateChangeAt: time });
     }
 
-    if (nextFsm !== currentFsm) {
-      useGameStore.getState().setGhost({ fsm: nextFsm, lastStateChangeAt: time });
-    }
-
-    // ── 按 FSM 状态选择速度和行为 ──
-    let speed = GHOST_SPEED;
-    if (nextFsm === "chasing") speed = GHOST_CHASE_SPEED;
-    else if (nextFsm === "stalking") speed = GHOST_STALK_SPEED;
-    else if (nextFsm === "ambush") speed = GHOST_STALK_SPEED * 0.7;
-    else if (nextFsm === "retreating") speed = GHOST_CHASE_SPEED; // fast retreat
-
-    // ── 寻路 ──
     if (
       !this.ghost.route.length ||
-      time - this.ghost.lastRouteAt > GHOST_ROUTE_REFRESH_INTERVAL ||
+      time - this.ghost.lastRouteAt > director.routeRefreshMs ||
       this.ghost.routeIndex >= this.ghost.route.length
     ) {
-      const target = nextFsm === "retreating"
-        ? this.pickGhostSpawnPoint()
-        : nextFsm === "ambush" && this.activeHotspot
-          ? this.activeHotspot
-          : this.playerIso;
+      const target = director.fsm === "retreating" ? this.pickGhostSpawnPoint() : director.target;
       this.ghost.route = this.findRoadRoute(this.ghost.iso, target);
       this.ghost.routeIndex = 1;
       this.ghost.lastRouteAt = time;
     }
-    let step = 0.075 * speed;
+    let step = 0.075 * director.speed;
     while (step > 0 && this.ghost.routeIndex < this.ghost.route.length) {
       const target = this.ghost.route[this.ghost.routeIndex];
       const dx = target.x - this.ghost.iso.x;
@@ -2408,8 +2406,7 @@ export class CampusScene extends Phaser.Scene {
     this.ghost.container.setPosition(p.x, p.y);
     this.ghost.container.setDepth(p.y + 52);
     // 不同 FSM 状态的视觉反馈
-    const auraAlpha = nextFsm === "chasing" ? 0.7 : nextFsm === "stalking" ? 0.35 : 0.16;
-    if (this.ghost.aura) this.ghost.aura.setAlpha(auraAlpha);
+    if (this.ghost.aura) this.ghost.aura.setAlpha(director.auraAlpha);
 
     audioManager.updateGhostBreath(playerDistance);
 
@@ -2607,22 +2604,11 @@ export class CampusScene extends Phaser.Scene {
   }
 
   private roadPointKey(point: IsoPoint) {
-    return `${point.x.toFixed(3)},${point.y.toFixed(3)}`;
+    return campusRoadGraph.pointKey(point);
   }
 
   private allRoadPoints() {
-    const points: IsoPoint[] = [];
-    const seen = new Set<string>();
-    campusRoads.forEach((road) => {
-      road.points.forEach((point) => {
-        const key = this.roadPointKey(point);
-        if (!seen.has(key)) {
-          seen.add(key);
-          points.push(point);
-        }
-      });
-    });
-    return points;
+    return campusRoadGraph.allRoadPoints();
   }
 
   private pickGhostSpawnPoint() {
@@ -2638,86 +2624,11 @@ export class CampusScene extends Phaser.Scene {
   }
 
   private routeLength(route: IsoPoint[]) {
-    return route.reduce((total, point, index) => {
-      if (index === 0) return 0;
-      const previous = route[index - 1];
-      return total + Math.hypot(point.x - previous.x, point.y - previous.y);
-    }, 0);
+    return campusRoadGraph.routeLength(route);
   }
 
   private findRoadRoute(from: IsoPoint, to: IsoPoint) {
-    const startProjection = this.nearestRoadProjection(from);
-    const endProjection = this.nearestRoadProjection(to);
-    if (!startProjection || !endProjection) return [from, to];
-    const nodes: IsoPoint[] = [];
-    const nodeByKey = new Map<string, number>();
-    const edges = new Map<number, RouteEdge[]>();
-    const addNode = (point: IsoPoint) => {
-      const key = this.roadPointKey(point);
-      const existing = nodeByKey.get(key);
-      if (existing !== undefined) return existing;
-      const index = nodes.length;
-      nodes.push({ x: point.x, y: point.y });
-      nodeByKey.set(key, index);
-      edges.set(index, []);
-      return index;
-    };
-    const connect = (a: number, b: number) => {
-      const distance = Math.hypot(nodes[a].x - nodes[b].x, nodes[a].y - nodes[b].y);
-      edges.get(a)!.push({ to: b, distance });
-      edges.get(b)!.push({ to: a, distance });
-    };
-    campusRoads.forEach((road) => {
-      for (let index = 0; index < road.points.length - 1; index += 1) {
-        const a = addNode(road.points[index]);
-        const b = addNode(road.points[index + 1]);
-        connect(a, b);
-      }
-    });
-    const addProjectionNode = (projection: RoadProjection) => {
-      const projected = addNode(projection.point);
-      const start = addNode(projection.segmentStart);
-      const end = addNode(projection.segmentEnd);
-      connect(projected, start);
-      connect(projected, end);
-      return projected;
-    };
-    const start = addProjectionNode(startProjection);
-    const end = addProjectionNode(endProjection);
-    if (startProjection.roadId === endProjection.roadId && startProjection.segmentIndex === endProjection.segmentIndex) {
-      connect(start, end);
-    }
-    const distances = Array(nodes.length).fill(Number.POSITIVE_INFINITY);
-    const previous = Array<number | undefined>(nodes.length).fill(undefined);
-    const visited = new Set<number>();
-    distances[start] = 0;
-    while (visited.size < nodes.length) {
-      let current = -1;
-      let best = Number.POSITIVE_INFINITY;
-      for (let index = 0; index < nodes.length; index += 1) {
-        if (!visited.has(index) && distances[index] < best) {
-          best = distances[index];
-          current = index;
-        }
-      }
-      if (current === -1 || current === end) break;
-      visited.add(current);
-      edges.get(current)!.forEach((edge) => {
-        const next = distances[current] + edge.distance;
-        if (next < distances[edge.to]) {
-          distances[edge.to] = next;
-          previous[edge.to] = current;
-        }
-      });
-    }
-    const route: IsoPoint[] = [];
-    let cursor: number | undefined = end;
-    while (cursor !== undefined) {
-      route.push(nodes[cursor]);
-      cursor = previous[cursor];
-    }
-    route.reverse();
-    return route.length > 1 ? route : [startProjection.point, endProjection.point];
+    return campusRoadGraph.findRoute(from, to);
   }
 }
 
