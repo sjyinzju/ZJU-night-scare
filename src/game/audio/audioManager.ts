@@ -13,8 +13,8 @@ import {
 } from "./proceduralAudio";
 
 type EndingKind = NonNullable<StoryScene["ending"]>;
-type LoopKey = "night" | "lowSanity" | "ending" | "wind" | "electric" | "lake";
-type OneShotKey = HorrorEffect | "choice" | "item" | "death";
+type AudibleHorrorEffect = Exclude<HorrorEffect, "whisper">;
+type OneShotKey = AudibleHorrorEffect | "choiceSelect" | "hover" | "item" | "ghostHit" | "death";
 
 type SceneAudioState = {
   sanity: number;
@@ -22,51 +22,57 @@ type SceneAudioState = {
   ending?: EndingKind;
 };
 
-type LoopTrack = {
-  howl: Howl;
-  stopTimer?: number;
-};
+type AudioTrack = { howl: Howl };
 
 const FADE_MS = 950;
 
-const loops: Record<LoopKey, LoopTrack> = {
-  night: {
-    howl: new Howl({ src: ["/audio/bgm/night-campus.wav"], loop: true, volume: 0, preload: true }),
-  },
-  lowSanity: {
-    howl: new Howl({ src: ["/audio/bgm/low-sanity.wav"], loop: true, volume: 0, preload: true }),
-  },
-  ending: {
-    howl: new Howl({ src: ["/audio/bgm/ending.wav"], loop: true, volume: 0, preload: true }),
-  },
-  wind: {
-    howl: new Howl({ src: ["/audio/ambient/wind.wav"], loop: true, volume: 0, preload: true }),
-  },
-  electric: {
-    howl: new Howl({ src: ["/audio/ambient/electric-hum.wav"], loop: true, volume: 0, preload: true }),
-  },
-  lake: {
-    howl: new Howl({ src: ["/audio/ambient/lake.wav"], loop: true, volume: 0, preload: true }),
-  },
-};
+// ── BGM 播放列表: score-1 → score-2 → loop ──
+const mainBgmTracks: AudioTrack[] = [
+  { howl: new Howl({ src: ["/audio/bgm/score-1.mp3"], loop: false, volume: 0, preload: true }) },
+  { howl: new Howl({ src: ["/audio/bgm/score-2.mp3"], loop: false, volume: 0, preload: true }) },
+];
 
+// ── 保留的旧环境音 (可选低调混合) ──
+const ambientWind = new Howl({ src: ["/audio/ambient/wind.wav"], loop: true, volume: 0, preload: true });
+
+// ── SFX ──
 const oneShots: Record<OneShotKey, Howl> = {
-  whisper: new Howl({ src: ["/audio/sfx/whisper.wav"], volume: 0.34, preload: true }),
   shake: new Howl({ src: ["/audio/sfx/shake.wav"], volume: 0.52, preload: true }),
   jumpscare: new Howl({ src: ["/audio/sfx/jumpscare.wav"], volume: 0.72, preload: true }),
   reveal: new Howl({ src: ["/audio/sfx/reveal.wav"], volume: 0.42, preload: true }),
   ending: new Howl({ src: ["/audio/sfx/ending.wav"], volume: 0.5, preload: true }),
-  choice: new Howl({ src: ["/audio/sfx/choice.wav"], volume: 0.24, preload: true }),
+  choiceSelect: new Howl({ src: ["/audio/sfx/choice-select.wav"], volume: 0.24, preload: true }),
+  hover: new Howl({ src: ["/audio/sfx/hover.wav"], volume: 0.18, preload: true }),
   item: new Howl({ src: ["/audio/sfx/item.wav"], volume: 0.34, preload: true }),
+  ghostHit: new Howl({ src: ["/audio/sfx/ghost-hit.wav"], volume: 0.58, preload: true }),
   death: new Howl({ src: ["/audio/sfx/death.wav"], volume: 0.72, preload: true }),
 };
 
+// ── 翻页/剧情推进音 ──
+const pageTurnSprites = ["turn1", "turn2", "turn3", "turn4", "turn5", "turn6"] as const;
+type PageTurnSprite = (typeof pageTurnSprites)[number];
+const pageTurnSound = new Howl({
+  src: ["/audio/sfx/story-open.mp3"],
+  volume: 0.36,
+  preload: true,
+  sprite: {
+    turn1: [0, 520],
+    turn2: [1120, 520],
+    turn3: [2350, 520],
+    turn4: [3650, 520],
+    turn5: [5050, 520],
+    turn6: [6500, 520],
+  } satisfies Record<PageTurnSprite, [number, number]>,
+});
+
 const effectCooldownMs: Partial<Record<OneShotKey, number>> = {
-  whisper: 550,
   shake: 500,
   jumpscare: 1150,
   reveal: 650,
   ending: 2000,
+  choiceSelect: 120,
+  hover: 90,
+  ghostHit: 900,
   death: 3000,
 };
 
@@ -74,63 +80,76 @@ let unlocked = false;
 let lastMixKey = "";
 let lastEnding: EndingKind | undefined;
 let currentSceneState: SceneAudioState = { sanity: 100, activeStory: false };
+let mainBgmIndex = 0;
+let mainBgmTargetVolume = 0;
+let mainBgmStopTimer: number | undefined;
+let pageTurnIndex = 0;
+let lastPageTurnAt = 0;
 const lastPlayedAt = new Map<OneShotKey, number>();
 
-function startLoop(key: LoopKey) {
-  const track = loops[key];
-  if (track.stopTimer) {
-    window.clearTimeout(track.stopTimer);
-    track.stopTimer = undefined;
+// ── BGM 链式播放: score-1 播完自动切 score-2 ──
+mainBgmTracks.forEach((track, index) => {
+  track.howl.on("end", () => {
+    if (!unlocked || mainBgmTargetVolume <= 0) return;
+    track.howl.volume(0);
+    mainBgmIndex = (index + 1) % mainBgmTracks.length;
+    fadeMainBgm(mainBgmTargetVolume, 1100);
+  });
+});
+
+function getActiveMainBgm() {
+  const activeIndex = mainBgmTracks.findIndex((track) => track.howl.playing());
+  if (activeIndex >= 0) {
+    mainBgmIndex = activeIndex;
+    return mainBgmTracks[activeIndex];
   }
-  if (!track.howl.playing()) {
-    track.howl.play();
-  }
+  return mainBgmTracks[mainBgmIndex];
 }
 
-function fadeLoop(key: LoopKey, targetVolume: number, duration = FADE_MS) {
-  const track = loops[key];
-  const currentVolume = Number(track.howl.volume());
+function fadeMainBgm(targetVolume: number, duration = FADE_MS) {
+  mainBgmTargetVolume = targetVolume;
+  if (mainBgmStopTimer) {
+    window.clearTimeout(mainBgmStopTimer);
+    mainBgmStopTimer = undefined;
+  }
 
   if (targetVolume > 0) {
-    startLoop(key);
-    track.howl.fade(currentVolume, targetVolume, duration);
+    const active = getActiveMainBgm();
+    if (!active.howl.playing()) active.howl.play();
+    active.howl.fade(Number(active.howl.volume()), targetVolume, duration);
+    mainBgmTracks.forEach((track) => {
+      if (track !== active && track.howl.playing()) {
+        track.howl.fade(Number(track.howl.volume()), 0, duration);
+        window.setTimeout(() => { track.howl.pause(); track.howl.volume(0); }, duration + 80);
+      }
+    });
+    // 背景风声保持轻量
+    if (!ambientWind.playing()) ambientWind.play();
+    ambientWind.fade(Number(ambientWind.volume()), 0.06, duration);
     return;
   }
 
-  track.howl.fade(currentVolume, 0, duration);
-  if (track.stopTimer) window.clearTimeout(track.stopTimer);
-  track.stopTimer = window.setTimeout(() => {
-    if (Number(track.howl.volume()) <= 0.01) {
-      track.howl.pause();
-      track.howl.volume(0);
-    }
+  mainBgmTracks.forEach((track) => {
+    track.howl.fade(Number(track.howl.volume()), 0, duration);
+  });
+  ambientWind.fade(Number(ambientWind.volume()), 0, duration);
+  mainBgmStopTimer = window.setTimeout(() => {
+    mainBgmTracks.forEach((track) => { track.howl.pause(); track.howl.volume(0); });
+    ambientWind.pause();
+    ambientWind.volume(0);
   }, duration + 80);
 }
 
-function applyMix(volumes: Record<LoopKey, number>, duration = FADE_MS) {
-  (Object.keys(loops) as LoopKey[]).forEach((key) => fadeLoop(key, volumes[key], duration));
+function applyMix(volume: number, duration = FADE_MS) {
+  fadeMainBgm(volume, duration);
 }
 
-function getMix(state: SceneAudioState): Record<LoopKey, number> {
-  if (state.ending === "death") {
-    return { night: 0, lowSanity: 0, ending: 0, wind: 0.05, electric: 0, lake: 0 };
-  }
-
-  if (state.ending) {
-    return { night: 0, lowSanity: 0, ending: 0.24, wind: 0.06, electric: 0, lake: 0.03 };
-  }
-
+function getMix(state: SceneAudioState) {
+  if (state.ending === "death") return 0;
+  if (state.ending) return 0.18;
   const lowSanity = state.sanity <= 30;
   const storyDuck = state.activeStory ? 0.58 : 1;
-
-  return {
-    night: (lowSanity ? 0.16 : 0.23) * storyDuck,
-    lowSanity: lowSanity ? 0.22 * storyDuck : 0,
-    ending: 0,
-    wind: 0.14 * storyDuck,
-    electric: (state.activeStory ? 0.07 : 0.035) + (lowSanity ? 0.035 : 0),
-    lake: lowSanity ? 0.07 : 0.035,
-  };
+  return (lowSanity ? 0.18 : 0.28) * storyDuck;
 }
 
 function mixKey(state: SceneAudioState) {
@@ -142,10 +161,19 @@ function playOneShot(key: OneShotKey) {
   const cooldown = effectCooldownMs[key] ?? 0;
   const last = lastPlayedAt.get(key) ?? 0;
   if (now - last < cooldown) return;
-
   lastPlayedAt.set(key, now);
   oneShots[key].stop();
   oneShots[key].play();
+}
+
+function playPageTurn() {
+  const now = Date.now();
+  if (now - lastPageTurnAt < 180) return;
+  lastPageTurnAt = now;
+  const sprite = pageTurnSprites[pageTurnIndex % pageTurnSprites.length];
+  pageTurnIndex += 1;
+  pageTurnSound.stop();
+  pageTurnSound.play(sprite);
 }
 
 export const audioManager = {
@@ -178,12 +206,12 @@ export const audioManager = {
 
   playEffect(effect?: HorrorEffect) {
     if (!effect || !unlocked) return;
-    // whisper / reveal → 程序化低沉轻响，不再播放 WAV 弹簧音
+    // whisper / reveal → 程序化低沉轻响
     if (effect === "whisper" || effect === "reveal") {
       playTextAppear();
       return;
     }
-    playOneShot(effect);
+    playOneShot(effect as AudibleHorrorEffect);
     // jump scare 叠加程序化合成的嘶吼层
     if (effect === "jumpscare") {
       playJumpscareScream("extreme");
@@ -192,12 +220,23 @@ export const audioManager = {
 
   playChoice() {
     if (!unlocked) return;
-    playOneShot("choice");
+    playOneShot("choiceSelect");
+    playPageTurn();
+  },
+
+  playHover() {
+    if (!unlocked) return;
+    playOneShot("hover");
   },
 
   playItem() {
     if (!unlocked) return;
     playOneShot("item");
+  },
+
+  playGhostHit() {
+    if (!unlocked) return;
+    playOneShot("ghostHit");
   },
 
   /** 播放程序化脚步声 (从 Phaser 调用) */
