@@ -19,6 +19,7 @@ import {
 } from "./horrorConfig";
 import { storyHotspots, type HorrorEffect, type HotspotId, type StoryHotspot, type StorySceneId } from "./storyData";
 import { audioManager } from "./audio/audioManager";
+import { useGameStore, getStore, type GhostFSM } from "./store";
 
 const TILE_W = 96;
 const TILE_H = 48;
@@ -31,6 +32,8 @@ const ROAD_SNAP_RADIUS = 0.72;
 const JUNCTION_RADIUS = 1.5;
 const WORLD_BOUNDS = { x: -1200, y: 0, width: 4300, height: 2200 };
 const GHOST_SPEED = 2.15;
+const GHOST_CHASE_SPEED = 3.2;
+const GHOST_STALK_SPEED = 1.6;
 const GHOST_CLOSE_RADIUS = 1.65;
 const GHOST_CAUGHT_RADIUS = 0.55;
 const GHOST_SANITY_COOLDOWN = 2200;
@@ -38,6 +41,10 @@ const GHOST_ROUTE_REFRESH_INTERVAL = 1350;
 const GHOST_SPAWN_DELAY = 5200;
 const GHOST_MIN_SPAWN_DISTANCE = 13;
 const GHOST_MIN_SPAWN_ROUTE_DISTANCE = 22;
+// FSM: 不同状态的距离/速度参数
+const FSM_STALK_DIST = 4.5;
+const FSM_CHASE_DIST = 2.2;
+const FSM_RETREAT_DURATION = 4000;
 
 type KeySet = {
   up: Phaser.Input.Keyboard.Key;
@@ -1805,16 +1812,15 @@ export class CampusScene extends Phaser.Scene {
     if (onRoad && nearest) {
       const options = this.availableDirections(this.playerIso, nearest);
 
-      // If we have a locked direction that is still available, require a
-      // clear threshold (0.4) before switching.  This prevents the
-      // flicker / jitter that otherwise happens at symmetric junctions
-      // where two road branches score identically.
       let best = options[0];
       let bestScore = Number.NEGATIVE_INFINITY;
       const hysteresisThreshold = 0.4;
+      // ── 三岔路智能匹配：先分上下，再分左右 ──
+      const bonuses = this.junctionBonuses(input.screen, options);
 
-      for (const opt of options) {
-        let score = this.dot(input.screen, opt.screenDirection);
+      for (let i = 0; i < options.length; i++) {
+        const opt = options[i];
+        let score = this.dot(input.screen, opt.screenDirection) + bonuses[i];
         if (
           this.lockedMoveDir &&
           Math.abs(opt.direction.x - this.lockedMoveDir.x) < 0.005 &&
@@ -1828,11 +1834,9 @@ export class CampusScene extends Phaser.Scene {
         }
       }
 
-      // Lock the chosen direction so the next frame applies hysteresis.
       this.lockedMoveDir = best.direction;
       this.lockedScreenDir = best.screenDirection;
 
-      // Always move at full speed — no score-based scaling.
       const moved = {
         x: this.playerIso.x + best.direction.x * stepDistance,
         y: this.playerIso.y + best.direction.y * stepDistance,
@@ -1840,7 +1844,6 @@ export class CampusScene extends Phaser.Scene {
       return this.resolveWalkablePoint(this.clampToMap(moved));
     }
 
-    // Off-road / plaza — clear the lock so we re-evaluate freely.
     this.lockedMoveDir = null;
     this.lockedScreenDir = null;
     const desired = {
@@ -1848,6 +1851,91 @@ export class CampusScene extends Phaser.Scene {
       y: this.playerIso.y + input.iso.y * stepDistance,
     };
     return this.resolveWalkablePoint(this.clampToMap(desired));
+  }
+
+  /**
+   * 三岔路先分上下，再分左右。
+   * 例如: 下方1条上方2条 → 按下默认往下，按左往左上，按右往右上。
+   * 返回每个方向应得的加成分数（在原 dot 分数之上）。
+   */
+  private junctionBonuses(
+    input: IsoPoint,
+    dirs: { direction: IsoPoint; screenDirection: IsoPoint }[],
+  ): number[] {
+    const ax = Math.abs(input.x);
+    const ay = Math.abs(input.y);
+
+    // 非纯方向键 → 不加成
+    if (ax > ay * 0.4 && ay > ax * 0.4) return dirs.map(() => 0);
+
+    const isDown = input.y > 0.6;
+    const isUp = input.y < -0.6;
+    const isLeft = input.x < -0.6;
+    const isRight = input.x > 0.6;
+
+    // 将方向按屏幕 y 分为上下两组
+    const upIdx: number[] = [];
+    const downIdx: number[] = [];
+    const midIdx: number[] = [];
+
+    dirs.forEach((d, i) => {
+      if (d.screenDirection.y < -0.2) upIdx.push(i);
+      else if (d.screenDirection.y > 0.2) downIdx.push(i);
+      else midIdx.push(i);
+    });
+
+    const bonuses = dirs.map(() => 0);
+
+    // 下键: 优先选下方组
+    if (isDown && downIdx.length > 0) {
+      if (downIdx.length === 1) {
+        bonuses[downIdx[0]] = 100; // 唯一下方 → 必定选中
+      } else {
+        // 多条下方: 左键选最左，右键选最右，纯下键选最右
+        const sorted = [...downIdx].sort((a, b) => dirs[a].screenDirection.x - dirs[b].screenDirection.x);
+        if (isLeft) bonuses[sorted[0]] = 50;       // 最左
+        else if (isRight) bonuses[sorted[sorted.length - 1]] = 50; // 最右
+        else bonuses[sorted[sorted.length - 1]] = 50; // 默认右下
+      }
+      return bonuses;
+    }
+
+    // 上键: 优先选上方组
+    if (isUp && upIdx.length > 0) {
+      if (upIdx.length === 1) {
+        bonuses[upIdx[0]] = 100;
+      } else {
+        const sorted = [...upIdx].sort((a, b) => dirs[a].screenDirection.x - dirs[b].screenDirection.x);
+        if (isLeft) bonuses[sorted[0]] = 50;
+        else if (isRight) bonuses[sorted[sorted.length - 1]] = 50;
+        else bonuses[sorted[sorted.length - 1]] = 50; // 默认右上
+      }
+      return bonuses;
+    }
+
+    // 没有明确的上下分组时 (如纯水平方向): 按左右匹配
+    if ((isLeft || isRight) && midIdx.length > 0) {
+      const sorted = [...midIdx].sort((a, b) => dirs[a].screenDirection.x - dirs[b].screenDirection.x);
+      if (isLeft) bonuses[sorted[0]] = 50;
+      else if (isRight) bonuses[sorted[sorted.length - 1]] = 50;
+      return bonuses;
+    }
+
+    // 下键但无下方分枝: 在所有方向中选最下方的
+    if (isDown) {
+      const sorted = [...dirs.keys()].sort((a, b) => dirs[b].screenDirection.y - dirs[a].screenDirection.y);
+      bonuses[sorted[0]] = 50;
+      return bonuses;
+    }
+
+    // 上键但无上方分枝: 选最上方的
+    if (isUp) {
+      const sorted = [...dirs.keys()].sort((a, b) => dirs[a].screenDirection.y - dirs[b].screenDirection.y);
+      bonuses[sorted[0]] = 50;
+      return bonuses;
+    }
+
+    return bonuses;
   }
 
   /**
@@ -2235,6 +2323,7 @@ export class CampusScene extends Phaser.Scene {
       this.ghost.nextSpawnAt = time + GHOST_SPAWN_DELAY;
       this.ghost.shouldRespawn = true;
       audioManager.updateGhostBreath(999);
+      useGameStore.getState().setGhost({ visible: false, fsm: "hidden" });
       return;
     }
     if (time < this.ghost.nextSpawnAt) {
@@ -2248,17 +2337,55 @@ export class CampusScene extends Phaser.Scene {
       this.ghost.routeIndex = 1;
       this.ghost.shouldRespawn = false;
     }
-    this.ghost.container.setVisible(true);
+
+    const playerDistance = Math.hypot(this.ghost.iso.x - this.playerIso.x, this.ghost.iso.y - this.playerIso.y);
+
+    // ── 鬼 FSM 状态转换 ──
+    const currentFsm = getStore().ghost.fsm;
+    let nextFsm: GhostFSM = currentFsm;
+
+    if (playerDistance <= GHOST_CAUGHT_RADIUS) {
+      nextFsm = "chasing";
+    } else if (playerDistance <= FSM_CHASE_DIST) {
+      nextFsm = "chasing";
+    } else if (playerDistance <= FSM_STALK_DIST) {
+      nextFsm = currentFsm === "chasing" ? "chasing" : "stalking";
+    } else if (this.activeHotspot && currentFsm === "stalking") {
+      nextFsm = "ambush";
+    } else if (currentFsm === "retreating") {
+      const elapsed = time - (this.ghost.lastSanityHitAt || time);
+      nextFsm = elapsed > FSM_RETREAT_DURATION ? "stalking" : "retreating";
+    } else {
+      nextFsm = "stalking";
+    }
+
+    if (nextFsm !== currentFsm) {
+      useGameStore.getState().setGhost({ fsm: nextFsm, lastStateChangeAt: time });
+    }
+
+    // ── 按 FSM 状态选择速度和行为 ──
+    let speed = GHOST_SPEED;
+    if (nextFsm === "chasing") speed = GHOST_CHASE_SPEED;
+    else if (nextFsm === "stalking") speed = GHOST_STALK_SPEED;
+    else if (nextFsm === "ambush") speed = GHOST_STALK_SPEED * 0.7;
+    else if (nextFsm === "retreating") speed = GHOST_CHASE_SPEED; // fast retreat
+
+    // ── 寻路 ──
     if (
       !this.ghost.route.length ||
       time - this.ghost.lastRouteAt > GHOST_ROUTE_REFRESH_INTERVAL ||
       this.ghost.routeIndex >= this.ghost.route.length
     ) {
-      this.ghost.route = this.findRoadRoute(this.ghost.iso, this.playerIso);
+      const target = nextFsm === "retreating"
+        ? this.pickGhostSpawnPoint()
+        : nextFsm === "ambush" && this.activeHotspot
+          ? this.activeHotspot
+          : this.playerIso;
+      this.ghost.route = this.findRoadRoute(this.ghost.iso, target);
       this.ghost.routeIndex = 1;
       this.ghost.lastRouteAt = time;
     }
-    let step = 0.075 * GHOST_SPEED;
+    let step = 0.075 * speed;
     while (step > 0 && this.ghost.routeIndex < this.ghost.route.length) {
       const target = this.ghost.route[this.ghost.routeIndex];
       const dx = target.x - this.ghost.iso.x;
@@ -2276,17 +2403,29 @@ export class CampusScene extends Phaser.Scene {
         step = 0;
       }
     }
+
+    // ── 渲染 ──
+    this.ghost.container.setVisible(true);
     const p = this.toScreen(this.ghost.iso);
     this.ghost.container.setPosition(p.x, p.y);
     this.ghost.container.setDepth(p.y + 52);
-    const playerDistance = Math.hypot(this.ghost.iso.x - this.playerIso.x, this.ghost.iso.y - this.playerIso.y);
-    // ── 鬼接近呼吸声 ──
+    // 不同 FSM 状态的视觉反馈
+    const auraAlpha = nextFsm === "chasing" ? 0.7 : nextFsm === "stalking" ? 0.35 : 0.16;
+    if (this.ghost.aura) this.ghost.aura.setAlpha(auraAlpha);
+
     audioManager.updateGhostBreath(playerDistance);
+
+    // ── 更新 Zustand 中的鬼状态 ──
+    useGameStore.getState().setGhost({ iso: { ...this.ghost!.iso }, visible: true, playerDistance });
+
+    // ── 碰撞检测 ──
     if (playerDistance <= GHOST_CAUGHT_RADIUS) {
       this.dead = true;
       this.ghost.container.setVisible(false);
       this.cameras.main.shake(620, 0.018);
       this.flashScreen(0.72, 700);
+      useGameStore.getState().setGhost({ visible: false });
+      useGameStore.getState().setJumpscareText("抓到你了");
       window.dispatchEvent(new CustomEvent("zju-horror-ghost-hit", { detail: { type: "death" } }));
       return;
     }
@@ -2294,6 +2433,8 @@ export class CampusScene extends Phaser.Scene {
       this.ghost.lastSanityHitAt = time;
       this.cameras.main.shake(260, 0.006);
       this.flashScreen(0.24, 320);
+      useGameStore.getState().setGhost({ fsm: "chasing" });
+      useGameStore.getState().setJumpscareText("它就在身后");
       window.dispatchEvent(new CustomEvent("zju-horror-ghost-hit", { detail: { type: "sanity", amount: -5 } }));
     }
   }
@@ -2388,30 +2529,20 @@ export class CampusScene extends Phaser.Scene {
   }
 
   private emitHud(place: string, prompt: string, activeHotspotId?: HotspotId) {
-    const event: GameHudEvent = {
-      place,
-      prompt,
-      activeHotspotId,
-    };
-    const signature = JSON.stringify(event);
-    if (signature === this.lastHudSignature) return;
-    this.lastHudSignature = signature;
-    window.dispatchEvent(new CustomEvent<GameHudEvent>("zju-horror-hud", { detail: event }));
+    const { hudPlace, hudPrompt, hudActiveHotspotId } = getStore();
+    if (place === hudPlace && prompt === hudPrompt && activeHotspotId === hudActiveHotspotId) return;
+    useGameStore.getState().setHud(place, prompt, activeHotspotId);
   }
 
   private emitMiniMap(time: number) {
     if (time - this.lastMiniMapAt < 80) return;
     this.lastMiniMapAt = time;
     const ghostVisible = Boolean(this.ghost && this.ghost.container.visible && !this.storyOpen && !this.dead);
-    window.dispatchEvent(
-      new CustomEvent<GameMiniMapEvent>("zju-horror-minimap", {
-        detail: {
-          player: { ...this.playerIso },
-          ghost: ghostVisible && this.ghost ? { ...this.ghost.iso } : undefined,
-          ghostVisible,
-        },
-      }),
-    );
+    useGameStore.getState().setMiniMap({
+      player: { ...this.playerIso },
+      ghost: ghostVisible && this.ghost ? { ...this.ghost.iso } : undefined,
+      ghostVisible,
+    });
   }
 
   private handleMapState = (event: Event) => {

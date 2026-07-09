@@ -32,6 +32,8 @@ import {
   type StoryState,
 } from "./game/storyData";
 import { useGameAudio } from "./game/audio/useGameAudio";
+import { useGameStore } from "./game/store";
+import { pickJumpscareText, contextForHotspot, textVariantClass, type JumpscareContext } from "./game/jumpscareTexts";
 
 const initialHud: GameHudEvent = {
   place: "",
@@ -203,6 +205,33 @@ function App() {
   const [nextObjectiveCue, setNextObjectiveCue] = useState<NextObjectiveCue | null>(null);
   const [gameSessionId, setGameSessionId] = useState(0);
 
+  // ── Zustand hook 订阅 ──
+  const zHudPlace = useGameStore((s) => s.hudPlace);
+  const zHudPrompt = useGameStore((s) => s.hudPrompt);
+  const zHudHotspot = useGameStore((s) => s.hudActiveHotspotId);
+  const zMiniMap = useGameStore((s) => s.miniMap);
+  const zJumpscareText = useGameStore((s) => s.jumpscareText);
+
+  // 同步 HUD
+  useEffect(() => {
+    setHud({ place: zHudPlace, prompt: zHudPrompt, activeHotspotId: zHudHotspot });
+  }, [zHudPlace, zHudPrompt, zHudHotspot]);
+
+  // 同步小地图
+  useEffect(() => {
+    miniMapSnapshotRef.current = zMiniMap;
+    if (miniMapCanvasRef.current) {
+      if (miniMapFrameRef.current !== null) window.cancelAnimationFrame(miniMapFrameRef.current);
+      miniMapFrameRef.current = window.requestAnimationFrame(() => {
+        miniMapFrameRef.current = null;
+        drawMiniMap(miniMapCanvasRef.current!, zMiniMap);
+      });
+    }
+  }, [zMiniMap]);
+
+  const jumpscareText = zJumpscareText;
+  const jumpscareVariant = textVariantClass(zJumpscareText);
+
   const currentScene = storyScenes[storyState.currentSceneId];
   const activeScene = activeSceneId ? storyScenes[activeSceneId] : null;
   const targetHotspotId = getSceneHotspot(storyState.currentSceneId);
@@ -273,27 +302,16 @@ function App() {
       });
     };
 
-    const handleMiniMap = (event: Event) => {
-      miniMapSnapshotRef.current = (event as CustomEvent<GameMiniMapEvent>).detail;
-      scheduleDraw();
-    };
-
     drawMiniMap(canvas, miniMapSnapshotRef.current);
     window.addEventListener("resize", scheduleDraw);
-    window.addEventListener("zju-horror-minimap", handleMiniMap);
     return () => {
       if (miniMapFrameRef.current !== null) window.cancelAnimationFrame(miniMapFrameRef.current);
       miniMapFrameRef.current = null;
       window.removeEventListener("resize", scheduleDraw);
-      window.removeEventListener("zju-horror-minimap", handleMiniMap);
     };
   }, []);
 
   useEffect(() => {
-    const handleHud = (event: Event) => {
-      setHud((event as CustomEvent<GameHudEvent>).detail);
-    };
-
     const handleOpenStory = (event: Event) => {
       const detail = (event as CustomEvent<{ hotspotId: HotspotId; sceneId: StorySceneId }>).detail;
       const sceneId = currentScene.locationId === detail.hotspotId ? storyState.currentSceneId : detail.sceneId;
@@ -309,10 +327,8 @@ function App() {
       window.dispatchEvent(new CustomEvent("zju-horror-effect", { detail: { effect: scene.effect ?? "whisper" } }));
     };
 
-    window.addEventListener("zju-horror-hud", handleHud);
     window.addEventListener("zju-horror-open-story", handleOpenStory);
     return () => {
-      window.removeEventListener("zju-horror-hud", handleHud);
       window.removeEventListener("zju-horror-open-story", handleOpenStory);
     };
   }, [currentScene.locationId, playEffect, storyState.currentSceneId]);
@@ -385,14 +401,19 @@ function App() {
   }, [nextObjectiveCue]);
 
   const triggerEffect = useCallback(
-    (effect?: HorrorEffect) => {
+    (effect?: HorrorEffect, context?: JumpscareContext) => {
       if (!effect) return;
       setScreenEffect(effect);
       playEffect(effect);
+      if (effect === "jumpscare" || effect === "shake") {
+        const ctx = context ?? contextForHotspot(targetHotspotId);
+        const text = pickJumpscareText(ctx, storyState.stats.sanity);
+        useGameStore.getState().setJumpscareText(text);
+      }
       window.dispatchEvent(new CustomEvent("zju-horror-effect", { detail: { effect } }));
       window.setTimeout(() => setScreenEffect(""), effect === "jumpscare" ? 760 : 520);
     },
-    [playEffect],
+    [playEffect, storyState.stats.sanity, targetHotspotId],
   );
 
   const restartGame = useCallback(() => {
@@ -438,7 +459,7 @@ function App() {
         setNextObjectiveCue(null);
         setActiveSceneId("death_sanity");
       }
-      triggerEffect("jumpscare");
+      triggerEffect("jumpscare", "ghost_close");
     };
 
     window.addEventListener("zju-horror-ghost-hit", handleGhostHit);
@@ -650,8 +671,10 @@ function App() {
         <div className="vignette" />
         <div className="scanline" />
         <div className="chromaticVeil" />
+        <div className={screenEffect === "low-sanity" ? "bloomVeil active" : "bloomVeil"} />
+        <div className="lensDirt" />
         <div className={screenEffect === "jumpscare" ? "jumpscareOverlay active" : "jumpscareOverlay"} />
-        <div className={screenEffect === "jumpscare" ? "jumpscareText active" : "jumpscareText"}>别回头</div>
+        <div className={["jumpscareText", screenEffect === "jumpscare" ? "active" : "", jumpscareVariant].join(" ")}>{jumpscareText}</div>
 
         {nextObjectiveCue && !activeScene && (
           <div className="routeCue" role="status">

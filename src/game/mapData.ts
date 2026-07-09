@@ -320,6 +320,7 @@ export const campusRoads: CampusRoad[] = [
       { x: 31.8, y: 30.4 },
       { x: 36.2, y: 30.0 },
       { x: 36.5, y: 24.5 },
+      { x: 36.5, y: 21.5 },
       { x: 36.5, y: 18.8 },
       { x: 36.4, y: 15.8 },
       { x: 37.0, y: 11.8 },
@@ -348,6 +349,7 @@ export const campusRoads: CampusRoad[] = [
       { x: 19.0, y: 22.6 },
       { x: 16.1, y: 21.9 },
       { x: 14.9, y: 17.2 },
+      { x: 13.5, y: 14.6 },
       { x: 14.5, y: 14.8 },
     ],
     color: 0x465956,
@@ -361,6 +363,7 @@ export const campusRoads: CampusRoad[] = [
       { x: 4.2, y: 8.0 },
       { x: 4.2, y: 11.0 },
       { x: 9.6, y: 11.6 },
+      { x: 10.4, y: 14.5 },
     ],
     color: 0x505f58,
   },
@@ -419,8 +422,28 @@ export const campusRoads: CampusRoad[] = [
       { x: 10.2, y: 18.5 },
       { x: 10.8, y: 19.5 },
       { x: 10.8, y: 20.8 },
+      { x: 10.4, y: 16.5 },
+      { x: 10.4, y: 14.5 },
     ],
     color: 0x505b58,
+  },
+  {
+    id: "canteen-spur",
+    name: "临湖餐厅前通路",
+    points: [
+      { x: 10.4, y: 14.5 },
+      { x: 13.5, y: 14.6 },
+    ],
+    color: 0x505f58,
+  },
+  {
+    id: "theater-spur",
+    name: "小剧场通路",
+    points: [
+      { x: 10.2, y: 8.2 },
+      { x: 12.0, y: 11.8 },
+    ],
+    color: 0x4d5a52,
   },
 ];
 

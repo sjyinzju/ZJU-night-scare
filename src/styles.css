@@ -467,6 +467,79 @@ button {
   mix-blend-mode: screen;
 }
 
+/* ── 眩光/失焦层 ── */
+.bloomVeil {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  opacity: 0;
+  background:
+    radial-gradient(ellipse at 50% 55%, rgba(255, 200, 160, 0.12), transparent 60%),
+    radial-gradient(ellipse at 25% 30%, rgba(180, 40, 30, 0.08), transparent 35%);
+  mix-blend-mode: screen;
+  transition: opacity 2s ease;
+}
+.bloomVeil.active {
+  opacity: 0.55;
+}
+
+/* ── 镜头脏痕 (恐怖氛围) ── */
+.lensDirt {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  z-index: 13;
+  opacity: 0.04;
+  background:
+    radial-gradient(circle at 15% 20%, rgba(40,10,5,0.5) 0%, transparent 12%),
+    radial-gradient(circle at 85% 70%, rgba(15,20,18,0.4) 0%, transparent 10%),
+    radial-gradient(circle at 45% 85%, rgba(25,8,5,0.35) 0%, transparent 8%);
+  mix-blend-mode: multiply;
+}
+
+/* ── 低理智失焦 ── */
+.fx-low-sanity .gameFrame {
+  filter: saturate(0.65) contrast(1.22) hue-rotate(-12deg) blur(0.6px);
+}
+.fx-low-sanity .chromaticVeil {
+  opacity: 0.26;
+}
+.fx-low-sanity .bloomVeil {
+  opacity: 0.38;
+}
+
+/* ── 惊吓闪屏动画增强 ── */
+.jumpscareOverlay.active {
+  animation: jsFlashEnhanced 0.3s ease-out;
+}
+@keyframes jsFlashEnhanced {
+  0%   { background: rgba(180,20,20,0); opacity:0; }
+  12%  { background: rgba(220,0,0,0.92); opacity:1; }
+  30%  { background: rgba(80,0,0,0.72); opacity:0.88; }
+  60%  { background: rgba(30,0,0,0.35); opacity:0.5; }
+  100% { background: rgba(0,0,0,0); opacity:0; }
+}
+
+/* ── 惊吓文字脉冲 ── */
+.jumpscareText {
+  display: grid;
+  place-items: center;
+  color: #ff0000;
+  font-size: clamp(36px, 7vw, 84px);
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  text-shadow: 0 0 40px #ff0000, 0 0 80px #cc0000, 0 0 120px #660000;
+}
+.jumpscareText.active {
+  animation: jsTextPop 0.8s ease-out forwards;
+}
+.jumpscareText.variant-whisper {
+  font-size: clamp(20px, 4vw, 48px);
+  color: #cccccc;
+  text-shadow: 0 0 20px rgba(200,200,200,0.5);
+}
+
 .storyModal {
   position: absolute;
   left: 50%;
@@ -680,67 +753,6 @@ button {
   border-color: rgba(158, 219, 115, 0.35);
 }
 
-.jumpscareOverlay,
-.jumpscareText {
-  pointer-events: none;
-  position: absolute;
-  inset: 0;
-  z-index: 60;
-  opacity: 0;
-}
-
-.jumpscareOverlay.active {
-  animation: jsFlash 0.3s ease-out;
-}
-
-@keyframes jsFlash {
-  0% {
-    background: rgba(180, 20, 20, 0);
-    opacity: 0;
-  }
-  15% {
-    background: rgba(200, 0, 0, 0.86);
-    opacity: 1;
-  }
-  40% {
-    background: rgba(80, 0, 0, 0.62);
-    opacity: 0.82;
-  }
-  100% {
-    background: rgba(0, 0, 0, 0);
-    opacity: 0;
-  }
-}
-
-.jumpscareText {
-  display: grid;
-  place-items: center;
-  color: #ff0000;
-  font-size: clamp(36px, 7vw, 84px);
-  font-weight: 800;
-  letter-spacing: 0.22em;
-  text-shadow: 0 0 40px #ff0000;
-}
-
-.jumpscareText.active {
-  animation: jsTextPop 0.6s ease-out forwards;
-}
-
-@keyframes jsTextPop {
-  0% {
-    opacity: 0;
-    transform: scale(0.35);
-  }
-  20% {
-    opacity: 1;
-    transform: scale(1.35);
-  }
-  100% {
-    opacity: 0;
-    transform: scale(1.8);
-  }
-}
-
 .fx-jumpscare .gameFrame {
   animation: hardGlitch 560ms steps(2);
 }
@@ -752,14 +764,6 @@ button {
 
 .fx-reveal .chromaticVeil,
 .fx-ending .chromaticVeil {
-  opacity: 0.22;
-}
-
-.fx-low-sanity .gameFrame {
-  filter: saturate(0.72) contrast(1.16) hue-rotate(-8deg);
-}
-
-.fx-low-sanity .chromaticVeil {
   opacity: 0.22;
 }
 

@@ -15,7 +15,8 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "typescript": "^5.7.2",
-    "vite": "^6.0.7"
+    "vite": "^6.0.7",
+    "zustand": "^5.0.14"
   },
   "devDependencies": {
     "@types/howler": "^2.2.13",
