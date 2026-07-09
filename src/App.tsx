@@ -373,7 +373,13 @@ function App() {
   }, [currentScene.locationId, playEffect, storyState.currentSceneId]);
 
   useEffect(() => {
-    if (!containerRef.current || gameRef.current) return;
+    if (!containerRef.current) return;
+    // Destroy previous game instance so the player position, dead flag,
+    // and all scene state reset on restart.
+    if (gameRef.current) {
+      gameRef.current.destroy(true);
+      gameRef.current = null;
+    }
 
     gameRef.current = new Phaser.Game({
       type: Phaser.AUTO,
@@ -400,7 +406,7 @@ function App() {
       gameRef.current?.destroy(true);
       gameRef.current = null;
     };
-  }, []);
+  }, [gameSessionId]);
 
   useEffect(() => {
     window.dispatchEvent(
