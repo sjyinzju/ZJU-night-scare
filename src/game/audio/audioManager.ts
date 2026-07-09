@@ -12,6 +12,9 @@ import {
   type FootSurface,
 } from "./proceduralAudio";
 
+// Vite 构建时自动替换为正确的基路径（如 /ZJU-night-scare/）
+const BASE = import.meta.env.BASE_URL;
+
 type EndingKind = NonNullable<StoryScene["ending"]>;
 type AudibleHorrorEffect = Exclude<HorrorEffect, "whisper">;
 type OneShotKey = AudibleHorrorEffect | "choiceSelect" | "hover" | "item" | "ghostHit" | "death";
@@ -28,31 +31,31 @@ const FADE_MS = 950;
 
 // ── BGM 播放列表: score-1 → score-2 → loop ──
 const mainBgmTracks: AudioTrack[] = [
-  { howl: new Howl({ src: ["/audio/bgm/score-1.mp3"], loop: false, volume: 0, preload: true }) },
-  { howl: new Howl({ src: ["/audio/bgm/score-2.mp3"], loop: false, volume: 0, preload: true }) },
+  { howl: new Howl({ src: [`${BASE}audio/bgm/score-1.mp3`], loop: false, volume: 0, preload: true }) },
+  { howl: new Howl({ src: [`${BASE}audio/bgm/score-2.mp3`], loop: false, volume: 0, preload: true }) },
 ];
 
 // ── 保留的旧环境音 (可选低调混合) ──
-const ambientWind = new Howl({ src: ["/audio/ambient/wind.wav"], loop: true, volume: 0, preload: true });
+const ambientWind = new Howl({ src: [`${BASE}audio/ambient/wind.wav`], loop: true, volume: 0, preload: true });
 
 // ── SFX ──
 const oneShots: Record<OneShotKey, Howl> = {
-  shake: new Howl({ src: ["/audio/sfx/shake.wav"], volume: 0.52, preload: true }),
-  jumpscare: new Howl({ src: ["/audio/sfx/jumpscare.wav"], volume: 0.72, preload: true }),
-  reveal: new Howl({ src: ["/audio/sfx/reveal.wav"], volume: 0.42, preload: true }),
-  ending: new Howl({ src: ["/audio/sfx/ending.wav"], volume: 0.5, preload: true }),
-  choiceSelect: new Howl({ src: ["/audio/sfx/choice-select.wav"], volume: 0.24, preload: true }),
-  hover: new Howl({ src: ["/audio/sfx/hover.wav"], volume: 0.18, preload: true }),
-  item: new Howl({ src: ["/audio/sfx/item.wav"], volume: 0.34, preload: true }),
-  ghostHit: new Howl({ src: ["/audio/sfx/ghost-hit.wav"], volume: 0.58, preload: true }),
-  death: new Howl({ src: ["/audio/sfx/death.wav"], volume: 0.72, preload: true }),
+  shake: new Howl({ src: [`${BASE}audio/sfx/shake.wav`], volume: 0.52, preload: true }),
+  jumpscare: new Howl({ src: [`${BASE}audio/sfx/jumpscare.wav`], volume: 0.72, preload: true }),
+  reveal: new Howl({ src: [`${BASE}audio/sfx/reveal.wav`], volume: 0.42, preload: true }),
+  ending: new Howl({ src: [`${BASE}audio/sfx/ending.wav`], volume: 0.5, preload: true }),
+  choiceSelect: new Howl({ src: [`${BASE}audio/sfx/choice-select.wav`], volume: 0.24, preload: true }),
+  hover: new Howl({ src: [`${BASE}audio/sfx/hover.wav`], volume: 0.18, preload: true }),
+  item: new Howl({ src: [`${BASE}audio/sfx/item.wav`], volume: 0.34, preload: true }),
+  ghostHit: new Howl({ src: [`${BASE}audio/sfx/ghost-hit.wav`], volume: 0.58, preload: true }),
+  death: new Howl({ src: [`${BASE}audio/sfx/death.wav`], volume: 0.72, preload: true }),
 };
 
 // ── 翻页/剧情推进音 ──
 const pageTurnSprites = ["turn1", "turn2", "turn3", "turn4", "turn5", "turn6"] as const;
 type PageTurnSprite = (typeof pageTurnSprites)[number];
 const pageTurnSound = new Howl({
-  src: ["/audio/sfx/story-open.mp3"],
+  src: [`${BASE}audio/sfx/story-open.mp3`],
   volume: 0.36,
   preload: true,
   sprite: {
