@@ -390,6 +390,59 @@ button {
   backdrop-filter: blur(6px);
 }
 
+.routeCue {
+  pointer-events: none;
+  position: absolute;
+  top: 22px;
+  left: 50%;
+  z-index: 34;
+  display: grid;
+  gap: 4px;
+  min-width: min(360px, calc(100vw - 420px));
+  max-width: 480px;
+  padding: 12px 14px;
+  transform: translateX(-50%);
+  border: 1px solid rgba(229, 92, 77, 0.34);
+  border-radius: 8px;
+  background: rgba(18, 8, 8, 0.78);
+  box-shadow:
+    0 18px 34px rgba(0, 0, 0, 0.32),
+    0 0 26px rgba(229, 92, 77, 0.12);
+  backdrop-filter: blur(8px);
+  animation: routeCueIn 0.28s ease-out both;
+}
+
+.routeCue span {
+  color: var(--blood-bright);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+}
+
+.routeCue strong {
+  color: var(--text);
+  font-size: 18px;
+}
+
+.routeCue em {
+  color: var(--text-dim);
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.45;
+}
+
+@keyframes routeCueIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -8px);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+    filter: blur(0);
+  }
+}
+
 .vignette {
   z-index: 9;
   background:
@@ -756,6 +809,26 @@ button {
     width: 190px;
     height: 142px;
   }
+
+  .routeCue {
+    left: 18px;
+    min-width: 260px;
+    max-width: calc(100% - 230px);
+    transform: none;
+  }
+
+  @keyframes routeCueIn {
+    from {
+      opacity: 0;
+      transform: translateY(-8px);
+      filter: blur(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+      filter: blur(0);
+    }
+  }
 }
 
 @media (max-width: 720px) {
@@ -791,5 +864,17 @@ button {
     right: 10px;
     width: 148px;
     height: 112px;
+  }
+
+  .routeCue {
+    left: 10px;
+    right: 168px;
+    min-width: 0;
+    max-width: none;
+    padding: 10px;
+  }
+
+  .routeCue strong {
+    font-size: 15px;
   }
 }

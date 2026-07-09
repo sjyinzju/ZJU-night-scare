@@ -47,6 +47,23 @@ type MiniMapSnapshot = {
   ghostVisible: boolean;
 };
 
+type NextObjectiveCue = {
+  place: string;
+  objective: string;
+};
+
+function createStoryState(): StoryState {
+  return {
+    ...initialStoryState,
+    stats: { ...initialStoryState.stats },
+    inventory: [...initialStoryState.inventory],
+    flags: { ...initialStoryState.flags },
+    visitedHotspots: [...initialStoryState.visitedHotspots],
+    completedHotspots: [...initialStoryState.completedHotspots],
+    log: [...initialStoryState.log],
+  };
+}
+
 const statMeta: Record<StatKey, { label: string; icon: typeof Brain; dangerBelow?: number }> = {
   sanity: { label: "理智", icon: Brain, dangerBelow: 30 },
   stamina: { label: "体力", icon: Footprints, dangerBelow: 25 },
@@ -229,9 +246,11 @@ function App() {
   const miniMapSnapshotRef = useRef<MiniMapSnapshot>({ player: { x: 16.2, y: 30.6 }, ghostVisible: false });
   const miniMapFrameRef = useRef<number | null>(null);
   const [hud, setHud] = useState<GameHudEvent>(initialHud);
-  const [storyState, setStoryState] = useState<StoryState>(initialStoryState);
+  const [storyState, setStoryState] = useState<StoryState>(() => createStoryState());
   const [activeSceneId, setActiveSceneId] = useState<StorySceneId | null>(null);
   const [screenEffect, setScreenEffect] = useState<HorrorEffect | "low-sanity" | "">("");
+  const [nextObjectiveCue, setNextObjectiveCue] = useState<NextObjectiveCue | null>(null);
+  const [gameSessionId, setGameSessionId] = useState(0);
   const { ensureAudio, playEffect } = useHorrorAudio();
 
   const currentScene = storyScenes[storyState.currentSceneId];
@@ -295,7 +314,7 @@ function App() {
       window.cancelAnimationFrame(raf);
       window.removeEventListener("resize", resize);
     };
-  }, []);
+  }, [gameSessionId]);
 
   useEffect(() => {
     const canvas = miniMapCanvasRef.current;
@@ -408,6 +427,12 @@ function App() {
     setScreenEffect("low-sanity");
   }, [screenEffect, storyState.stats.sanity]);
 
+  useEffect(() => {
+    if (!nextObjectiveCue) return;
+    const timer = window.setTimeout(() => setNextObjectiveCue(null), 4200);
+    return () => window.clearTimeout(timer);
+  }, [nextObjectiveCue]);
+
   const triggerEffect = useCallback(
     (effect?: HorrorEffect) => {
       if (!effect) return;
@@ -419,10 +444,21 @@ function App() {
     [playEffect],
   );
 
+  const restartGame = useCallback(() => {
+    setStoryState(createStoryState());
+    setActiveSceneId(null);
+    setHud(initialHud);
+    setScreenEffect("");
+    setNextObjectiveCue(null);
+    miniMapSnapshotRef.current = { player: { x: 16.2, y: 30.6 }, ghostVisible: false };
+    setGameSessionId((value) => value + 1);
+  }, []);
+
   useEffect(() => {
     const handleGhostHit = (event: Event) => {
       const detail = (event as CustomEvent<{ type: "sanity" | "death"; amount?: number }>).detail;
       if (detail.type === "death") {
+        setNextObjectiveCue(null);
         setStoryState((previous) => ({
           ...previous,
           currentSceneId: "death_sanity",
@@ -446,7 +482,10 @@ function App() {
           log: appendLog(previous.log, "红色鬼影靠得太近，理智被撕下一截。"),
         };
       });
-      if (becameDead) setActiveSceneId("death_sanity");
+      if (becameDead) {
+        setNextObjectiveCue(null);
+        setActiveSceneId("death_sanity");
+      }
       triggerEffect("jumpscare");
     };
 
@@ -497,8 +536,10 @@ function App() {
       }
 
       const nextScene = storyScenes[nextSceneId];
+      const nextHotspot = getHotspotById(nextScene.locationId);
+      const changesLocation = nextScene.locationId !== currentLocation;
       const completedHotspots = uniqueValues(
-        nextScene.locationId !== currentLocation || nextScene.ending
+        changesLocation || nextScene.ending
           ? [...storyState.completedHotspots, currentLocation]
           : storyState.completedHotspots,
       );
@@ -511,6 +552,8 @@ function App() {
       const talismanLine = applied.blockedByTalisman ? "护身符发烫，替你挡下了一次精神侵蚀。" : "";
 
       nextStats = { ...nextStats };
+      const nextPlaceLine = changesLocation && !nextScene.ending && nextHotspot ? `下一站：${nextHotspot.place}` : "";
+
       setStoryState({
         ...storyState,
         currentSceneId: nextSceneId,
@@ -519,14 +562,18 @@ function App() {
         flags: nextFlags,
         visitedHotspots: uniqueValues([...storyState.visitedHotspots, currentLocation]),
         completedHotspots,
-        log: appendLog(storyState.log, [choice.text, talismanLine, itemLine].filter(Boolean).join(" ")),
+        log: appendLog(storyState.log, [choice.text, talismanLine, itemLine, nextPlaceLine].filter(Boolean).join(" ")),
       });
 
       triggerEffect(choice.effect ?? nextScene.effect);
 
       if (nextScene.ending || nextScene.locationId === currentLocation) {
+        setNextObjectiveCue(null);
         setActiveSceneId(nextSceneId);
       } else {
+        if (nextHotspot) {
+          setNextObjectiveCue({ place: nextHotspot.place, objective: nextHotspot.objective });
+        }
         setActiveSceneId(null);
       }
     },
@@ -652,6 +699,14 @@ function App() {
         <div className={screenEffect === "jumpscare" ? "jumpscareOverlay active" : "jumpscareOverlay"} />
         <div className={screenEffect === "jumpscare" ? "jumpscareText active" : "jumpscareText"}>别回头</div>
 
+        {nextObjectiveCue && !activeScene && (
+          <div className="routeCue" role="status">
+            <span>下一段</span>
+            <strong>{nextObjectiveCue.place}</strong>
+            <em>{nextObjectiveCue.objective}</em>
+          </div>
+        )}
+
         {activeScene && (
           <section className={activeScene.ending ? "storyModal ending" : "storyModal"} aria-live="polite">
             <div className="storyKicker">
@@ -667,8 +722,8 @@ function App() {
               ))}
             </div>
             {activeScene.ending ? (
-              <button className="choiceButton primary" onClick={() => setActiveSceneId(null)}>
-                回到地图
+              <button className="choiceButton primary" onClick={restartGame}>
+                重新开始
               </button>
             ) : (
               <div className="choiceList">
