@@ -168,6 +168,7 @@ function App() {
   const [screenEffect, setScreenEffect] = useState<HorrorEffect | "low-sanity" | "">("");
   const [nextObjectiveCue, setNextObjectiveCue] = useState<NextObjectiveCue | null>(null);
   const [gameSessionId, setGameSessionId] = useState(0);
+  const [gameStarted, setGameStarted] = useState(false);
 
   // ── Zustand hook 订阅 ──
   const zHudPlace = useGameStore((s) => s.hudPlace);
@@ -313,6 +314,9 @@ function App() {
         default: "arcade",
         arcade: { debug: false },
       },
+      audio: {
+        noAudio: true,
+      },
       scale: {
         mode: Phaser.Scale.RESIZE,
         autoCenter: Phaser.Scale.CENTER_BOTH,
@@ -376,7 +380,13 @@ function App() {
     [playEffect, storyState.stats.sanity, targetHotspotId],
   );
 
+  const startGame = useCallback(() => {
+    setGameStarted(true);
+    triggerEffect("reveal");
+  }, [triggerEffect]);
+
   const restartGame = useCallback(() => {
+    setGameStarted(true);
     setStoryState(createStoryState());
     setActiveSceneId(null);
     setHud(initialHud);
@@ -474,7 +484,7 @@ function App() {
     [storyState.inventory],
   );
 
-  const rootClass = ["appShell", screenEffect ? `fx-${screenEffect}` : ""].filter(Boolean).join(" ");
+  const rootClass = ["appShell", !gameStarted ? "titleMode" : "", screenEffect ? `fx-${screenEffect}` : ""].filter(Boolean).join(" ");
   const completedCount = storyState.completedHotspots.length;
 
   return (
@@ -588,6 +598,11 @@ function App() {
         <div className={screenEffect === "low-sanity" ? "bloomVeil active" : "bloomVeil"} />
         <div className="lensDirt" />
         <div className={screenEffect === "jumpscare" ? "jumpscareOverlay active" : "jumpscareOverlay"} />
+        <div className={screenEffect === "jumpscare" ? "jumpscareFace active" : "jumpscareFace"} aria-hidden="true">
+          <span className="faceEye left" />
+          <span className="faceEye right" />
+          <span className="faceMouth" />
+        </div>
         <div className={["jumpscareText", screenEffect === "jumpscare" ? "active" : "", jumpscareVariant].join(" ")}>{jumpscareText}</div>
 
         {nextObjectiveCue && !activeScene && (
@@ -641,6 +656,22 @@ function App() {
           </section>
         )}
       </section>
+
+      {!gameStarted && (
+        <section className="titleScreen" aria-label="浙大夜惊魂开场界面">
+          <div className="titleAtmosphere" aria-hidden="true" />
+          <div className="titlePanel">
+            <p className="titleEyebrow">紫金港校区 / 00:47</p>
+            <h1>浙大夜惊魂</h1>
+            <p className="titleSubtitle">学长学姐代代相传的校园恐怖传说</p>
+            <p className="titleWarning">游戏包含恐怖元素，请谨慎游玩</p>
+            <button className="titleStartButton" onClick={startGame} onMouseEnter={playHover} type="button">
+              开始游戏
+            </button>
+            <p className="titleMeta">二维地图推理 · 多分支剧情 · 道具系统 · 理智管理</p>
+          </div>
+        </section>
+      )}
     </main>
   );
 }

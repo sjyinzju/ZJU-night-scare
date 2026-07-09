@@ -48,6 +48,158 @@ button {
     #070606;
 }
 
+.appShell.titleMode .leftRail,
+.appShell.titleMode .gameFrame {
+  filter: saturate(0.72) brightness(0.58) blur(1.2px);
+}
+
+.titleScreen {
+  position: absolute;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  overflow: hidden;
+  text-align: center;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(123, 14, 14, 0.28), transparent 34%),
+    radial-gradient(circle at 22% 68%, rgba(16, 44, 40, 0.24), transparent 28%),
+    rgba(5, 3, 3, 0.74);
+  backdrop-filter: blur(7px) saturate(0.72);
+}
+
+.titleAtmosphere {
+  position: absolute;
+  inset: -16%;
+  background:
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.035) 0 1px, transparent 1px 72px),
+    repeating-linear-gradient(0deg, transparent 0 9px, rgba(227, 92, 77, 0.05) 10px 11px);
+  opacity: 0.42;
+  animation: titleDrift 12s linear infinite;
+}
+
+.titlePanel {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  max-width: min(720px, calc(100vw - 44px));
+  padding: 34px 24px;
+}
+
+.titleEyebrow,
+.titleSubtitle,
+.titleWarning,
+.titleMeta {
+  margin: 0;
+}
+
+.titleEyebrow {
+  color: rgba(215, 183, 118, 0.82);
+  font-size: 12px;
+  letter-spacing: 0.28em;
+}
+
+.titlePanel h1 {
+  margin: 12px 0 8px;
+  color: #ff6a58;
+  font-size: clamp(42px, 8vw, 96px);
+  line-height: 1.05;
+  letter-spacing: 0.14em;
+  text-shadow:
+    0 0 42px rgba(227, 52, 42, 0.72),
+    0 0 96px rgba(137, 12, 12, 0.58),
+    0 0 150px rgba(63, 0, 0, 0.8);
+  animation: titleGlow 3s ease-in-out infinite;
+}
+
+.titleSubtitle {
+  color: rgba(232, 219, 200, 0.72);
+  font-size: clamp(14px, 2vw, 18px);
+  letter-spacing: 0.26em;
+}
+
+.titleWarning {
+  margin-top: 34px;
+  color: #ff5b50;
+  font-size: 13px;
+  letter-spacing: 0.16em;
+  animation: titleBlink 2s ease-in-out infinite;
+}
+
+.titleStartButton {
+  margin-top: 34px;
+  min-width: 220px;
+  padding: 15px 36px;
+  cursor: pointer;
+  border: 1px solid rgba(227, 92, 77, 0.7);
+  color: #f7ece3;
+  background: rgba(20, 4, 4, 0.42);
+  letter-spacing: 0.24em;
+  box-shadow:
+    inset 0 0 24px rgba(227, 92, 77, 0.08),
+    0 0 0 rgba(227, 92, 77, 0);
+  transition:
+    color 0.28s ease,
+    background 0.28s ease,
+    box-shadow 0.28s ease,
+    transform 0.28s ease;
+}
+
+.titleStartButton:hover,
+.titleStartButton:focus-visible {
+  color: #fff;
+  background: rgba(129, 20, 18, 0.8);
+  box-shadow: 0 0 42px rgba(227, 40, 32, 0.36);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.titleMeta {
+  margin-top: 26px;
+  color: rgba(153, 140, 125, 0.86);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  line-height: 1.8;
+}
+
+@keyframes titleGlow {
+  0%,
+  100% {
+    filter: brightness(0.94);
+    text-shadow:
+      0 0 42px rgba(227, 52, 42, 0.62),
+      0 0 96px rgba(137, 12, 12, 0.48),
+      0 0 150px rgba(63, 0, 0, 0.72);
+  }
+  50% {
+    filter: brightness(1.18);
+    text-shadow:
+      0 0 70px rgba(255, 80, 66, 0.82),
+      0 0 140px rgba(174, 28, 24, 0.64),
+      0 0 190px rgba(78, 0, 0, 0.86);
+  }
+}
+
+@keyframes titleBlink {
+  0%,
+  100% {
+    opacity: 0.46;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes titleDrift {
+  from {
+    transform: translate3d(-24px, -12px, 0);
+  }
+  to {
+    transform: translate3d(24px, 12px, 0);
+  }
+}
+
 .leftRail {
   position: absolute;
   inset: 0 auto 0 0;
@@ -510,19 +662,122 @@ button {
 }
 
 /* ── 惊吓闪屏动画增强 ── */
+.jumpscareOverlay,
+.jumpscareFace,
+.jumpscareText {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  z-index: 45;
+  opacity: 0;
+}
+
+.jumpscareFace {
+  z-index: 46;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(ellipse at 50% 48%, rgba(0,0,0,0.72) 0 14%, transparent 43%),
+    radial-gradient(ellipse at 50% 54%, rgba(190, 0, 0, 0.18), transparent 50%);
+}
+
+.jumpscareFace::before {
+  content: "";
+  width: min(44vw, 380px);
+  aspect-ratio: 0.78;
+  border-radius: 48% 48% 42% 42%;
+  background:
+    radial-gradient(circle at 34% 36%, rgba(255,255,255,0.92) 0 3%, rgba(255,0,0,0.72) 4% 5%, transparent 8%),
+    radial-gradient(circle at 66% 36%, rgba(255,255,255,0.92) 0 3%, rgba(255,0,0,0.72) 4% 5%, transparent 8%),
+    radial-gradient(ellipse at 50% 66%, rgba(0,0,0,0.96) 0 10%, rgba(150,0,0,0.72) 11% 14%, transparent 21%),
+    radial-gradient(ellipse at 50% 50%, rgba(238, 232, 220, 0.88), rgba(116, 107, 101, 0.48) 38%, rgba(15, 0, 0, 0.12) 62%, transparent 72%);
+  box-shadow:
+    0 0 70px rgba(255, 0, 0, 0.38),
+    inset 0 0 64px rgba(0, 0, 0, 0.74);
+  filter: contrast(1.6) saturate(0.45);
+}
+
+.faceEye,
+.faceMouth {
+  position: absolute;
+  display: block;
+}
+
+.faceEye {
+  top: calc(50% - min(8vw, 72px));
+  width: min(8vw, 58px);
+  height: min(3vw, 22px);
+  border-radius: 50%;
+  background: #fff6ee;
+  box-shadow: 0 0 32px rgba(255, 0, 0, 0.8);
+}
+
+.faceEye.left {
+  left: calc(50% - min(11vw, 96px));
+}
+
+.faceEye.right {
+  right: calc(50% - min(11vw, 96px));
+}
+
+.faceMouth {
+  top: calc(50% + min(7vw, 58px));
+  left: 50%;
+  width: min(13vw, 112px);
+  height: min(8vw, 72px);
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: #040000;
+  box-shadow:
+    0 0 24px rgba(255, 0, 0, 0.62),
+    inset 0 -16px 18px rgba(120, 0, 0, 0.8);
+}
+
+.jumpscareFace.active {
+  animation: jsFaceLunge 0.58s steps(2) forwards;
+}
+
+@keyframes jsFaceLunge {
+  0% {
+    opacity: 0;
+    transform: scale(0.22) translateY(20px);
+    filter: blur(6px) contrast(1.1);
+  }
+  16% {
+    opacity: 1;
+    transform: scale(1.18) translate(-8px, 3px) rotate(-0.6deg);
+    filter: blur(0) contrast(2.1);
+  }
+  34% {
+    opacity: 0.9;
+    transform: scale(1.34) translate(10px, -5px) rotate(0.7deg);
+  }
+  62% {
+    opacity: 0.58;
+    transform: scale(1.52) translate(-5px, 2px);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.72);
+    filter: blur(3px) contrast(1.7);
+  }
+}
+
 .jumpscareOverlay.active {
-  animation: jsFlashEnhanced 0.3s ease-out;
+  animation: jsFlashEnhanced 0.36s ease-out;
 }
 @keyframes jsFlashEnhanced {
   0%   { background: rgba(180,20,20,0); opacity:0; }
-  12%  { background: rgba(220,0,0,0.92); opacity:1; }
-  30%  { background: rgba(80,0,0,0.72); opacity:0.88; }
-  60%  { background: rgba(30,0,0,0.35); opacity:0.5; }
+  10%  { background: rgba(255,255,255,0.82); opacity:1; }
+  18%  { background: rgba(220,0,0,0.92); opacity:1; }
+  42%  { background: rgba(80,0,0,0.72); opacity:0.88; }
+  68%  { background: rgba(30,0,0,0.35); opacity:0.5; }
   100% { background: rgba(0,0,0,0); opacity:0; }
 }
 
 /* ── 惊吓文字脉冲 ── */
 .jumpscareText {
+  z-index: 47;
   display: grid;
   place-items: center;
   color: #ff0000;
@@ -532,8 +787,24 @@ button {
   text-shadow: 0 0 40px #ff0000, 0 0 80px #cc0000, 0 0 120px #660000;
 }
 .jumpscareText.active {
-  animation: jsTextPop 0.8s ease-out forwards;
+  animation: jsTextPop 0.68s ease-out forwards;
 }
+
+@keyframes jsTextPop {
+  0% {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+  18% {
+    opacity: 1;
+    transform: scale(1.38);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.86);
+  }
+}
+
 .jumpscareText.variant-whisper {
   font-size: clamp(20px, 4vw, 48px);
   color: #cccccc;
@@ -754,7 +1025,7 @@ button {
 }
 
 .fx-jumpscare .gameFrame {
-  animation: hardGlitch 560ms steps(2);
+  animation: hardGlitch 620ms steps(2);
 }
 
 .fx-shake .gameFrame,
