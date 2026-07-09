@@ -432,9 +432,23 @@ export const campusRoads: CampusRoad[] = [
     name: "临湖餐厅前通路",
     points: [
       { x: 10.4, y: 14.5 },
+      { x: 11.6, y: 14.85 },
+      { x: 12.7, y: 14.9 },
       { x: 13.5, y: 14.6 },
+      { x: 14.5, y: 14.8 },
     ],
     color: 0x505f58,
+  },
+  {
+    id: "canteen-south-link",
+    name: "临湖餐厅南侧连路",
+    points: [
+      { x: 10.4, y: 16.5 },
+      { x: 11.8, y: 16.4 },
+      { x: 13.2, y: 16.1 },
+      { x: 14.5, y: 14.8 },
+    ],
+    color: 0x4d5d58,
   },
   {
     id: "theater-spur",

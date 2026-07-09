@@ -1813,10 +1813,10 @@ export class CampusScene extends Phaser.Scene {
       const options = this.availableDirections(this.playerIso, nearest);
 
       let best = options[0];
-      let bestScore = Number.NEGATIVE_INFINITY;
-      const hysteresisThreshold = 0.4;
       // ── 三岔路智能匹配：先分上下，再分左右 ──
       const bonuses = this.junctionBonuses(input.screen, options);
+      let bestScore = Number.NEGATIVE_INFINITY;
+      const hysteresisThreshold = bonuses.some((bonus) => bonus > 0) ? 0.08 : 0.35;
 
       for (let i = 0; i < options.length; i++) {
         const opt = options[i];
@@ -1862,16 +1862,10 @@ export class CampusScene extends Phaser.Scene {
     input: IsoPoint,
     dirs: { direction: IsoPoint; screenDirection: IsoPoint }[],
   ): number[] {
-    const ax = Math.abs(input.x);
-    const ay = Math.abs(input.y);
-
-    // 非纯方向键 → 不加成
-    if (ax > ay * 0.4 && ay > ax * 0.4) return dirs.map(() => 0);
-
-    const isDown = input.y > 0.6;
-    const isUp = input.y < -0.6;
-    const isLeft = input.x < -0.6;
-    const isRight = input.x > 0.6;
+    const isDown = input.y > 0.35;
+    const isUp = input.y < -0.35;
+    const isLeft = input.x < -0.35;
+    const isRight = input.x > 0.35;
 
     // 将方向按屏幕 y 分为上下两组
     const upIdx: number[] = [];
@@ -1885,17 +1879,26 @@ export class CampusScene extends Phaser.Scene {
     });
 
     const bonuses = dirs.map(() => 0);
+    const chooseByHorizontal = (indices: number[], verticalSign: -1 | 1 | 0) => {
+      const sorted = [...indices].sort((a, b) => dirs[a].screenDirection.x - dirs[b].screenDirection.x);
+      if (isLeft) return sorted[0];
+      if (isRight) return sorted[sorted.length - 1];
+      return [...indices].sort((a, b) => {
+        const ax = Math.abs(dirs[a].screenDirection.x);
+        const bx = Math.abs(dirs[b].screenDirection.x);
+        if (Math.abs(ax - bx) > 0.05) return ax - bx;
+        if (verticalSign < 0) return dirs[a].screenDirection.y - dirs[b].screenDirection.y;
+        if (verticalSign > 0) return dirs[b].screenDirection.y - dirs[a].screenDirection.y;
+        return 0;
+      })[0];
+    };
 
     // 下键: 优先选下方组
     if (isDown && downIdx.length > 0) {
       if (downIdx.length === 1) {
         bonuses[downIdx[0]] = 100; // 唯一下方 → 必定选中
       } else {
-        // 多条下方: 左键选最左，右键选最右，纯下键选最右
-        const sorted = [...downIdx].sort((a, b) => dirs[a].screenDirection.x - dirs[b].screenDirection.x);
-        if (isLeft) bonuses[sorted[0]] = 50;       // 最左
-        else if (isRight) bonuses[sorted[sorted.length - 1]] = 50; // 最右
-        else bonuses[sorted[sorted.length - 1]] = 50; // 默认右下
+        bonuses[chooseByHorizontal(downIdx, 1)] = 75;
       }
       return bonuses;
     }
@@ -1905,19 +1908,14 @@ export class CampusScene extends Phaser.Scene {
       if (upIdx.length === 1) {
         bonuses[upIdx[0]] = 100;
       } else {
-        const sorted = [...upIdx].sort((a, b) => dirs[a].screenDirection.x - dirs[b].screenDirection.x);
-        if (isLeft) bonuses[sorted[0]] = 50;
-        else if (isRight) bonuses[sorted[sorted.length - 1]] = 50;
-        else bonuses[sorted[sorted.length - 1]] = 50; // 默认右上
+        bonuses[chooseByHorizontal(upIdx, -1)] = 75;
       }
       return bonuses;
     }
 
     // 没有明确的上下分组时 (如纯水平方向): 按左右匹配
     if ((isLeft || isRight) && midIdx.length > 0) {
-      const sorted = [...midIdx].sort((a, b) => dirs[a].screenDirection.x - dirs[b].screenDirection.x);
-      if (isLeft) bonuses[sorted[0]] = 50;
-      else if (isRight) bonuses[sorted[sorted.length - 1]] = 50;
+      bonuses[chooseByHorizontal(midIdx, 0)] = 60;
       return bonuses;
     }
 
