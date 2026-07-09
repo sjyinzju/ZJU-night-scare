@@ -4,11 +4,10 @@ import {
   campusRoads,
   campusPlazas,
   campusWaters,
-  storyTasks,
   type CampusBuilding,
-  type CampusTask,
   type IsoPoint,
 } from "./mapData";
+import { storyHotspots, type HorrorEffect, type HotspotId, type StoryHotspot, type StorySceneId } from "./storyData";
 
 const TILE_W = 96;
 const TILE_H = 48;
@@ -17,9 +16,17 @@ const ORIGIN_Y = 120;
 const MAP_W = 42;
 const MAP_D = 34;
 const PLAYER_SPEED = 4.2;
+const GHOST_SPEED = 2.15;
 const ROAD_SNAP_RADIUS = 0.72;
 const ROAD_JUNCTION_RADIUS = 1.12;
 const WORLD_BOUNDS = { x: -1200, y: 0, width: 4300, height: 2200 };
+const GHOST_CLOSE_RADIUS = 1.65;
+const GHOST_CAUGHT_RADIUS = 0.55;
+const GHOST_SANITY_COOLDOWN = 2200;
+const GHOST_ROUTE_REFRESH_INTERVAL = 1350;
+const GHOST_SPAWN_DELAY = 5200;
+const GHOST_MIN_SPAWN_DISTANCE = 13;
+const GHOST_MIN_SPAWN_ROUTE_DISTANCE = 22;
 
 type KeySet = {
   up: Phaser.Input.Keyboard.Key;
@@ -67,11 +74,52 @@ type RailDirection = {
   screenDirection: IsoPoint;
 };
 
+type HotspotMarker = {
+  container: Phaser.GameObjects.Container;
+  beam: Phaser.GameObjects.Ellipse;
+  ring: Phaser.GameObjects.Ellipse;
+  core: Phaser.GameObjects.Arc;
+  label: Phaser.GameObjects.Text;
+  arrow: Phaser.GameObjects.Text;
+};
+
+type MapStateEvent = {
+  guideHotspotId: HotspotId;
+  completedHotspotIds: HotspotId[];
+  visitedHotspotIds: HotspotId[];
+  sanity: number;
+  activeStory: boolean;
+};
+
+type RouteEdge = {
+  to: number;
+  distance: number;
+};
+
+type GhostState = {
+  container: Phaser.GameObjects.Container;
+  aura: Phaser.GameObjects.Arc;
+  body: Phaser.GameObjects.Ellipse;
+  head: Phaser.GameObjects.Arc;
+  iso: IsoPoint;
+  route: IsoPoint[];
+  routeIndex: number;
+  lastRouteAt: number;
+  lastSanityHitAt: number;
+  nextSpawnAt: number;
+  shouldRespawn: boolean;
+};
+
+export type GameMiniMapEvent = {
+  player: IsoPoint;
+  ghost?: IsoPoint;
+  ghostVisible: boolean;
+};
+
 export type GameHudEvent = {
   place: string;
   prompt: string;
-  story: string;
-  tasks: Array<{ id: string; title: string; place: string; done: boolean }>;
+  activeHotspotId?: HotspotId;
 };
 
 export class CampusScene extends Phaser.Scene {
@@ -79,11 +127,22 @@ export class CampusScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Container;
   private playerBody!: Phaser.GameObjects.Ellipse;
   private playerIso = { x: 16.2, y: 30.6 };
-  private activeTask?: CampusTask;
-  private completed = new Set<string>();
+  private activeHotspot?: StoryHotspot;
+  private completedHotspots = new Set<HotspotId>();
+  private visitedHotspots = new Set<HotspotId>();
+  private guideHotspotId: HotspotId = "library";
   private lastInteract = 0;
   private lastHudSignature = "";
   private fog!: Phaser.GameObjects.Graphics;
+  private guideLine!: Phaser.GameObjects.Graphics;
+  private effectFlash!: Phaser.GameObjects.Rectangle;
+  private storyOpen = false;
+  private sanity = 100;
+  private dead = false;
+  private ghost?: GhostState;
+  private lastMiniMapAt = 0;
+  private sceneReady = false;
+  private hotspotMarkers = new Map<HotspotId, HotspotMarker>();
   private lightBeams: Phaser.GameObjects.Arc[] = [];
 
   constructor() {
@@ -91,6 +150,7 @@ export class CampusScene extends Phaser.Scene {
   }
 
   create() {
+    this.sceneReady = true;
     this.cameras.main.setBackgroundColor("#0b1110");
     this.physics.world.setBounds(WORLD_BOUNDS.x, WORLD_BOUNDS.y, WORLD_BOUNDS.width, WORLD_BOUNDS.height);
     this.drawGround();
@@ -101,10 +161,14 @@ export class CampusScene extends Phaser.Scene {
     this.drawBuildings();
     this.drawTaskMarkers();
     this.drawLampPosts();
+    this.drawHorrorApparitions();
     this.drawOrientationLabels();
     this.snapPlayerToRoad();
     this.createPlayer();
+    this.createGuideLine();
+    this.createGhost();
     this.createFog();
+    this.createScreenEffects();
 
     this.keys = this.input.keyboard!.addKeys({
       up: Phaser.Input.Keyboard.KeyCodes.UP,
@@ -123,14 +187,25 @@ export class CampusScene extends Phaser.Scene {
     this.cameras.main.startFollow(this.player, false, 0.22, 0.22);
     this.cameras.main.centerOn(this.player.x, this.player.y);
 
-    this.emitHud("", "", "凌晨的紫金港校区只剩下路灯和地图上的建筑编号。先去图书馆确认闭馆记录。");
+    window.addEventListener("zju-horror-map-state", this.handleMapState as EventListener);
+    window.addEventListener("zju-horror-effect", this.handleHorrorEffect as EventListener);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.sceneReady = false;
+      window.removeEventListener("zju-horror-map-state", this.handleMapState as EventListener);
+      window.removeEventListener("zju-horror-effect", this.handleHorrorEffect as EventListener);
+    });
+
+    this.emitHud("", "沿红色虚线路线前进，绕开红鬼。");
   }
 
   update(time: number) {
     this.movePlayer();
+    this.updateGhost(time);
     this.updateDepth();
-    this.updateTaskRange(time);
+    this.updateHotspotRange(time);
+    this.updateGuideLine(time);
     this.updateFog(time);
+    this.emitMiniMap(time);
   }
 
   private toScreen(point: IsoPoint) {
@@ -446,30 +521,51 @@ export class CampusScene extends Phaser.Scene {
   }
 
   private drawTaskMarkers() {
-    storyTasks.forEach((task) => {
-      const p = this.toScreen(task);
+    storyHotspots.forEach((hotspot) => {
+      const p = this.toScreen(hotspot);
       const marker = this.add.container(p.x, p.y - 12);
-      const ring = this.add.ellipse(0, 0, 60, 24, 0xb7d667, 0.24);
-      const core = this.add.circle(0, -15, 9, 0xd3ef70, 0.9);
-      const icon = this.add.text(0, -17, "!", {
-        fontFamily: "Arial, sans-serif",
-        fontSize: "16px",
-        color: "#1d251c",
+      const beam = this.add.ellipse(0, -34, 34, 112, 0xb92828, 0.08);
+      const ring = this.add.ellipse(0, 0, 72, 28, 0xb92828, 0.28);
+      const core = this.add.circle(0, -16, 10, 0xe8d2a4, 0.92);
+      const icon = this.add.text(0, -18, `${hotspot.order}`, {
+        fontFamily: "Microsoft YaHei, Arial, sans-serif",
+        fontSize: "13px",
+        color: "#160b0b",
         fontStyle: "bold",
       }).setOrigin(0.5);
-      marker.add([ring, core, icon]);
+      const arrow = this.add
+        .text(0, -72, "目标", {
+          fontFamily: "Microsoft YaHei, sans-serif",
+          fontSize: "13px",
+          color: "#ffd5be",
+          backgroundColor: "rgba(113, 8, 8, 0.9)",
+          padding: { x: 8, y: 4 },
+        })
+        .setOrigin(0.5);
+      const label = this.add
+        .text(0, 17, hotspot.title, {
+          fontFamily: "Microsoft YaHei, sans-serif",
+          fontSize: "13px",
+          color: "#f2e4cf",
+          backgroundColor: "rgba(12, 6, 6, 0.72)",
+          padding: { x: 7, y: 3 },
+        })
+        .setOrigin(0.5);
+      marker.add([beam, ring, core, icon, arrow, label]);
       marker.setDepth(p.y + 24);
-      marker.setData("taskId", task.id);
+      marker.setData("hotspotId", hotspot.id);
+      this.hotspotMarkers.set(hotspot.id, { container: marker, beam, ring, core, label, arrow });
       this.tweens.add({
-        targets: [ring, core],
-        alpha: { from: 0.25, to: 0.85 },
-        scaleX: { from: 0.92, to: 1.08 },
-        scaleY: { from: 0.92, to: 1.08 },
-        duration: 1100,
+        targets: [beam, ring, core],
+        alpha: { from: 0.18, to: 0.82 },
+        scaleX: { from: 0.88, to: 1.16 },
+        scaleY: { from: 0.88, to: 1.16 },
+        duration: 980 + hotspot.order * 90,
         yoyo: true,
         repeat: -1,
       });
     });
+    this.updateHotspotMarkerStates();
   }
 
   private drawLampPosts() {
@@ -502,6 +598,33 @@ export class CampusScene extends Phaser.Scene {
     });
   }
 
+  private drawHorrorApparitions() {
+    const apparitions = [
+      { x: 18.8, y: 22.8, delay: 0 },
+      { x: 31.2, y: 19.6, delay: 900 },
+      { x: 12.1, y: 12.0, delay: 1600 },
+    ];
+
+    apparitions.forEach((ghost) => {
+      const p = this.toScreen(ghost);
+      const body = this.add.ellipse(p.x, p.y - 42, 24, 58, 0xd8e1d5, 0.0);
+      const head = this.add.circle(p.x, p.y - 80, 10, 0xd8e1d5, 0.0);
+      body.setDepth(p.y + 34);
+      head.setDepth(p.y + 35);
+      this.tweens.add({
+        targets: [body, head],
+        alpha: { from: 0, to: 0.16 },
+        x: `+=${ghost.delay === 0 ? 18 : -14}`,
+        duration: 2600,
+        delay: ghost.delay,
+        hold: 500,
+        yoyo: true,
+        repeat: -1,
+        repeatDelay: 4200,
+      });
+    });
+  }
+
   private createPlayer() {
     const p = this.toScreen(this.playerIso);
     this.player = this.add.container(p.x, p.y);
@@ -511,6 +634,48 @@ export class CampusScene extends Phaser.Scene {
     const light = this.add.triangle(18, -9, 0, 0, 170, -28, 170, 34, 0xe7e0ba, 0.13);
     this.player.add([light, shadow, this.playerBody, face]);
     this.player.setDepth(p.y + 40);
+  }
+
+  private createGuideLine() {
+    this.guideLine = this.add.graphics();
+    this.guideLine.setDepth(99998);
+  }
+
+  private createGhost() {
+    const spawn = this.pickGhostSpawnPoint();
+    const p = this.toScreen(spawn);
+    const container = this.add.container(p.x, p.y);
+    const aura = this.add.circle(0, -18, 38, 0xc90000, 0.16);
+    const shadow = this.add.ellipse(0, 14, 34, 12, 0x240000, 0.55);
+    const body = this.add.ellipse(0, -16, 22, 46, 0xbb0909, 0.86);
+    const head = this.add.circle(0, -48, 10, 0xff1d1d, 0.88);
+    const eyes = this.add.rectangle(0, -50, 16, 3, 0xffd6d6, 0.92);
+    container.add([aura, shadow, body, head, eyes]);
+    container.setDepth(p.y + 44);
+    this.tweens.add({
+      targets: [aura, body, head],
+      alpha: { from: 0.35, to: 0.92 },
+      scaleX: { from: 0.92, to: 1.1 },
+      scaleY: { from: 0.92, to: 1.08 },
+      duration: 720,
+      yoyo: true,
+      repeat: -1,
+    });
+
+    this.ghost = {
+      container,
+      aura,
+      body,
+      head,
+      iso: spawn,
+      route: [],
+      routeIndex: 1,
+      lastRouteAt: 0,
+      lastSanityHitAt: 0,
+      nextSpawnAt: GHOST_SPAWN_DELAY,
+      shouldRespawn: false,
+    };
+    container.setVisible(false);
   }
 
   private snapPlayerToRoad() {
@@ -524,7 +689,16 @@ export class CampusScene extends Phaser.Scene {
     this.fog.setDepth(100000);
   }
 
+  private createScreenEffects() {
+    const camera = this.cameras.main;
+    this.effectFlash = this.add.rectangle(0, 0, camera.width, camera.height, 0x7a0606, 0);
+    this.effectFlash.setOrigin(0);
+    this.effectFlash.setScrollFactor(0);
+    this.effectFlash.setDepth(100001);
+  }
+
   private movePlayer() {
+    if (this.storyOpen) return;
     if (!this.keys) return;
 
     const input = this.getInputVector();
@@ -541,6 +715,80 @@ export class CampusScene extends Phaser.Scene {
       this.playerBody.setFillStyle(0x2c3c45);
     } else {
       this.playerBody.setFillStyle(0x23313a);
+    }
+  }
+
+  private updateGhost(time: number) {
+    if (!this.ghost || this.dead) return;
+
+    if (this.storyOpen) {
+      this.ghost.container.setVisible(false);
+      this.ghost.nextSpawnAt = time + GHOST_SPAWN_DELAY;
+      this.ghost.shouldRespawn = true;
+      return;
+    }
+
+    if (time < this.ghost.nextSpawnAt) {
+      this.ghost.container.setVisible(false);
+      return;
+    }
+
+    if (this.ghost.shouldRespawn) {
+      this.ghost.iso = this.pickGhostSpawnPoint();
+      this.ghost.route = [];
+      this.ghost.routeIndex = 1;
+      this.ghost.shouldRespawn = false;
+    }
+
+    this.ghost.container.setVisible(true);
+    if (
+      !this.ghost.route.length ||
+      time - this.ghost.lastRouteAt > GHOST_ROUTE_REFRESH_INTERVAL ||
+      this.ghost.routeIndex >= this.ghost.route.length
+    ) {
+      this.ghost.route = this.findRoadRoute(this.ghost.iso, this.playerIso);
+      this.ghost.routeIndex = 1;
+      this.ghost.lastRouteAt = time;
+    }
+
+    let step = 0.075 * GHOST_SPEED;
+    while (step > 0 && this.ghost.routeIndex < this.ghost.route.length) {
+      const target = this.ghost.route[this.ghost.routeIndex];
+      const dx = target.x - this.ghost.iso.x;
+      const dy = target.y - this.ghost.iso.y;
+      const distance = Math.hypot(dx, dy);
+      if (distance <= step) {
+        this.ghost.iso = { ...target };
+        this.ghost.routeIndex += 1;
+        step -= distance;
+      } else {
+        this.ghost.iso = {
+          x: this.ghost.iso.x + (dx / distance) * step,
+          y: this.ghost.iso.y + (dy / distance) * step,
+        };
+        step = 0;
+      }
+    }
+
+    const p = this.toScreen(this.ghost.iso);
+    this.ghost.container.setPosition(p.x, p.y);
+    this.ghost.container.setDepth(p.y + 52);
+    const playerDistance = Math.hypot(this.ghost.iso.x - this.playerIso.x, this.ghost.iso.y - this.playerIso.y);
+
+    if (playerDistance <= GHOST_CAUGHT_RADIUS) {
+      this.dead = true;
+      this.ghost.container.setVisible(false);
+      this.cameras.main.shake(620, 0.018);
+      this.flashScreen(0.72, 700);
+      window.dispatchEvent(new CustomEvent("zju-horror-ghost-hit", { detail: { type: "death" } }));
+      return;
+    }
+
+    if (playerDistance <= GHOST_CLOSE_RADIUS && time - this.ghost.lastSanityHitAt > GHOST_SANITY_COOLDOWN) {
+      this.ghost.lastSanityHitAt = time;
+      this.cameras.main.shake(260, 0.006);
+      this.flashScreen(0.24, 320);
+      window.dispatchEvent(new CustomEvent("zju-horror-ghost-hit", { detail: { type: "sanity", amount: -5 } }));
     }
   }
 
@@ -569,14 +817,6 @@ export class CampusScene extends Phaser.Scene {
     const nearest = this.nearestRoadProjection(this.playerIso);
     if (nearest && nearest.distance <= ROAD_SNAP_RADIUS) {
       return this.resolveRailMovement(input, stepDistance, nearest);
-    }
-
-    if (this.isInPlaza(this.playerIso) && !this.isBlocked(this.playerIso)) {
-      const next = this.clampToMap({
-        x: this.playerIso.x + input.iso.x * stepDistance,
-        y: this.playerIso.y + input.iso.y * stepDistance,
-      });
-      return this.resolveWalkablePoint(next);
     }
 
     const next = this.clampToMap({
@@ -667,7 +907,6 @@ export class CampusScene extends Phaser.Scene {
 
   private resolveWalkablePoint(point: IsoPoint) {
     if (this.isOutOfMap(point)) return null;
-    if (this.isInPlaza(point) && !this.isBlocked(point)) return point;
 
     const nearest = this.nearestRoadPoint(point);
     if (nearest && nearest.distance <= ROAD_SNAP_RADIUS) {
@@ -791,6 +1030,129 @@ export class CampusScene extends Phaser.Scene {
     return { point: projection, distance: Math.hypot(point.x - projection.x, point.y - projection.y), t };
   }
 
+  private roadPointKey(point: IsoPoint) {
+    return `${point.x.toFixed(3)},${point.y.toFixed(3)}`;
+  }
+
+  private allRoadPoints() {
+    const points: IsoPoint[] = [];
+    const seen = new Set<string>();
+    campusRoads.forEach((road) => {
+      road.points.forEach((point) => {
+        const key = this.roadPointKey(point);
+        if (!seen.has(key)) {
+          seen.add(key);
+          points.push(point);
+        }
+      });
+    });
+    return points;
+  }
+
+  private pickGhostSpawnPoint() {
+    const points = this.allRoadPoints();
+    const farPoints = points.filter((point) => {
+      const straightDistance = Math.hypot(point.x - this.playerIso.x, point.y - this.playerIso.y);
+      if (straightDistance < GHOST_MIN_SPAWN_DISTANCE) return false;
+      return this.routeLength(this.findRoadRoute(point, this.playerIso)) >= GHOST_MIN_SPAWN_ROUTE_DISTANCE;
+    });
+    const fallbackPoints = points.filter((point) => Math.hypot(point.x - this.playerIso.x, point.y - this.playerIso.y) > GHOST_MIN_SPAWN_DISTANCE);
+    const source = farPoints.length ? farPoints : fallbackPoints.length ? fallbackPoints : points;
+    return { ...source[Math.floor(Math.random() * source.length)] };
+  }
+
+  private routeLength(route: IsoPoint[]) {
+    return route.reduce((total, point, index) => {
+      if (index === 0) return 0;
+      const previous = route[index - 1];
+      return total + Math.hypot(point.x - previous.x, point.y - previous.y);
+    }, 0);
+  }
+
+  private findRoadRoute(from: IsoPoint, to: IsoPoint) {
+    const startProjection = this.nearestRoadProjection(from);
+    const endProjection = this.nearestRoadProjection(to);
+    if (!startProjection || !endProjection) return [from, to];
+
+    const nodes: IsoPoint[] = [];
+    const nodeByKey = new Map<string, number>();
+    const edges = new Map<number, RouteEdge[]>();
+
+    const addNode = (point: IsoPoint) => {
+      const key = this.roadPointKey(point);
+      const existing = nodeByKey.get(key);
+      if (existing !== undefined) return existing;
+      const index = nodes.length;
+      nodes.push({ x: point.x, y: point.y });
+      nodeByKey.set(key, index);
+      edges.set(index, []);
+      return index;
+    };
+
+    const connect = (a: number, b: number) => {
+      const distance = Math.hypot(nodes[a].x - nodes[b].x, nodes[a].y - nodes[b].y);
+      edges.get(a)!.push({ to: b, distance });
+      edges.get(b)!.push({ to: a, distance });
+    };
+
+    campusRoads.forEach((road) => {
+      for (let index = 0; index < road.points.length - 1; index += 1) {
+        const a = addNode(road.points[index]);
+        const b = addNode(road.points[index + 1]);
+        connect(a, b);
+      }
+    });
+
+    const addProjectionNode = (projection: RoadProjection) => {
+      const projected = addNode(projection.point);
+      const start = addNode(projection.segmentStart);
+      const end = addNode(projection.segmentEnd);
+      connect(projected, start);
+      connect(projected, end);
+      return projected;
+    };
+
+    const start = addProjectionNode(startProjection);
+    const end = addProjectionNode(endProjection);
+    if (startProjection.roadId === endProjection.roadId && startProjection.segmentIndex === endProjection.segmentIndex) {
+      connect(start, end);
+    }
+
+    const distances = Array(nodes.length).fill(Number.POSITIVE_INFINITY);
+    const previous = Array<number | undefined>(nodes.length).fill(undefined);
+    const visited = new Set<number>();
+    distances[start] = 0;
+
+    while (visited.size < nodes.length) {
+      let current = -1;
+      let best = Number.POSITIVE_INFINITY;
+      for (let index = 0; index < nodes.length; index += 1) {
+        if (!visited.has(index) && distances[index] < best) {
+          best = distances[index];
+          current = index;
+        }
+      }
+      if (current === -1 || current === end) break;
+      visited.add(current);
+      edges.get(current)!.forEach((edge) => {
+        const next = distances[current] + edge.distance;
+        if (next < distances[edge.to]) {
+          distances[edge.to] = next;
+          previous[edge.to] = current;
+        }
+      });
+    }
+
+    const route: IsoPoint[] = [];
+    let cursor: number | undefined = end;
+    while (cursor !== undefined) {
+      route.push(nodes[cursor]);
+      cursor = previous[cursor];
+    }
+    route.reverse();
+    return route.length > 1 ? route : [startProjection.point, endProjection.point];
+  }
+
   private clampToMap(point: IsoPoint) {
     return {
       x: Phaser.Math.Clamp(point.x, 1.5, MAP_W - 2),
@@ -832,40 +1194,86 @@ export class CampusScene extends Phaser.Scene {
     this.player.setDepth(this.player.y + 48);
   }
 
-  private updateTaskRange(time: number) {
-    let nearest: CampusTask | undefined;
+  private updateHotspotRange(time: number) {
+    let nearest: StoryHotspot | undefined;
     let nearestDistance = Number.POSITIVE_INFINITY;
 
-    storyTasks.forEach((task) => {
-      if (this.completed.has(task.id)) return;
-      const distance = Math.hypot(this.playerIso.x - task.x, this.playerIso.y - task.y);
-      if (distance < nearestDistance) {
-        nearest = task;
-        nearestDistance = distance;
-      }
-    });
+    storyHotspots
+      .filter((hotspot) => hotspot.id === this.guideHotspotId)
+      .forEach((hotspot) => {
+        const distance = Math.hypot(this.playerIso.x - hotspot.x, this.playerIso.y - hotspot.y);
+        if (distance < nearestDistance) {
+          nearest = hotspot;
+          nearestDistance = distance;
+        }
+      });
 
-    this.activeTask = nearestDistance < 1.8 ? nearest : undefined;
-    if (this.activeTask) {
-      this.emitHud(this.activeTask.place, this.activeTask.prompt, "");
+    this.activeHotspot = nearest && nearestDistance < nearest.radius ? nearest : undefined;
+    if (this.activeHotspot) {
+      this.emitHud(this.activeHotspot.place, `已抵达：${this.activeHotspot.title}`, this.activeHotspot.id);
     } else {
       const place = this.findNearbyPlace();
-      this.emitHud(place, "", "");
+      this.emitHud(place, "");
     }
+    this.updateHotspotMarkerStates();
 
-    if (this.activeTask && this.keys?.e.isDown && time - this.lastInteract > 550) {
+    if (this.activeHotspot && time - this.lastInteract > 800 && !this.storyOpen) {
       this.lastInteract = time;
-      this.completed.add(this.activeTask.id);
-      this.emitHud(this.activeTask.place, "", this.activeTask.story);
-      if (this.completed.size === storyTasks.length) {
-        this.time.delayedCall(1100, () => {
-          this.emitHud(
-            "紫金港校区",
-            "",
-            "四个地点的记录拼在一起，地图上的道路开始重排。下一版可以在这里接入追逐、身份与多人任务。",
-          );
-        });
+      this.visitedHotspots.add(this.activeHotspot.id);
+      this.updateHotspotMarkerStates();
+      window.dispatchEvent(
+        new CustomEvent<{ hotspotId: HotspotId; sceneId: StorySceneId }>("zju-horror-open-story", {
+          detail: { hotspotId: this.activeHotspot.id, sceneId: this.activeHotspot.sceneId },
+        }),
+      );
+    }
+  }
+
+  private updateGuideLine(time: number) {
+    if (!this.guideLine) return;
+
+    const target = storyHotspots.find((hotspot) => hotspot.id === this.guideHotspotId);
+    this.guideLine.clear();
+    if (!target || this.storyOpen) return;
+
+    const route = this.findRoadRoute(this.playerIso, target);
+    const dash = 24;
+    const gap = 17;
+    const phase = (time * 0.075) % (dash + gap);
+    const camera = this.cameras.main;
+    const alpha = this.activeHotspot?.id === target.id ? 0.28 : 0.68;
+
+    this.guideLine.lineStyle(5, 0xe35c4d, alpha);
+    this.drawDashedRoute(route, dash, gap, phase);
+
+    const end = this.toScreen(target);
+    this.guideLine.fillStyle(0xe35c4d, 0.72);
+    this.guideLine.fillCircle(end.x, end.y - 18 + Math.sin(time * 0.006) * 3, 7);
+    this.guideLine.setDepth(camera.scrollY + end.y + 120);
+  }
+
+  private drawDashedRoute(route: IsoPoint[], dash: number, gap: number, phase: number) {
+    let carry = -phase;
+    for (let index = 0; index < route.length - 1; index += 1) {
+      const start = this.toScreen(route[index]);
+      const end = this.toScreen(route[index + 1]);
+      const dx = end.x - start.x;
+      const dy = end.y - start.y;
+      const distance = Math.hypot(dx, dy);
+      if (distance < 1) continue;
+      const ux = dx / distance;
+      const uy = dy / distance;
+
+      for (let offset = carry; offset < distance; offset += dash + gap) {
+        const from = Math.max(0, offset);
+        const to = Math.min(distance, offset + dash);
+        if (to <= 0) continue;
+        this.guideLine.beginPath();
+        this.guideLine.moveTo(start.x + ux * from, start.y + uy * from);
+        this.guideLine.lineTo(start.x + ux * to, start.y + uy * to);
+        this.guideLine.strokePath();
       }
+      carry = (carry + distance) % (dash + gap);
     }
   }
 
@@ -886,7 +1294,8 @@ export class CampusScene extends Phaser.Scene {
   private updateFog(time: number) {
     const camera = this.cameras.main;
     this.fog.clear();
-    this.fog.fillStyle(0x040707, 0.42);
+    const fogAlpha = this.sanity <= 25 ? 0.62 : this.sanity <= 45 ? 0.52 : 0.42;
+    this.fog.fillStyle(0x040707, fogAlpha);
     this.fog.fillRect(0, 0, camera.width, camera.height);
     for (let i = 0; i < 9; i += 1) {
       const x = ((time * 0.011 + i * 177) % (camera.width + 260)) - 130;
@@ -896,22 +1305,98 @@ export class CampusScene extends Phaser.Scene {
     }
   }
 
-  private emitHud(place: string, prompt: string, story: string) {
+  private emitHud(place: string, prompt: string, activeHotspotId?: HotspotId) {
     const event: GameHudEvent = {
       place,
       prompt,
-      story,
-      tasks: storyTasks.map((task) => ({
-        id: task.id,
-        title: task.title,
-        place: task.place,
-        done: this.completed.has(task.id),
-      })),
+      activeHotspotId,
     };
     const signature = JSON.stringify(event);
     if (signature === this.lastHudSignature) return;
     this.lastHudSignature = signature;
     window.dispatchEvent(new CustomEvent<GameHudEvent>("zju-horror-hud", { detail: event }));
+  }
+
+  private emitMiniMap(time: number) {
+    if (time - this.lastMiniMapAt < 80) return;
+    this.lastMiniMapAt = time;
+    const ghostVisible = Boolean(this.ghost && this.ghost.container.visible && !this.storyOpen && !this.dead);
+    window.dispatchEvent(
+      new CustomEvent<GameMiniMapEvent>("zju-horror-minimap", {
+        detail: {
+          player: { ...this.playerIso },
+          ghost: ghostVisible && this.ghost ? { ...this.ghost.iso } : undefined,
+          ghostVisible,
+        },
+      }),
+    );
+  }
+
+  private handleMapState = (event: Event) => {
+    if (!this.sceneReady) return;
+    const detail = (event as CustomEvent<MapStateEvent>).detail;
+    this.guideHotspotId = detail.guideHotspotId;
+    this.completedHotspots = new Set(detail.completedHotspotIds);
+    this.visitedHotspots = new Set(detail.visitedHotspotIds);
+    this.sanity = detail.sanity;
+    this.storyOpen = detail.activeStory;
+    this.updateHotspotMarkerStates();
+  };
+
+  private handleHorrorEffect = (event: Event) => {
+    if (!this.sceneReady) return;
+    const effect = (event as CustomEvent<{ effect?: HorrorEffect }>).detail.effect;
+    const camera = this.cameras?.main;
+    if (!effect || !camera) return;
+
+    if (effect === "jumpscare") {
+      camera.shake(460, 0.012);
+      this.flashScreen(0.42, 520);
+      return;
+    }
+
+    if (effect === "shake") {
+      camera.shake(320, 0.006);
+      this.flashScreen(0.18, 300);
+      return;
+    }
+
+    if (effect === "reveal" || effect === "ending") {
+      camera.flash(480, 210, 230, 196, false);
+    }
+  };
+
+  private flashScreen(alpha: number, duration: number) {
+    if (!this.sceneReady || !this.effectFlash) return;
+    const camera = this.cameras?.main;
+    if (!camera) return;
+    this.effectFlash.setSize(camera.width, camera.height);
+    this.effectFlash.setAlpha(alpha);
+    this.tweens.add({
+      targets: this.effectFlash,
+      alpha: 0,
+      duration,
+      ease: "Sine.easeOut",
+    });
+  }
+
+  private updateHotspotMarkerStates() {
+    if (!this.sceneReady) return;
+    this.hotspotMarkers.forEach((marker, id) => {
+      const isGuide = id === this.guideHotspotId;
+      const isDone = this.completedHotspots.has(id);
+      const isVisited = this.visitedHotspots.has(id);
+      const isActive = this.activeHotspot?.id === id;
+
+      const color = isDone ? 0x9edb73 : isGuide ? 0xd04438 : isVisited ? 0x8f7859 : 0x7d2424;
+      marker.beam.setFillStyle(color, isGuide ? 0.34 : isVisited ? 0.04 : 0.06);
+      marker.ring.setFillStyle(color, isActive || isGuide ? 0.64 : 0.14);
+      marker.core.setFillStyle(isDone ? 0xcff18b : isGuide ? 0xffd2a4 : 0xa64b43, isDone ? 0.95 : isGuide ? 1 : 0.72);
+      marker.label.setTint(isGuide ? 0xffe2c1 : isDone ? 0xdff6c2 : 0xc9b3a4);
+      marker.arrow.setVisible(isGuide && !isDone);
+      marker.container.setAlpha(isDone ? 0.72 : isGuide ? 1 : isVisited ? 0.48 : 0.44);
+      marker.container.setScale(isGuide ? 1.28 : isActive ? 1.1 : 0.96);
+    });
   }
 
   private shade(color: number, amount: number) {
