@@ -207,7 +207,7 @@ function App() {
   const activeScene = activeSceneId ? storyScenes[activeSceneId] : null;
   const targetHotspotId = getSceneHotspot(storyState.currentSceneId);
   const targetHotspot = getHotspotById(targetHotspotId);
-  const { playEffect, playChoice, playItem, resetAudio } = useGameAudio({
+  const { playEffect, playChoice, playHover, playItem, playGhostHit, resetAudio } = useGameAudio({
     sanity: storyState.stats.sanity,
     activeStory: Boolean(activeSceneId),
     ending: activeScene?.ending,
@@ -305,7 +305,7 @@ function App() {
         log: appendLog(previous.log, `抵达 ${getHotspotById(scene.locationId)?.place ?? scene.title}`),
       }));
       setActiveSceneId(sceneId);
-      playEffect(scene.effect ?? "whisper");
+      if (scene.effect && scene.effect !== "whisper") playEffect(scene.effect);
       window.dispatchEvent(new CustomEvent("zju-horror-effect", { detail: { effect: scene.effect ?? "whisper" } }));
     };
 
@@ -418,6 +418,7 @@ function App() {
           log: appendLog(previous.log, "红色鬼影贴到背后，你被拖进了地图外侧的黑暗。"),
         }));
         setActiveSceneId("death_sanity");
+        playGhostHit();
         triggerEffect("jumpscare");
         return;
       }
@@ -438,12 +439,13 @@ function App() {
         setNextObjectiveCue(null);
         setActiveSceneId("death_sanity");
       }
+      playGhostHit();
       triggerEffect("jumpscare");
     };
 
     window.addEventListener("zju-horror-ghost-hit", handleGhostHit);
     return () => window.removeEventListener("zju-horror-ghost-hit", handleGhostHit);
-  }, [triggerEffect]);
+  }, [playGhostHit, triggerEffect]);
 
   const useInventoryItem = useCallback(
     (itemId: ItemId) => {
@@ -686,7 +688,14 @@ function App() {
                   const delta = statDeltaText(choice.statChanges);
                   const required = choice.requireItem ? `需要：${itemCatalog[choice.requireItem].name}` : "";
                   return (
-                    <button className={locked ? "choiceButton locked" : "choiceButton"} disabled={locked} key={choice.id} onClick={() => choose(choice)}>
+                    <button
+                      className={locked ? "choiceButton locked" : "choiceButton"}
+                      disabled={locked}
+                      key={choice.id}
+                      onClick={() => choose(choice)}
+                      onFocus={() => !locked && playHover()}
+                      onMouseEnter={() => !locked && playHover()}
+                    >
                       <span>{choice.text}</span>
                       {(delta || required) && <em>{locked ? required : delta}</em>}
                     </button>

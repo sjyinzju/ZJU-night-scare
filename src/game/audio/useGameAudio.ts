@@ -33,13 +33,21 @@ export function useGameAudio({ sanity, activeStory, ending }: UseGameAudioOption
     audioManager.playChoice();
   }, []);
 
+  const playHover = useCallback(() => {
+    audioManager.playHover();
+  }, []);
+
   const playItem = useCallback(() => {
     audioManager.playItem();
+  }, []);
+
+  const playGhostHit = useCallback(() => {
+    audioManager.playGhostHit();
   }, []);
 
   const resetAudio = useCallback(() => {
     audioManager.reset();
   }, []);
 
-  return { playEffect, playChoice, playItem, resetAudio };
+  return { playEffect, playChoice, playHover, playItem, playGhostHit, resetAudio };
 }

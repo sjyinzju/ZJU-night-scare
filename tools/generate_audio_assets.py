@@ -132,8 +132,20 @@ def choice(t: float, _i: int, _total: int, _rng: random.Random) -> float:
     return math.exp(-t * 18.0) * (0.35 * tone(530.0, t) + 0.2 * tone(795.0, t))
 
 
+def hover(t: float, _i: int, _total: int, _rng: random.Random) -> float:
+    sweep = 360.0 + t * 740.0
+    return math.exp(-t * 24.0) * (0.2 * tone(sweep, t) + 0.1 * tone(sweep * 1.5, t, 0.3))
+
+
 def item(t: float, _i: int, _total: int, _rng: random.Random) -> float:
     return math.exp(-t * 6.0) * (0.28 * tone(330.0 + t * 90.0, t) + 0.14 * tone(660.0 + t * 120.0, t))
+
+
+def ghost_hit(t: float, _i: int, _total: int, rng: random.Random) -> float:
+    thud = math.exp(-t * 9.0) * tone(62.0 - min(t * 34.0, 28.0), t)
+    scrape = (rng.random() - 0.5) * math.exp(-t * 5.0)
+    sting = tone(510.0 - t * 260.0, t) * math.exp(-t * 13.0)
+    return 0.7 * thud + 0.24 * scrape + 0.18 * sting
 
 
 def death(t: float, _i: int, _total: int, rng: random.Random) -> float:
@@ -143,19 +155,13 @@ def death(t: float, _i: int, _total: int, rng: random.Random) -> float:
 
 
 ASSETS = {
-    "bgm/night-campus.wav": make_loop(28.0, night_renderer),
-    "bgm/low-sanity.wav": make_loop(18.0, low_sanity_renderer),
-    "bgm/ending.wav": make_loop(16.0, ending_renderer),
-    "ambient/wind.wav": make_loop(14.0, wind_renderer),
-    "ambient/electric-hum.wav": make_loop(10.0, electric_renderer),
-    "ambient/lake.wav": make_loop(12.0, lake_renderer),
-    "sfx/whisper.wav": sfx(1.15, whisper),
     "sfx/shake.wav": sfx(0.95, shake),
     "sfx/jumpscare.wav": sfx(1.05, jumpscare),
     "sfx/reveal.wav": sfx(1.4, reveal),
     "sfx/ending.wav": sfx(2.8, ending_stinger),
-    "sfx/choice.wav": sfx(0.18, choice),
+    "sfx/hover.wav": sfx(0.12, hover),
     "sfx/item.wav": sfx(0.42, item),
+    "sfx/ghost-hit.wav": sfx(0.68, ghost_hit),
     "sfx/death.wav": sfx(2.3, death),
 }
 
