@@ -31,6 +31,7 @@ import {
   type StorySceneId,
   type StoryState,
 } from "./game/storyData";
+import { useGameAudio } from "./game/audio/useGameAudio";
 
 const initialHud: GameHudEvent = {
   place: "",
@@ -188,56 +189,6 @@ function drawMiniMap(canvas: HTMLCanvasElement, snapshot: MiniMapSnapshot) {
   ctx.shadowBlur = 0;
 }
 
-function useHorrorAudio() {
-  const audioRef = useRef<AudioContext | null>(null);
-  const gainRef = useRef<GainNode | null>(null);
-
-  const ensureAudio = useCallback(() => {
-    if (audioRef.current) return audioRef.current;
-    const AudioCtor = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AudioCtor) return null;
-    const ctx = new AudioCtor();
-    const gain = ctx.createGain();
-    gain.gain.value = 0.018;
-    gain.connect(ctx.destination);
-
-    const osc = ctx.createOscillator();
-    osc.type = "sawtooth";
-    osc.frequency.value = 46;
-    osc.connect(gain);
-    osc.start();
-
-    audioRef.current = ctx;
-    gainRef.current = gain;
-    return ctx;
-  }, []);
-
-  const playEffect = useCallback(
-    (effect?: HorrorEffect) => {
-      if (!effect) return;
-      const ctx = ensureAudio();
-      if (!ctx) return;
-      const gain = ctx.createGain();
-      const osc = ctx.createOscillator();
-      const now = ctx.currentTime;
-
-      osc.type = effect === "jumpscare" ? "square" : "sine";
-      osc.frequency.setValueAtTime(effect === "jumpscare" ? 96 : effect === "reveal" ? 220 : 72, now);
-      osc.frequency.exponentialRampToValueAtTime(effect === "jumpscare" ? 38 : 108, now + 0.38);
-      gain.gain.setValueAtTime(0.001, now);
-      gain.gain.exponentialRampToValueAtTime(effect === "jumpscare" ? 0.13 : 0.055, now + 0.04);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.52);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(now);
-      osc.stop(now + 0.56);
-    },
-    [ensureAudio],
-  );
-
-  return { ensureAudio, playEffect };
-}
-
 function App() {
   const gameRef = useRef<Phaser.Game | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -251,22 +202,16 @@ function App() {
   const [screenEffect, setScreenEffect] = useState<HorrorEffect | "low-sanity" | "">("");
   const [nextObjectiveCue, setNextObjectiveCue] = useState<NextObjectiveCue | null>(null);
   const [gameSessionId, setGameSessionId] = useState(0);
-  const { ensureAudio, playEffect } = useHorrorAudio();
 
   const currentScene = storyScenes[storyState.currentSceneId];
   const activeScene = activeSceneId ? storyScenes[activeSceneId] : null;
   const targetHotspotId = getSceneHotspot(storyState.currentSceneId);
   const targetHotspot = getHotspotById(targetHotspotId);
-
-  useEffect(() => {
-    const unlockAudio = () => ensureAudio();
-    window.addEventListener("pointerdown", unlockAudio, { once: true });
-    window.addEventListener("keydown", unlockAudio, { once: true });
-    return () => {
-      window.removeEventListener("pointerdown", unlockAudio);
-      window.removeEventListener("keydown", unlockAudio);
-    };
-  }, [ensureAudio]);
+  const { playEffect, playChoice, playItem, resetAudio } = useGameAudio({
+    sanity: storyState.stats.sanity,
+    activeStory: Boolean(activeSceneId),
+    ending: activeScene?.ending,
+  });
 
   useEffect(() => {
     const canvas = particleCanvasRef.current;
@@ -457,8 +402,9 @@ function App() {
     setScreenEffect("");
     setNextObjectiveCue(null);
     miniMapSnapshotRef.current = { player: { x: 16.2, y: 30.6 }, ghostVisible: false };
+    resetAudio();
     setGameSessionId((value) => value + 1);
-  }, []);
+  }, [resetAudio]);
 
   useEffect(() => {
     const handleGhostHit = (event: Event) => {
@@ -502,6 +448,7 @@ function App() {
   const useInventoryItem = useCallback(
     (itemId: ItemId) => {
       if (itemId !== "medicine" && itemId !== "energy") return;
+      playItem();
       setStoryState((previous) => {
         if (!previous.inventory.includes(itemId)) return previous;
         const inventory = previous.inventory.filter((id) => id !== itemId);
@@ -517,12 +464,13 @@ function App() {
       });
       triggerEffect("reveal");
     },
-    [triggerEffect],
+    [playItem, triggerEffect],
   );
 
   const choose = useCallback(
     (choice: StoryChoice) => {
       if (!activeScene || isChoiceLocked(choice, storyState)) return;
+      playChoice();
 
       const currentLocation = activeScene.locationId;
       const applied = applyStatChanges(storyState, choice.statChanges);
@@ -583,7 +531,7 @@ function App() {
         setActiveSceneId(null);
       }
     },
-    [activeScene, storyState, triggerEffect],
+    [activeScene, playChoice, storyState, triggerEffect],
   );
 
   const usableItems = useMemo<Set<ItemId>>(
