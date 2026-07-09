@@ -356,7 +356,6 @@ button {
 
 .gameCanvas canvas {
   display: block;
-  filter: saturate(0.86) contrast(1.08) brightness(1.06) hue-rotate(165deg);
 }
 
 .particleCanvas,

@@ -63,7 +63,7 @@ export const campusBuildings: CampusBuilding[] = [
     w: 4.2,
     d: 0.7,
     h: 1.4,
-    color: 0x69756d,
+    color: 0x6e625a,
     roof: 0x27322f,
   },
   {
@@ -75,7 +75,7 @@ export const campusBuildings: CampusBuilding[] = [
     w: 5.8,
     d: 3.0,
     h: 3.0,
-    color: 0x6b7d74,
+    color: 0x6e625a,
     roof: 0x2b3835,
   },
   {
@@ -87,7 +87,7 @@ export const campusBuildings: CampusBuilding[] = [
     w: 4.3,
     d: 2.6,
     h: 3.0,
-    color: 0x718079,
+    color: 0x72665e,
     roof: 0x2d3a37,
   },
   {
@@ -99,7 +99,7 @@ export const campusBuildings: CampusBuilding[] = [
     w: 4.0,
     d: 2.3,
     h: 3.0,
-    color: 0x6f8178,
+    color: 0x70655d,
     roof: 0x2c3a37,
   },
   {
@@ -111,7 +111,7 @@ export const campusBuildings: CampusBuilding[] = [
     w: 2.9,
     d: 1.5,
     h: 3.0,
-    color: 0x74837b,
+    color: 0x736860,
     roof: 0x2f3d39,
   },
   {

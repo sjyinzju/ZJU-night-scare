@@ -359,9 +359,8 @@ export class CampusScene extends Phaser.Scene {
       const g = this.add.graphics();
       const points = water.points.map((p) => this.toScreen(p));
       const isQizhenLake = water.id === "qizhen-lake";
-      // These lake colors compensate for the global color grade so the final image reads as deep blue.
-      const waterFill = isQizhenLake ? 0x785c20 : water.color;
-      const waterStroke = isQizhenLake ? 0xa46810 : 0x1d5660;
+      const waterFill = isQizhenLake ? 0x143a4a : water.color;
+      const waterStroke = isQizhenLake ? 0x1e5a6a : 0x1d5660;
       g.fillStyle(this.shade(waterFill, -28), 0.94);
       g.lineStyle(4, waterStroke, isQizhenLake ? 0.56 : 0.42);
       g.beginPath();
@@ -384,7 +383,7 @@ export class CampusScene extends Phaser.Scene {
           p.y,
           82 + (i % 3) * 24,
           14 + (i % 2) * 6,
-          i % 4 === 0 ? 0xb87818 : 0x906824,
+          i % 4 === 0 ? 0x186888 : 0x105878,
           0.08,
         );
         ripple.setDepth(13);
@@ -410,7 +409,7 @@ export class CampusScene extends Phaser.Scene {
 
     warmPoints.forEach((point, index) => {
       const p = this.toScreen(point);
-      const glow = this.add.ellipse(p.x, p.y - 8, 92 - index * 12, 22, 0xd5ad68, 0.055);
+      const glow = this.add.ellipse(p.x, p.y - 8, 92 - index * 12, 22, 0x4898b8, 0.055);
       glow.setDepth(18);
       glow.setBlendMode(Phaser.BlendModes.ADD);
       this.tweens.add({
@@ -425,7 +424,7 @@ export class CampusScene extends Phaser.Scene {
     const reflectedBlocks = [
       { x: 23.8, y: 18.0, w: 62, h: 14, color: 0x789490 },
       { x: 21.3, y: 23.1, w: 88, h: 16, color: 0x536f70 },
-      { x: 17.0, y: 21.8, w: 50, h: 12, color: 0x8e6f54 },
+      { x: 17.0, y: 21.8, w: 50, h: 12, color: 0x4a6a78 },
     ];
 
     reflectedBlocks.forEach((item, index) => {
