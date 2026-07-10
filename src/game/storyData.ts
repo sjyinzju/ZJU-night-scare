@@ -1,4 +1,4 @@
-export type StatKey = "sanity" | "stamina" | "clues" | "trust";
+export type StatKey = "sanity" | "stamina" | "clues" | "trust" | "affection";
 
 export type ItemId = "talisman" | "flashlight" | "key_card" | "medicine" | "diary" | "photograph" | "cat_hair" | "energy";
 
@@ -30,10 +30,14 @@ export type StorySceneId =
   | "reveal_villain"
   | "final_plan"
   | "final_confrontation"
+  | "dorm_baiqiu_bond"
+  | "baiqiu_umbrella"
+  | "baiqiu_confession"
   | "ending_good"
   | "ending_sacrifice"
   | "ending_mercy"
   | "ending_escape"
+  | "ending_together"
   | "ending_nightmare"
   | "death_sanity";
 
@@ -44,6 +48,7 @@ export interface StoryStats {
   stamina: number;
   clues: number;
   trust: number;
+  affection: number;
 }
 
 export interface StoryState {
@@ -105,7 +110,7 @@ export const itemCatalog: Record<ItemId, { name: string; icon: string; desc: str
 
 export const initialStoryState: StoryState = {
   currentSceneId: "library_intro",
-  stats: { sanity: 100, stamina: 100, clues: 0, trust: 50 },
+  stats: { sanity: 100, stamina: 100, clues: 0, trust: 50, affection: 0 },
   inventory: [],
   flags: {},
   visitedHotspots: [],
@@ -320,6 +325,62 @@ export const storyScenes: Record<StorySceneId, StoryScene> = {
         gainItem: "talisman",
         effect: "whisper",
       },
+      {
+        id: "stay",
+        text: "先别急着答复，陪她在雨里的路灯下多站一会儿",
+        next: "dorm_baiqiu_bond",
+        statChanges: { sanity: 4, trust: 10, affection: 8 },
+        gainItem: "talisman",
+      },
+    ],
+  },
+  dorm_baiqiu_bond: {
+    id: "dorm_baiqiu_bond",
+    title: "路灯下的白秋",
+    chapter: "第二章",
+    locationId: "dorm",
+    body: [
+      "你没有立刻接过话，也没有急着离开。你只是把伞往她那边倾了倾，让雨从自己这一侧的肩头滑下去。白秋愣了一下，像是很久没有人愿意为她多站这半步。",
+      "她低声说，从小到大，家里人告诉她的第一件事不是如何长大，而是如何不被听见。那首歌像一条看不见的线，缠在她身上很多年，谁靠近她，线就会缠向谁。所以她学会了先一步把人推开。",
+      "路灯忽明忽暗，把她的影子和你的影子叠在一起，又慢慢分开。你发现她说这些时，指尖一直在轻轻发抖，却始终没有往后退。",
+      "你说：把我算进那根线里也没关系。她抬起头，眼睛里有雨，也有一点你从没在她脸上见过的、近乎慌乱的光。她说，别轻易说这种话，紫金港的夜里，承诺是要还的。",
+      "可她还是没有把伞推开。你们就这样在楼下站了很久，直到雨声把远处那首歌完全盖了过去。那一刻你忽然明白，你想守护的已经不只是一个证人，而是这个总把自己藏在符纸后面的女孩。",
+    ],
+    choices: [
+      {
+        id: "umbrella",
+        text: "把外套披到她肩上，送她走完这段夜路",
+        next: "baiqiu_umbrella",
+        statChanges: { sanity: 3, trust: 8, affection: 10, stamina: -2 },
+      },
+      {
+        id: "restraint",
+        text: "把话咽回去，先回宿舍整理线索",
+        next: "dorm_forum",
+        statChanges: { sanity: 2, trust: 6, affection: 4, clues: 2 },
+      },
+    ],
+  },
+  baiqiu_umbrella: {
+    id: "baiqiu_umbrella",
+    title: "共一把伞",
+    chapter: "第二章",
+    locationId: "dorm",
+    body: [
+      "你脱下外套披到她肩上。外套还带着体温，她的身体几不可察地僵了一瞬，随即安静下来，像一株终于等到屋檐的植物。",
+      "两个人挤在一把伞下，脚步不得不放慢。雨水在伞面上敲出细密的节奏，奇怪的是，那首一直缠着你们的歌声，在这节奏里第一次显得很远。白秋说，从来没有人陪她走过这条路，往年这个时候，她都是一个人抱着符纸，从楼下一直走到湖边，再一个人走回来。",
+      "走到宿舍拐角，她忽然停下，把黄符又往你手里塞了塞，说：如果哪天我不见了，别去湖边找我，也别去小剧场。你握住她冰凉的手，说你不会让那一天来。她没有反驳，只是把脸别过去，肩膀轻轻抖了一下。",
+      "分别前，她第一次主动说了句和调查无关的话：谢谢你，今天没有把我当成传说的一部分。她说这句话时，路灯正好熄灭，黑暗里你听见她很轻地笑了一下，那声音干净得不像属于这个夜晚。",
+      "你站在原地看着她的窗户亮起，又很快熄灭。掌心里的黄符不再发烫，反而透出一点微弱的暖，像是有人隔着很远，仍愿意为你留一盏灯。",
+    ],
+    choices: [
+      {
+        id: "vow",
+        text: "在心里认下这个约定，回宿舍继续追查真相",
+        next: "dorm_forum",
+        statChanges: { sanity: 4, trust: 10, affection: 12 },
+        setFlag: "baiqiuBond",
+      },
     ],
   },
   dorm_forum: {
@@ -350,6 +411,13 @@ export const storyScenes: Record<StorySceneId, StoryScene> = {
         next: "find_yicheng",
         statChanges: { sanity: 8, stamina: 12 },
         gainItem: "energy",
+      },
+      {
+        id: "message-baiqiu",
+        text: "给白秋发条消息，只说一句“我在查，你别怕”",
+        next: "find_yicheng",
+        requireFlag: "baiqiuBond",
+        statChanges: { sanity: 5, trust: 6, affection: 8 },
       },
     ],
   },
@@ -430,6 +498,14 @@ export const storyScenes: Record<StorySceneId, StoryScene> = {
         text: "带上药，立刻去医学院",
         next: "medical_entry",
         statChanges: { stamina: -4, trust: 8 },
+        gainItem: "medicine",
+      },
+      {
+        id: "ask-baiqiu",
+        text: "向杜学民打听：有没有办法让白秋彻底脱离那根线",
+        next: "medical_entry",
+        requireFlag: "baiqiuBond",
+        statChanges: { sanity: -2, clues: 6, affection: 10, trust: 4 },
         gainItem: "medicine",
       },
     ],
@@ -650,6 +726,36 @@ export const storyScenes: Record<StorySceneId, StoryScene> = {
         statChanges: { sanity: -4, stamina: -8, trust: 10 },
         effect: "shake",
       },
+      {
+        id: "call-her-name",
+        text: "越过陈九，先喊出白秋的名字",
+        next: "baiqiu_confession",
+        requireFlag: "baiqiuBond",
+        statChanges: { sanity: 3, trust: 8, affection: 12 },
+      },
+    ],
+  },
+  baiqiu_confession: {
+    id: "baiqiu_confession",
+    title: "绳结前的坦白",
+    chapter: "终章",
+    locationId: "theater",
+    body: [
+      "你喊出她的名字，声音在空荡的剧场里撞出回声。陈九握着刀的手停了一下——他没料到，被绑在椅子上的人还能被一个名字唤回来。",
+      "白秋抬起头。灯光下她的脸很白，眼角有干掉的泪痕，可她看见你的瞬间，眼神却奇异地稳了下来。她说：我叫你别来湖边，也别来这里。你怎么就是不听。",
+      "你说，因为那天雨里的约定还没还。她怔住了，随即像是用尽全身力气，把这些年一直藏着的话一口气说了出来：她说她早就知道自己会被带来这里，从小家里人就在等这一天。她一直不敢和任何人走得太近，因为凡是被那根线缠上的人，最后都会替她受难。",
+      "她说：可我遇见你之后，第一次开始怕死。不是怕那首歌，是怕以后再也没有人在雨里替我倾一倾伞。她说这话时没有哭，反而笑了，那笑比哭更让你心口发紧。",
+      "陈九冷冷开口，说这份感情正好，恐惧和不舍都是最好的祭品。可你握紧口袋里那枚早已回暖的黄符，忽然明白：他要的是让白秋孤立无援地害怕，而此刻她身后站着的，不再只是传说，还有一个愿意和她一起把线扯断的人。",
+      "白秋看着你，极轻地说了一句只有你们两人听得见的话：如果能出去，这次换我陪你走那条夜路。",
+    ],
+    choices: [
+      {
+        id: "to-confront",
+        text: "把她的手和你的攥在一起，转身面对陈九",
+        next: "final_confrontation",
+        statChanges: { sanity: 5, trust: 12, affection: 15 },
+        effect: "reveal",
+      },
     ],
   },
   final_confrontation: {
@@ -696,7 +802,30 @@ export const storyScenes: Record<StorySceneId, StoryScene> = {
         next: "ending_escape",
         statChanges: { sanity: 3, trust: 10, stamina: -4 },
       },
+      {
+        id: "together",
+        text: "和白秋十指相扣，一起扯断缠在她身上的绳",
+        next: "ending_together",
+        requireFlag: "baiqiuBond",
+        statChanges: { sanity: 6, trust: 15, affection: 20 },
+        effect: "ending",
+      },
     ],
+  },
+  ending_together: {
+    id: "ending_together",
+    title: "结局六：共赴晨光",
+    chapter: "结局",
+    locationId: "theater",
+    body: [
+      "你没有先去够那张照片，也没有先去切电源。你走到白秋身后，握住她被绳子勒红的手，然后当着陈九的面，把那圈红绳一寸一寸地扯松。绳子在你们两个人的手里失去了力量——它本靠一个人的孤立与恐惧收紧，却收不住两颗一起跳的心。",
+      "陈九疯了一样想再唱起那首歌，可白秋第一次没有躲。她站起身，反手把你护在身侧，用她自己的声音，轻轻覆盖过那段旋律。歌声散了，剧场的幕布无风自落，露出后台那些早被拆穿的扩音器与铁绳。守护了这座校园半个世纪的苏婉，仿佛终于等到有人替她把结解开，湖底的波纹第一次彻底平息。",
+      "天快亮时，你们一起走出小剧场。紫金港的路灯陆续熄灭，取而代之的是启真湖上第一层薄薄的晨光。白秋仍然握着你的手，没有松开，她说这是她记事以来，第一个不必回头的清晨。",
+      "后来那枚黄符被你们一起埋在了湖边的树下。白秋说，它护了她很多年，现在该轮到它安心。你问她还怕不怕那首歌，她想了想，说：怕，但只要旁边有人一起怕，就不算什么了。",
+      "很多年以后，也会有新生在旧论坛里翻到那篇《浙大夜惊魂》。帖子最末多了一条没有署名的回复，时间不再是 23:47，而是清晨六点：如果你也听见了歌声，别一个人扛着——找一个愿意在雨里为你倾一倾伞的人，然后，一起走到天亮。",
+    ],
+    choices: [],
+    ending: "escape",
   },
   ending_good: {
     id: "ending_good",

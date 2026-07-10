@@ -7,6 +7,7 @@ import {
   CircleDot,
   Footprints,
   HandHeart,
+  Heart,
   HeartPulse,
   MapPin,
   RadioTower,
@@ -14,6 +15,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { CampusScene, type GameHudEvent, type GameMiniMapEvent } from "./game/CampusScene";
+import InteriorOverlay from "./game/interior3d/InteriorOverlay";
 import { campusBuildings, campusRoads, type IsoPoint } from "./game/mapData";
 import {
   clampStat,
@@ -62,17 +64,103 @@ type NextObjectiveCue = {
   objective: string;
 };
 
+/** 可进入建筑的最小数据契约，与 InteriorOverlay 的 props 对齐。 */
+type EnterableBuilding = { id: string; name: string; zone?: string };
+
+/** 同步判定是否为触摸/移动设备:窄屏 + 触摸能力任一满足即视为移动端。 */
+function detectMobile(): boolean {
+  if (typeof window === "undefined") return false;
+  const coarse = window.matchMedia("(pointer: coarse)").matches;
+  const narrow = window.matchMedia("(max-width: 820px)").matches;
+  const touch = (navigator.maxTouchPoints ?? 0) > 0 || "ontouchstart" in window;
+  return (coarse && touch) || (narrow && touch);
+}
+
+/** isMobile hook。首帧即同步取真值(供 Phaser 创建时决定画质),之后随视口变化更新。 */
+function useIsMobile(): boolean {
+  const [isMobile, setIsMobile] = useState(detectMobile);
+  useEffect(() => {
+    const detect = () => setIsMobile(detectMobile());
+    const mq = window.matchMedia("(max-width: 820px)");
+    mq.addEventListener?.("change", detect);
+    window.addEventListener("resize", detect);
+    return () => {
+      mq.removeEventListener?.("change", detect);
+      window.removeEventListener("resize", detect);
+    };
+  }, []);
+  return isMobile;
+}
+
+const JOY_RADIUS = 46;
+
+/** 外层地图的虚拟摇杆。onMove 传出屏幕坐标向量(x 右正、y 下正)，范围约 [-1,1]。 */
+function MapJoystick({ onMove }: { onMove: (x: number, y: number) => void }): React.ReactElement {
+  const knobRef = useRef<HTMLDivElement>(null);
+  const pointerId = useRef<number | null>(null);
+  const origin = useRef({ x: 0, y: 0 });
+
+  const onDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    pointerId.current = e.pointerId;
+    const rect = e.currentTarget.getBoundingClientRect();
+    origin.current = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }, []);
+
+  const onMovePointer = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (pointerId.current !== e.pointerId) return;
+      e.preventDefault();
+      let dx = e.clientX - origin.current.x;
+      let dy = e.clientY - origin.current.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist > JOY_RADIUS) {
+        dx = (dx / dist) * JOY_RADIUS;
+        dy = (dy / dist) * JOY_RADIUS;
+      }
+      if (knobRef.current) knobRef.current.style.transform = `translate(${dx}px, ${dy}px)`;
+      onMove(dx / JOY_RADIUS, dy / JOY_RADIUS);
+    },
+    [onMove],
+  );
+
+  const onUp = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (pointerId.current !== e.pointerId) return;
+      pointerId.current = null;
+      if (knobRef.current) knobRef.current.style.transform = "translate(0px, 0px)";
+      onMove(0, 0);
+    },
+    [onMove],
+  );
+
+  return (
+    <div
+      className="touchJoystick"
+      onPointerDown={onDown}
+      onPointerMove={onMovePointer}
+      onPointerUp={onUp}
+      onPointerCancel={onUp}
+      aria-label="移动摇杆"
+    >
+      <div ref={knobRef} className="touchJoyKnob" />
+    </div>
+  );
+}
+
 const statMeta: Record<StatKey, { label: string; icon: typeof Brain; dangerBelow?: number }> = {
   sanity: { label: "理智", icon: Brain, dangerBelow: 30 },
   stamina: { label: "体力", icon: Footprints, dangerBelow: 25 },
   clues: { label: "线索", icon: Search },
   trust: { label: "信任", icon: HandHeart },
+  affection: { label: "好感", icon: Heart },
 };
 
 function statDeltaText(changes?: Partial<Record<StatKey, number>>) {
   if (!changes) return "";
   return (Object.entries(changes) as Array<[StatKey, number]>)
-    .filter(([, value]) => value !== 0)
+    .filter(([key, value]) => value !== 0 && statMeta[key])
     .map(([key, value]) => `${statMeta[key].label}${value > 0 ? "+" : ""}${value}`)
     .join(" / ");
 }
@@ -169,6 +257,10 @@ function App() {
   const [nextObjectiveCue, setNextObjectiveCue] = useState<NextObjectiveCue | null>(null);
   const [gameSessionId, setGameSessionId] = useState(0);
   const [gameStarted, setGameStarted] = useState(false);
+  // ── 移动端 / 内景 ──
+  const isMobile = useIsMobile();
+  const [nearBuilding, setNearBuilding] = useState<EnterableBuilding | null>(null);
+  const [interiorBuilding, setInteriorBuilding] = useState<EnterableBuilding | null>(null);
 
   // ── Zustand hook 订阅 ──
   const zHudPlace = useGameStore((s) => s.hudPlace);
@@ -214,7 +306,7 @@ function App() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const particles = Array.from({ length: 90 }, (_, index) => ({
+    const particles = Array.from({ length: isMobile ? 42 : 90 }, (_, index) => ({
       x: Math.random(),
       y: Math.random(),
       speed: 0.00016 + (index % 7) * 0.000035,
@@ -322,7 +414,8 @@ function App() {
         autoCenter: Phaser.Scale.CENTER_BOTH,
       },
       render: {
-        antialias: true,
+        // 移动端关抗锯齿，减轻高 DPI 手机的填充率压力，换取流畅度。
+        antialias: !isMobile,
         pixelArt: false,
       },
     });
@@ -364,6 +457,56 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [nextObjectiveCue]);
 
+  // ── 进入建筑触发链：监听 CampusScene 派发的靠近 / 进入事件 ──
+  useEffect(() => {
+    const onNear = (event: Event) => {
+      setNearBuilding((event as CustomEvent<{ building: EnterableBuilding | null }>).detail.building);
+    };
+    const onEnter = (event: Event) => {
+      setInteriorBuilding((event as CustomEvent<{ building: EnterableBuilding }>).detail.building);
+    };
+    window.addEventListener("zju-horror-near-building", onNear);
+    window.addEventListener("zju-horror-enter-building", onEnter);
+    return () => {
+      window.removeEventListener("zju-horror-near-building", onNear);
+      window.removeEventListener("zju-horror-enter-building", onEnter);
+    };
+  }, []);
+
+  // 内景开合时通知 CampusScene 冻结/恢复外层移动。
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent("zju-horror-interior-state", { detail: { open: Boolean(interiorBuilding) } }),
+    );
+  }, [interiorBuilding]);
+
+  // 内景里拾取的道具加入剧情物品栏(去重),对后续文字剧情选项有用。
+  useEffect(() => {
+    const onPickup = (event: Event) => {
+      const { itemId, name } = (event as CustomEvent<{ itemId: string; name: string }>).detail;
+      setStoryState((prev) => {
+        if (prev.inventory.includes(itemId as ItemId)) return prev;
+        return {
+          ...prev,
+          inventory: [...prev.inventory, itemId as ItemId],
+          log: appendStoryLog(prev.log, `在建筑内拾取了「${name}」。`),
+        };
+      });
+    };
+    window.addEventListener("zju-horror-pickup", onPickup);
+    return () => window.removeEventListener("zju-horror-pickup", onPickup);
+  }, []);
+
+  // 虚拟摇杆把移动向量注入到 Phaser 的 CampusScene。
+  const handleJoystick = useCallback((x: number, y: number) => {
+    const scene = gameRef.current?.scene?.getScene("CampusScene") as CampusScene | undefined;
+    scene?.setTouchInput?.(x, y);
+  }, []);
+
+  const enterNearBuilding = useCallback(() => {
+    setInteriorBuilding((current) => current ?? nearBuilding);
+  }, [nearBuilding]);
+
   const triggerEffect = useCallback(
     (effect?: HorrorEffect, context?: JumpscareContext) => {
       if (!effect) return;
@@ -392,6 +535,8 @@ function App() {
     setHud(initialHud);
     setScreenEffect("");
     setNextObjectiveCue(null);
+    setNearBuilding(null);
+    setInteriorBuilding(null);
     miniMapSnapshotRef.current = { player: { x: 16.2, y: 30.6 }, ghostVisible: false };
     resetAudio();
     setGameSessionId((value) => value + 1);
@@ -499,7 +644,9 @@ function App() {
         </header>
 
         <section className="railSection statusGrid" aria-label="状态">
-          {(Object.entries(storyState.stats) as Array<[StatKey, number]>).map(([key, value]) => {
+          {(Object.entries(storyState.stats) as Array<[StatKey, number]>)
+            .filter(([key]) => statMeta[key])
+            .map(([key, value]) => {
             const meta = statMeta[key];
             const Icon = meta.icon;
             const danger = meta.dangerBelow !== undefined && value <= meta.dangerBelow;
@@ -613,6 +760,16 @@ function App() {
           </div>
         )}
 
+        {gameStarted && nearBuilding && !activeScene && !interiorBuilding && (
+          <button className="enterBuildingBtn" onClick={enterNearBuilding} type="button">
+            <span>进入 {nearBuilding.name}</span>
+            <em>{isMobile ? "点击进入内部" : "按 E 或点击进入"}</em>
+          </button>
+        )}
+
+        {/* 摇杆对所有设备可见:桌面可用鼠标拖动移动(键盘焦点/占用异常时的兜底),移动端为主控。 */}
+        {gameStarted && !activeScene && !interiorBuilding && <MapJoystick onMove={handleJoystick} />}
+
         {activeScene && (
           <section className={activeScene.ending ? "storyModal ending" : "storyModal"} aria-live="polite">
             <div className="storyKicker">
@@ -671,6 +828,14 @@ function App() {
             <p className="titleMeta">二维地图推理 · 多分支剧情 · 道具系统 · 理智管理</p>
           </div>
         </section>
+      )}
+
+      {interiorBuilding && (
+        <InteriorOverlay
+          building={interiorBuilding}
+          isMobile={isMobile}
+          onExit={() => setInteriorBuilding(null)}
+        />
       )}
     </main>
   );

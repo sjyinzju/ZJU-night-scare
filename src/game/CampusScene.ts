@@ -33,6 +33,8 @@ const MAP_D = 34;
 const PLAYER_SPEED = 4.2;
 const ROAD_SNAP_RADIUS = 0.72;
 const JUNCTION_RADIUS = 1.5;
+// 玩家中心距离可进入建筑中心小于此值时，判定为"可进入"。
+const ENTER_RADIUS = 2.6;
 const WORLD_BOUNDS = { x: -1200, y: 0, width: 4300, height: 2200 };
 const GHOST_SPEED = 2.15;
 const GHOST_CHASE_SPEED = 3.2;
@@ -93,6 +95,13 @@ type MapStateEvent = {
   visitedHotspotIds: HotspotId[];
   sanity: number;
   activeStory: boolean;
+};
+
+type PickupSprite = {
+  iso: IsoPoint;
+  itemId: string;
+  container: Phaser.GameObjects.Container;
+  bornAt: number;
 };
 
 type GhostState = {
@@ -181,6 +190,23 @@ export class CampusScene extends Phaser.Scene {
   private tilemapLayer?: Phaser.Tilemaps.TilemapLayer;
   private tilemapFrame = 0;
   private nextTilemapFrameAt = 0;
+  // ── 移动端虚拟摇杆输入（由 React 通过事件写入的屏幕方向向量） ──
+  private virtualMove: IsoPoint = { x: 0, y: 0 };
+  // ── 随机掉落道具 ──
+  private pickups: PickupSprite[] = [];
+  private nextPickupSpawnAt = 0;
+  // ── 可进入建筑（第一人称 3D）检测 ──
+  private nearBuildingId: string | null = null;
+  // 触摸摇杆注入的移动向量（屏幕坐标：x 右正，y 下正），无触摸时为 0。
+  private touchInput = { x: 0, y: 0 };
+  // 进入内景后冻结外层地图移动与进入检测。
+  private frozen = false;
+
+  /** 供 React 层的虚拟摇杆注入移动向量。x：屏幕右正；y：屏幕下正。范围约 [-1,1]。 */
+  setTouchInput(x: number, y: number) {
+    this.touchInput.x = x;
+    this.touchInput.y = y;
+  }
 
   constructor() {
     super("CampusScene");
@@ -235,10 +261,12 @@ export class CampusScene extends Phaser.Scene {
 
     window.addEventListener("zju-horror-map-state", this.handleMapState as EventListener);
     window.addEventListener("zju-horror-effect", this.handleHorrorEffect as EventListener);
+    window.addEventListener("zju-horror-interior-state", this.handleInteriorState as EventListener);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.sceneReady = false;
       window.removeEventListener("zju-horror-map-state", this.handleMapState as EventListener);
       window.removeEventListener("zju-horror-effect", this.handleHorrorEffect as EventListener);
+      window.removeEventListener("zju-horror-interior-state", this.handleInteriorState as EventListener);
     });
 
     this.emitHud("", "沿红色虚线路线前进，绕开红鬼。");
@@ -253,6 +281,7 @@ export class CampusScene extends Phaser.Scene {
     this.updateVisualPipelines(time);
     this.updateTilemapLayer(time);
     this.updateHotspotRange(time);
+    this.updateEnterableProximity();
     this.updateGuideLine(time);
     this.updateFog(time);
     this.emitMiniMap(time);
@@ -1102,10 +1131,118 @@ export class CampusScene extends Phaser.Scene {
     makeLabel(south, "南 S", 90000);
   }
 
+  /** 绘制单个长方体块（等距盒），供组合体块与单盒共用。 */
+  private drawPrismVolume(
+    g: Phaser.GameObjects.Graphics,
+    bx: number,
+    by: number,
+    bw: number,
+    bd: number,
+    bh: number,
+    bodyColor: number,
+    roofColor: number,
+    withShadow: boolean,
+  ) {
+    const a = this.toScreen({ x: bx, y: by });
+    const east = this.toScreen({ x: bx + bw, y: by });
+    const south = this.toScreen({ x: bx, y: by + bd });
+    const far = this.toScreen({ x: bx + bw, y: by + bd });
+    const height = bh * 28;
+    const topA = { x: a.x, y: a.y - height };
+    const topEast = { x: east.x, y: east.y - height };
+    const topSouth = { x: south.x, y: south.y - height };
+    const topFar = { x: far.x, y: far.y - height };
+
+    if (withShadow) {
+      g.fillStyle(0x000000, 0.32);
+      g.fillPoints(
+        [
+          { x: south.x - 14, y: south.y + 12 },
+          { x: far.x + 24, y: far.y + 10 },
+          { x: east.x + 18, y: east.y + 30 },
+          { x: a.x - 18, y: a.y + 34 },
+        ],
+        true,
+      );
+    }
+
+    // 南面（较暗）
+    g.fillStyle(this.shade(bodyColor, -58), 1);
+    g.beginPath();
+    g.moveTo(south.x, south.y);
+    g.lineTo(far.x, far.y);
+    g.lineTo(topFar.x, topFar.y);
+    g.lineTo(topSouth.x, topSouth.y);
+    g.closePath();
+    g.fillPath();
+
+    // 东面
+    g.fillStyle(this.shade(bodyColor, -36), 1);
+    g.beginPath();
+    g.moveTo(east.x, east.y);
+    g.lineTo(far.x, far.y);
+    g.lineTo(topFar.x, topFar.y);
+    g.lineTo(topEast.x, topEast.y);
+    g.closePath();
+    g.fillPath();
+
+    // 屋顶
+    g.fillStyle(this.shade(roofColor, -22), 1);
+    g.lineStyle(2, 0xa9c2b8, 0.11);
+    g.beginPath();
+    g.moveTo(topA.x, topA.y);
+    g.lineTo(topEast.x, topEast.y);
+    g.lineTo(topFar.x, topFar.y);
+    g.lineTo(topSouth.x, topSouth.y);
+    g.closePath();
+    g.fillPath();
+    g.strokePath();
+
+    // 南面窗格
+    for (let i = 0; i < Math.max(1, Math.floor(bw)); i += 1) {
+      const wp = this.toScreen({ x: bx + i + 0.7, y: by + bd });
+      const lit = (i * 3 + Math.round(bh)) % 3 === 0;
+      const windowColor = lit ? 0xbdded7 : 0xb88758;
+      g.fillStyle(windowColor, lit ? 0.19 : 0.045);
+      g.fillRect(wp.x - 9, wp.y - height + 34, 12, 18);
+      if (height > 70) {
+        g.fillStyle(0xe4c07d, i % 2 === 0 ? 0.13 : 0.035);
+        g.fillRect(wp.x - 9, wp.y - height + 64, 12, 18);
+      }
+    }
+  }
+
+  /** 组合体块渲染：按由后到前的顺序叠画多个长方体，拼出 L 形 / 阶梯塔 / 双塔等外形。 */
+  private drawMassing(g: Phaser.GameObjects.Graphics, b: CampusBuilding, bodyColor: number, roofColor: number) {
+    const masses = [...(b.massing ?? [])].sort((m1, m2) => {
+      const key1 = m1.dx + m1.dy;
+      const key2 = m2.dx + m2.dy;
+      if (Math.abs(key1 - key2) > 0.001) return key1 - key2;
+      return m1.h - m2.h;
+    });
+    masses.forEach((m, index) => {
+      this.drawPrismVolume(
+        g,
+        b.x + m.dx,
+        b.y + m.dy,
+        m.w,
+        m.d,
+        m.h,
+        this.shade(bodyColor, m.bodyShade ?? 0),
+        this.shade(roofColor, m.roofShade ?? 0),
+        index === 0,
+      );
+    });
+  }
+
   private drawIsoPrism(g: Phaser.GameObjects.Graphics, b: CampusBuilding) {
     const theme = buildingThemes[b.id];
     const bodyColor = theme?.body ?? b.color;
     const roofColor = theme?.roof ?? b.roof;
+    if (b.massing && b.massing.length) {
+      this.drawMassing(g, b, bodyColor, roofColor);
+      return;
+    }
     const a = this.toScreen({ x: b.x, y: b.y });
     const east = this.toScreen({ x: b.x + b.w, y: b.y });
     const south = this.toScreen({ x: b.x, y: b.y + b.d });
@@ -1610,7 +1747,7 @@ export class CampusScene extends Phaser.Scene {
   }
 
   private movePlayer() {
-    if (this.storyOpen || this.dead) return;
+    if (this.storyOpen || this.dead || this.frozen) return;
     if (!this.keys) return;
 
     const input = this.getInputVector();
@@ -1834,6 +1971,14 @@ export class CampusScene extends Phaser.Scene {
     if (this.keys.right.isDown || this.keys.d.isDown) screenX += 1;
     if (this.keys.up.isDown || this.keys.w.isDown) screenY -= 1;
     if (this.keys.down.isDown || this.keys.s.isDown) screenY += 1;
+
+    // 键盘无输入时，用触摸摇杆注入的向量（移动端）。
+    if (screenX === 0 && screenY === 0) {
+      if (Math.hypot(this.touchInput.x, this.touchInput.y) > 0.18) {
+        screenX = this.touchInput.x;
+        screenY = this.touchInput.y;
+      }
+    }
     if (screenX === 0 && screenY === 0) return null;
 
     const screenLength = Math.hypot(screenX, screenY);
@@ -2321,7 +2466,9 @@ export class CampusScene extends Phaser.Scene {
       audioManager.updateGhostBreath(999);
       return;
     }
-    if (this.storyOpen) {
+    // 剧情弹窗打开、或玩家进入建筑内景(frozen)时：玩家在"室内"，鬼不应继续追杀。
+    // 隐藏鬼、安排重生延迟，退出后鬼在别处重新出现（不会贴脸秒杀）。
+    if (this.storyOpen || this.frozen) {
       this.ghost.container.setVisible(false);
       this.ghost.nextSpawnAt = time + GHOST_SPAWN_DELAY;
       this.ghost.shouldRespawn = true;
@@ -2521,6 +2668,55 @@ export class CampusScene extends Phaser.Scene {
     return label;
   }
 
+  /**
+   * 检测玩家是否靠近可进入建筑。靠近状态变化时向 window 派发 `zju-horror-near-building`
+   * （detail.building 为 {id,name,zone} 或 null），供 React 层显示"进入建筑"按钮。
+   * 桌面端按 E 键即派发 `zju-horror-enter-building` 直接进入内景。
+   */
+  private updateEnterableProximity() {
+    // 让位于原有剧情系统：进入内景 / 剧情弹窗 / 死亡 / 正处于某个剧情热点范围内
+    // （activeHotspot，会自动触发 2D 剧情）时，不显示"进入建筑"按钮，避免两套交互在同一
+    // 近距离时刻抢占。3D 进入只在非剧情触发时刻出现（重访已探索建筑、非当前目标建筑）。
+    if (this.frozen || this.storyOpen || this.dead || this.activeHotspot) {
+      if (this.nearBuildingId !== null) {
+        this.nearBuildingId = null;
+        window.dispatchEvent(new CustomEvent("zju-horror-near-building", { detail: { building: null } }));
+      }
+      return;
+    }
+
+    let near: CampusBuilding | null = null;
+    let best = ENTER_RADIUS;
+    for (const building of campusBuildings) {
+      if (!building.enterable) continue;
+      const center = { x: building.x + building.w / 2, y: building.y + building.d / 2 };
+      const d = Math.hypot(this.playerIso.x - center.x, this.playerIso.y - center.y);
+      if (d < best) {
+        best = d;
+        near = building;
+      }
+    }
+
+    const nextId = near?.id ?? null;
+    if (nextId !== this.nearBuildingId) {
+      this.nearBuildingId = nextId;
+      window.dispatchEvent(
+        new CustomEvent("zju-horror-near-building", {
+          detail: { building: near ? { id: near.id, name: near.name, zone: near.zone } : null },
+        }),
+      );
+    }
+
+    // 桌面端：靠近时按 E 直接进入。
+    if (near && this.keys && Phaser.Input.Keyboard.JustDown(this.keys.e)) {
+      window.dispatchEvent(
+        new CustomEvent("zju-horror-enter-building", {
+          detail: { building: { id: near.id, name: near.name, zone: near.zone } },
+        }),
+      );
+    }
+  }
+
   private emitHud(place: string, prompt: string, activeHotspotId?: HotspotId) {
     const { hudPlace, hudPrompt, hudActiveHotspotId } = getStore();
     if (place === hudPlace && prompt === hudPrompt && activeHotspotId === hudActiveHotspotId) return;
@@ -2530,11 +2726,13 @@ export class CampusScene extends Phaser.Scene {
   private emitMiniMap(time: number) {
     if (time - this.lastMiniMapAt < 80) return;
     this.lastMiniMapAt = time;
-    const ghostVisible = Boolean(this.ghost && this.ghost.container.visible && !this.storyOpen && !this.dead);
+    // 只要鬼存在且玩家未死亡，就在小地图上持续标出鬼的（当前或最近已知）位置。
+    // 之前依赖 container.visible，导致每次剧情任务后的 5.2s 重生间隙红点消失、看着像"永久没了"。
+    const active = Boolean(this.ghost && !this.dead);
     useGameStore.getState().setMiniMap({
       player: { ...this.playerIso },
-      ghost: ghostVisible && this.ghost ? { ...this.ghost.iso } : undefined,
-      ghostVisible,
+      ghost: active && this.ghost ? { ...this.ghost.iso } : undefined,
+      ghostVisible: active,
     });
   }
 
@@ -2547,6 +2745,13 @@ export class CampusScene extends Phaser.Scene {
     this.sanity = detail.sanity;
     this.storyOpen = detail.activeStory;
     this.updateHotspotMarkerStates();
+  };
+
+  private handleInteriorState = (event: Event) => {
+    const detail = (event as CustomEvent<{ open: boolean }>).detail;
+    this.frozen = detail.open;
+    // 进入内景时立刻停下外层玩家，避免退出后仍在漂移。
+    if (detail.open) this.touchInput = { x: 0, y: 0 };
   };
 
   private handleHorrorEffect = (event: Event) => {

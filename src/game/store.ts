@@ -97,7 +97,7 @@ export interface GameStore {
 
 const initialStoryState: GameStore["storyState"] = {
   currentSceneId: "library_intro" as StorySceneId,
-  stats: { sanity: 100, stamina: 100, clues: 0, trust: 50 },
+  stats: { sanity: 100, stamina: 100, clues: 0, trust: 50, affection: 0 },
   inventory: [],
   flags: {},
   visitedHotspots: [],
