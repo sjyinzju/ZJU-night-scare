@@ -542,6 +542,112 @@ button {
   backdrop-filter: blur(6px);
 }
 
+/* 内景 3D 覆盖层进入时的淡入 */
+@keyframes interiorFadeIn {
+  from {
+    opacity: 0;
+    filter: brightness(0.4) blur(6px);
+  }
+  to {
+    opacity: 1;
+    filter: brightness(1) blur(0);
+  }
+}
+
+/* ── 进入建筑按钮：靠近可进入建筑时出现，桌面/触摸通用 ── */
+.enterBuildingBtn {
+  position: absolute;
+  bottom: 26px;
+  left: 50%;
+  z-index: 40;
+  display: grid;
+  gap: 3px;
+  justify-items: center;
+  padding: 11px 24px;
+  transform: translateX(-50%);
+  border: 1px solid rgba(215, 183, 118, 0.5);
+  border-radius: 11px;
+  background: var(--panel-strong);
+  color: var(--gold);
+  cursor: pointer;
+  font-family: inherit;
+  letter-spacing: 0.14em;
+  box-shadow:
+    0 14px 30px rgba(0, 0, 0, 0.44),
+    0 0 24px rgba(179, 50, 46, 0.22);
+  backdrop-filter: blur(7px);
+  animation: enterBtnPulse 1.9s ease-in-out infinite;
+  transition: transform 0.12s ease;
+}
+
+.enterBuildingBtn:active {
+  transform: translateX(-50%) scale(0.96);
+}
+
+.enterBuildingBtn span {
+  font-size: 16px;
+  font-weight: 600;
+  color: #f6ecd8;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
+}
+
+.enterBuildingBtn em {
+  font-size: 11.5px;
+  font-style: normal;
+  letter-spacing: 0.08em;
+  color: var(--gold);
+}
+
+@keyframes enterBtnPulse {
+  0%,
+  100% {
+    border-color: rgba(215, 183, 118, 0.42);
+    box-shadow:
+      0 14px 30px rgba(0, 0, 0, 0.44),
+      0 0 20px rgba(179, 50, 46, 0.18);
+  }
+  50% {
+    border-color: rgba(227, 92, 77, 0.7);
+    box-shadow:
+      0 14px 30px rgba(0, 0, 0, 0.44),
+      0 0 34px rgba(179, 50, 46, 0.42);
+  }
+}
+
+/* ── 外层地图虚拟摇杆（移动端） ── */
+.touchJoystick {
+  position: absolute;
+  left: 24px;
+  bottom: 26px;
+  z-index: 41;
+  width: 92px;
+  height: 92px;
+  border-radius: 50%;
+  background: rgba(215, 183, 118, 0.05);
+  border: 1px solid rgba(215, 183, 118, 0.22);
+  box-shadow:
+    inset 0 0 20px rgba(0, 0, 0, 0.5),
+    0 6px 18px rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  backdrop-filter: blur(3px);
+}
+
+.touchJoyKnob {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(215, 183, 118, 0.32);
+  border: 1px solid rgba(215, 183, 118, 0.5);
+  box-shadow: 0 0 14px rgba(179, 50, 46, 0.25);
+  pointer-events: none;
+  transition: transform 0.02s linear;
+}
+
 .routeCue {
   pointer-events: none;
   position: absolute;
@@ -1116,18 +1222,28 @@ button {
     height: auto;
   }
 
-  .leftRail {
-    position: relative;
-    width: 100%;
-    max-height: 46vh;
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
+  .appShell {
+    display: flex;
+    flex-direction: column;
   }
 
+  /* 游戏区域优先，放到最上面并占据主要高度；信息栏收到下面可滚动查看。 */
   .gameFrame {
+    order: 0;
     position: relative;
     inset: auto;
-    height: 62vh;
+    height: 72vh;
+    min-height: 420px;
+  }
+
+  .leftRail {
+    order: 1;
+    position: relative;
+    width: 100%;
+    max-height: none;
+    overflow: visible;
+    border-right: 0;
+    border-top: 1px solid var(--line);
   }
 
   .storyModal {
@@ -1137,13 +1253,13 @@ button {
   .miniMapCanvas {
     top: 10px;
     right: 10px;
-    width: 148px;
-    height: 112px;
+    width: 132px;
+    height: 100px;
   }
 
   .routeCue {
     left: 10px;
-    right: 168px;
+    right: 152px;
     min-width: 0;
     max-width: none;
     padding: 10px;
@@ -1151,5 +1267,25 @@ button {
 
   .routeCue strong {
     font-size: 15px;
+  }
+
+  /* 触摸控件放大更好按，进入按钮抬到摇杆上方避免重叠。 */
+  .touchJoystick {
+    left: 18px;
+    bottom: 22px;
+    width: 104px;
+    height: 104px;
+  }
+
+  .touchJoyKnob {
+    width: 50px;
+    height: 50px;
+  }
+
+  .enterBuildingBtn {
+    bottom: 140px;
+    left: auto;
+    right: 16px;
+    transform: none;
   }
 }
