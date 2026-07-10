@@ -8,11 +8,12 @@ import type { IsoPoint } from "./mapData";
 
 // ── 鬼状态机 ──
 export type GhostFSM =
-  | "hidden"       // 不可见，等待生成计时
-  | "stalking"     // 追踪玩家，保持中等距离
-  | "ambush"       // 在下一个热点附近潜伏等待
-  | "chasing"      // 近距离全速追击
-  | "retreating";  // 被照片/护身符驱退
+  | "hidden"
+  | "patrol"       // 巡逻 — 沿预设路线缓慢移动，视线检测玩家
+  | "stalking"
+  | "ambush"
+  | "chasing"
+  | "retreating";
 
 export interface GhostSnapshot {
   fsm: GhostFSM;

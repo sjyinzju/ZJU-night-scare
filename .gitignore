@@ -16,3 +16,5 @@ vite.config.d.ts
 *.webp
 
 /ppt
+
+/reference

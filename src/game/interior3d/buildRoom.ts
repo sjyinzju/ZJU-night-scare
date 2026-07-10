@@ -1,5 +1,8 @@
 import * as THREE from "three";
 import { buildCharacter, type CharacterHandle } from "./buildCharacter";
+import { DoorComponent } from "./DoorComponent";
+import { buildStraightStairs, buildLStairs } from "./StaircaseBuilder";
+import { RoomDivider } from "./RoomDivider";
 
 /** Room archetypes with distinct furniture layouts. */
 export type RoomKind = "library" | "medical" | "dorm" | "hall";
@@ -23,6 +26,16 @@ export interface Pickup {
   taken: boolean;
 }
 
+/** A red-glowing story-trigger zone inside the 3D interior. Walk in → text popup. */
+export interface StoryTrigger {
+  id: string;
+  sceneId: string;
+  glow: THREE.Object3D;
+  position: THREE.Vector3;
+  radius: number;
+  triggered: boolean;
+}
+
 export interface RoomBuildResult {
   /** Group holding all room + furniture + NPC meshes. Add to the scene. */
   root: THREE.Group;
@@ -30,12 +43,16 @@ export interface RoomBuildResult {
   colliders: AABB[];
   /** Inner playable bounds (already inset from the walls). */
   bounds: AABB;
-  /** Per-frame update: NPC idle + horror reveal + pickup bob. `t` seconds. */
+  /** Per-frame update: NPC idle + horror reveal + pickup bob + door rotation. `t` seconds. */
   update: (t: number, playerPos: THREE.Vector3) => void;
   /** Ground height under a world XZ position (0 on the ground floor). */
   floorHeightAt: (x: number, z: number) => number;
   /** Collectable items still in the room. */
   pickups: Pickup[];
+  /** Story-trigger zones the player can walk into. */
+  storyTriggers: StoryTrigger[];
+  /** Interactive doors in this room. */
+  doors: DoorComponent[];
   /** Suggested spawn point for the camera. */
   spawn: THREE.Vector3;
   /** Free all geometries + materials. */
@@ -45,9 +62,11 @@ export interface RoomBuildResult {
 /** Map a building id / zone onto a room archetype. */
 export function classifyRoom(id: string, zone?: string): RoomKind {
   const key = `${id} ${zone ?? ""}`.toLowerCase();
-  if (/lib|book|图书|阅览/.test(key)) return "library";
-  if (/med|hospital|clinic|医|health|病/.test(key)) return "medical";
+  // 医学分馆是图书馆，不是医院——用 library 布局（螺旋楼梯）
+  if (/medical-library/.test(key)) return "library";
   if (/dorm|hostel|宿舍|寝|baisha|白沙/.test(key)) return "dorm";
+  if (/medical|med|hospital|clinic|医|health|病/.test(key)) return "medical";
+  if (/library|lib|book|图书|阅览/.test(key)) return "library";
   return "hall";
 }
 
@@ -95,6 +114,8 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
   const colliders: AABB[] = [];
   const npcs: CharacterHandle[] = [];
   const pickups: Pickup[] = [];
+  const storyTriggers: StoryTrigger[] = [];
+  const doors: DoorComponent[] = [];
 
   const geometries: THREE.BufferGeometry[] = [];
   const materials: THREE.Material[] = [];
@@ -217,7 +238,35 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
     });
   };
 
-  // Shared finalizer (hoisted). Closes over root/npcs/pickups/geometries/materials.
+  // A red glowing story-trigger zone. Player walks in → text popup in the 3D interior.
+  const addStoryTrigger = (sceneId: string, x: number, y: number, z: number): void => {
+    const color = 0xd04438;
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
+    root.add(g);
+    const coreMat = trackMat(
+      new THREE.MeshStandardMaterial({ color, emissive: new THREE.Color(color), emissiveIntensity: 2.0, roughness: 0.3 }),
+    );
+    const core = new THREE.Mesh(track(new THREE.IcosahedronGeometry(0.18, 0)), coreMat);
+    g.add(core);
+    const haloMat = trackMat(
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false }),
+    );
+    const halo = new THREE.Mesh(track(new THREE.SphereGeometry(0.5, 16, 16)), haloMat);
+    g.add(halo);
+    const light = new THREE.PointLight(color, 1.5, 4.5, 2);
+    g.add(light);
+    storyTriggers.push({
+      id: `${sceneId}-${storyTriggers.length}`,
+      sceneId,
+      glow: g,
+      position: new THREE.Vector3(x, y, z),
+      radius: 1.2,
+      triggered: false,
+    });
+  };
+
+  // Shared finalizer (hoisted). Closes over root/npcs/pickups/storyTriggers/geometries/materials.
   function finalize(
     bounds: AABB,
     spawn: THREE.Vector3,
@@ -243,6 +292,11 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
         p.glow.rotation.y = t * 1.4;
         p.glow.position.y = p.position.y + Math.sin(t * 2.2 + p.position.x) * 0.08;
       }
+      for (const s of storyTriggers) {
+        if (s.triggered) continue;
+        s.glow.rotation.y = t * 0.9;
+        s.glow.position.y = s.position.y + Math.sin(t * 1.8 + s.position.x) * 0.1;
+      }
     };
     const dispose = (): void => {
       for (const n of npcs) n.dispose();
@@ -250,7 +304,7 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
       for (const m of materials) m.dispose();
       root.clear();
     };
-    return { root, colliders, bounds, update, floorHeightAt, pickups, spawn, dispose };
+    return { root, colliders, bounds, update, floorHeightAt, pickups, storyTriggers, doors, spawn, dispose };
   }
 
   // ---------------------------------------------------------------- LIBRARY
@@ -280,6 +334,14 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
       const p = built.pickupSpots[i] ?? built.pickupSpots[0];
       addPickup(it.itemId, it.name, p.x, p.y, p.z, i === 0 ? 0x8fd0ff : 0xffd27a);
     });
+
+    // Story triggers: first one visible, rest hidden until previous triggered
+    addStoryTrigger("library_intro", 0, 0.7, 3.5);    // near the reading table
+    addStoryTrigger("library_sound", 0, 0.7, -3.0);   // near the spiral staircase base
+    // Hide all triggers after the first
+    for (let i = 1; i < storyTriggers.length; i++) {
+      storyTriggers[i].glow.visible = false;
+    }
 
     return finalize(built.bounds, built.spawn, built.floorHeightAt, { revealZ: -99, revealFloor2: true });
   }
@@ -321,6 +383,25 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
     addTable(halfW - 2.6, 4.2, 1.1, 0.7, 0.78, whiteMat);
     addChair(halfW - 2.6, 5.0, fabricMat);
     addBox(0.6, 0.9, 0.6, 1.4, 0.45, halfL - 3.0, metalMat);
+
+    // ── 地下仓库隔间（locked door, novel: 医学院地下二层）──
+    const medDivider = new RoomDivider({
+      startX: -halfW + 0.3, startZ: -halfL + 5.2, endX: halfW - 0.3, endZ: -halfL + 5.2,
+      wallHeight: WALL_H,
+      thickness: 0.2,
+      color: palette.wall,
+      door: { position: 0.5, width: 1.0, height: 2.2, keyItemId: "key_card", label: "地下仓库（需要门禁卡）" },
+    });
+    root.add(medDivider.group);
+    colliders.push(...medDivider.wallColliders);
+    if (medDivider.door) {
+      doors.push(medDivider.door);
+      colliders.push(medDivider.door.closedCollider);
+    }
+    // 隔间内：黑暗储物柜 + 解剖台暗示
+    addBox(1.2, 0.5, 2.0, 1.5, 0.35, -halfL + 6.6, metalMat);
+    addBox(1.2, 0.5, 2.0, -1.5, 0.35, -halfL + 6.6, metalMat);
+    addBox(2.0, 0.8, 0.8, 0, 0.55, -halfL + 6.3, stdMat(0x6f7d82, 0.85));
   } else if (kind === "dorm") {
     // ── 浙大白沙式"上床下桌":上层黑色金属高架床，下层木书桌+书架柜+绿椅+爬梯 ──
     const blueFabric = stdMat(0x3f5a86, 0.95); // 蓝色被褥/窗帘
@@ -365,14 +446,69 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
     addBox(0.06, 1.5, 0.9, halfW - 0.22, 1.45, mirrorZ, woodMat, false); // 镜框
     const glass = trackMat(new THREE.MeshStandardMaterial({ color: 0x9fb0bd, roughness: 0.12, metalness: 0.85 }));
     addBox(0.02, 1.3, 0.72, halfW - 0.27, 1.45, mirrorZ, glass, false); // 镜面
+
+    // ── 走廊隔断 + 门（宿舍后段分隔出走廊/卫生间区域）──
+    const dormDivider = new RoomDivider({
+      startX: -halfW + 0.3, startZ: -halfL + 5.5, endX: halfW - 0.3, endZ: -halfL + 5.5,
+      wallHeight: WALL_H,
+      thickness: 0.2,
+      color: palette.wall,
+      door: { position: 0.25, width: 1.0, height: 2.2, label: "卫生间门" },
+    });
+    root.add(dormDivider.group);
+    colliders.push(...dormDivider.wallColliders);
+    if (dormDivider.door) {
+      doors.push(dormDivider.door);
+    }
+    // 隔断后面：一个小卫生间（洗手台 + 蹲位示意）
+    addBox(0.6, 0.8, 0.4, 0, 0.4, -halfL + 6.7, whiteMat);
+    addBox(0.7, 1.8, 0.06, 1.6, 0.9, -halfL + 6.8, fabricMat, false);
+    // Story triggers for dorm: forum scene at the desk area
+    addStoryTrigger("dorm_forum", -halfW + 1.1, 0.85, -3.6); // near first loft desk
   } else {
-    addBox(3.2, 0.5, 0.8, 0, 0.25, -2.5, woodMat);
-    addBox(3.2, 0.5, 0.8, 0, 0.25, 2.5, woodMat);
+    // ── 小剧场/大厅布局：舞台 + 观众席 + 后台门 ──
+    const stageY = 0.5;
+    const stageZ = -halfL + 3.5;
+    // 舞台平台
+    addBox(ROOM_W - 1.5, stageY, 3.5, 0, stageY / 2, stageZ, woodMat);
+    // 舞台幕布(红绒布柱)
+    const curtainMat = stdMat(0x7b2229, 0.7);
+    for (const sx of [-2.8, -1.4, 0, 1.4, 2.8]) {
+      addBox(0.25, WALL_H - stageY, 0.3, sx, stageY + (WALL_H - stageY) / 2, stageZ + 1.8, curtainMat, false);
+    }
+    // 观众席（几排木长凳）
+    for (let row = 0; row < 3; row++) {
+      const rz = stageZ + 2.5 + row * 1.8;
+      addBox(4.5, 0.12, 0.4, 0, 0.06, rz, woodMat, false);
+      addBox(4.5, 0.45, 0.06, 0, 0.28, rz, woodMat, false); // 靠背
+      colliders.push({ minX: -2.3, maxX: 2.3, minZ: rz - 0.3, maxZ: rz + 0.3 });
+    }
+    // 走廊两侧柱
     for (const sx of [-1, 1]) {
       addBox(0.5, 3.2, 0.5, sx * (halfW - 1.2), 1.6, -1.0, accentMat);
       addBox(0.5, 3.2, 0.5, sx * (halfW - 1.2), 1.6, 3.0, accentMat);
     }
-    addTable(0, halfL - 3.5, 2.0, 0.8, 0.9, woodMat);
+
+    // ── 后台隔断 + 门（novel: 幕布后的空间"有人站在后台"）──
+    const hallDivider = new RoomDivider({
+      startX: -halfW + 0.3, startZ: stageZ - 0.5, endX: halfW - 0.3, endZ: stageZ - 0.5,
+      wallHeight: WALL_H,
+      thickness: 0.2,
+      color: palette.wall,
+      door: { position: 0.6, width: 1.0, height: 2.2, label: "后台门" },
+    });
+    root.add(hallDivider.group);
+    colliders.push(...hallDivider.wallColliders);
+    if (hallDivider.door) {
+      doors.push(hallDivider.door);
+      colliders.push(hallDivider.door.closedCollider);
+    }
+    // 后台：化妆台 + 道具箱
+    addBox(1.6, 0.02, 0.9, 0, stageY + 0.01, -halfL + 1.2, fabricMat, false);
+    addBox(0.9, 0.7, 0.5, -1.8, stageY + 0.35, -halfL + 0.9, woodMat);
+
+    // Story triggers for theater indoor scenes
+    addStoryTrigger("final_plan", 0, stageY + 0.7, stageZ + 1.2);
   }
 
   // Deep horror figure (hidden until the player walks in / approaches the mirror).
@@ -472,10 +608,10 @@ function buildLibrary(ctx: LibCtx): LibResult {
   addBox(0.3, WALL_H, L + 0.3, -halfW, WALL_H / 2, 0, wallMat);
   addBox(0.3, WALL_H, L + 0.3, halfW, WALL_H / 2, 0, wallMat);
 
-  // Turnstile gate at the entrance (+Z).
+  // Turnstile gate at the entrance (+Z) — posts are visual only, not solid.
   const gateZ = halfL - 2.2;
-  for (const sx of [-1.1, 0, 1.1]) addBox(0.5, 1.0, 0.5, sx, 0.5, gateZ, metalMat);
-  for (const sx of [-0.55, 0.55]) addBox(0.06, 0.1, 0.9, sx, 0.95, gateZ, whiteMat, false);
+  for (const sx of [-1.3, 0, 1.3]) addBox(0.4, 1.0, 0.4, sx, 0.5, gateZ, metalMat, false);
+  for (const sx of [-0.65, 0.65]) addBox(0.06, 0.1, 0.9, sx, 0.95, gateZ, whiteMat, false);
   addBox(W, 0.3, 0.3, 0, 2.6, gateZ, whiteMat, false);
 
   // Bookshelf rows down both sides of the ground floor.
@@ -567,7 +703,8 @@ function buildLibrary(ctx: LibCtx): LibResult {
   };
 
   const bounds: AABB = { minX: -halfW + 0.3, maxX: halfW - 0.3, minZ: -halfL + 0.3, maxZ: halfL - 0.3 };
-  const spawn = new THREE.Vector3(0, 1.6, halfL - 0.9);
+  // Spawn in clear space between the entrance and the reading table.
+  const spawn = new THREE.Vector3(1.8, 1.6, 6.0);
 
   return {
     bounds,

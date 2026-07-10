@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback, useState, type CSSProperties } from "react";
 import { Interior3D } from "./Interior3D";
+import { useGameStore } from "../store";
 
 export interface InteriorOverlayProps {
   building: { id: string; name: string; zone?: string };
@@ -47,12 +48,25 @@ export default function InteriorOverlay({
         buildingId: building.id,
         zone: building.zone,
         isMobile,
+        getDoorInventory: () => useGameStore.getState().storyState.inventory,
         onPickup: (itemId, name) => {
           // 通知外层剧情系统把道具加入物品栏，并弹一个短暂提示。
           window.dispatchEvent(new CustomEvent("zju-horror-pickup", { detail: { itemId, name } }));
           setPickupToast(name);
           if (toastTimer.current !== null) window.clearTimeout(toastTimer.current);
           toastTimer.current = window.setTimeout(() => setPickupToast(null), 2600);
+        },
+        onStoryTrigger: (sceneId) => {
+          engineRef.current?.exitPointerLock();
+          window.dispatchEvent(new CustomEvent("zju-horror-interior-story", { detail: { sceneId } }));
+        },
+        getStamina: () => useGameStore.getState().storyState.stats.stamina,
+        setStamina: (v) => {
+          const s = useGameStore.getState();
+          s.setStoryState((prev) => ({
+            ...prev,
+            stats: { ...prev.stats, stamina: Math.max(0, Math.min(100, Math.round(v))) },
+          }));
         },
       });
       engineRef.current = engine;

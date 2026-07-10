@@ -240,3 +240,20 @@ export const ambientEvents: AmbientEvent[] = [
   { id: "lake-memory", zoneId: "lake", stageMin: 4, status: "白秋不在这里", minDistortion: 0.58 },
   { id: "swamp-loop", zoneId: "swamp", stageMin: 3, status: "路线重复", minDistortion: 0.54 },
 ];
+
+/**
+ * Story hotspot → skyline building(s) targeted for red-pulse guidance.
+ * For buildings marked `enterable`, proximity triggers the 3D interior;
+ * otherwise it triggers the text story popup.
+ * `lake` maps to an empty array — the hotspot marker + guide line handle it.
+ */
+export const hotspotBuildingMap: Record<string, string[]> = {
+  library: ["medical-library"],
+  dorm: ["dorm-baisha"],
+  canteen: ["linhu-canteen"],
+  "du-office": ["medical-library"],
+  "medical-college": ["medical-college"],
+  "east-teaching": ["east-teaching-1", "east-teaching-2", "east-teaching-3", "east-teaching-4"],
+  lake: [],
+  theater: ["little-theater"],
+};

@@ -18,6 +18,7 @@ type RouteEdge = {
 };
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+const JUNCTION_CONNECT_DISTANCE = 0.36;
 
 const normalize = (point: IsoPoint): IsoPoint => {
   const length = Math.hypot(point.x, point.y);
@@ -150,6 +151,13 @@ export class MapGraph {
         connect(a, b);
       }
     });
+
+    for (let a = 0; a < nodes.length; a += 1) {
+      for (let b = a + 1; b < nodes.length; b += 1) {
+        const distance = Math.hypot(nodes[a].x - nodes[b].x, nodes[a].y - nodes[b].y);
+        if (distance > 0 && distance <= JUNCTION_CONNECT_DISTANCE) connect(a, b);
+      }
+    }
 
     const addProjectionNode = (projection: RoadProjection) => {
       const projected = addNode(projection.point);
