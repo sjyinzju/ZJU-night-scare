@@ -5,6 +5,23 @@ export interface IsoPoint {
   y: number;
 }
 
+/**
+ * 组合体块：相对建筑锚点(x,y)偏移的一个长方体，用来拼出 L 形 / 阶梯塔 / 双塔 等非方盒外形。
+ * dx/dy 为相对偏移，w/d 为占地，h 为该体块高度（层数）。
+ * bodyShade/roofShade 为在建筑主色上的明暗微调（正数更亮，负数更暗），用来区分层次。
+ */
+export interface BuildingMass {
+  dx: number;
+  dy: number;
+  w: number;
+  d: number;
+  h: number;
+  bodyShade?: number;
+  roofShade?: number;
+}
+
+export type BuildingShape = "box" | "L" | "tower" | "stepped" | "twin" | "slab" | "hall";
+
 export interface CampusBuilding {
   id: string;
   name: string;
@@ -17,6 +34,12 @@ export interface CampusBuilding {
   color: number;
   roof: number;
   labelOffset?: number;
+  /** 语义形状标记（供 3D 内景 / 小地图使用）。缺省视为 box。 */
+  shape?: BuildingShape;
+  /** 组合体块，存在时用多体块渲染出复杂外形；缺省时渲染为单一方盒。 */
+  massing?: BuildingMass[];
+  /** 标记为可进入建筑：玩家靠近后可进入第一人称 3D 内景。 */
+  enterable?: boolean;
 }
 
 export interface CampusRoad {
@@ -74,9 +97,15 @@ export const campusBuildings: CampusBuilding[] = [
     y: 3.1,
     w: 5.8,
     d: 3.0,
-    h: 3.0,
+    h: 5.2,
     color: 0x6e625a,
     roof: 0x2b3835,
+    shape: "twin",
+    massing: [
+      { dx: 0, dy: 0, w: 5.8, d: 3.0, h: 1.4, bodyShade: -10 },
+      { dx: 0.4, dy: 0.55, w: 1.9, d: 1.9, h: 4.6, bodyShade: 2 },
+      { dx: 3.35, dy: 0.6, w: 1.9, d: 1.9, h: 5.2, bodyShade: 8, roofShade: 6 },
+    ],
   },
   {
     id: "dorm-danyang",
@@ -104,6 +133,7 @@ export const campusBuildings: CampusBuilding[] = [
   },
   {
     id: "dorm-baisha",
+    enterable: true,
     name: "白沙宿舍区",
     zone: "living",
     x: 4.6,
@@ -128,15 +158,21 @@ export const campusBuildings: CampusBuilding[] = [
   },
   {
     id: "little-theater",
+    enterable: true,
     name: "小剧场",
     zone: "story",
     x: 11.1,
     y: 9.4,
     w: 2.0,
     d: 1.8,
-    h: 2.8,
+    h: 3.6,
     color: 0x735d78,
     roof: 0x312b3a,
+    shape: "hall",
+    massing: [
+      { dx: 0, dy: 0, w: 2.0, d: 1.8, h: 1.9, bodyShade: -4 },
+      { dx: 0.55, dy: 0.5, w: 0.95, d: 0.8, h: 3.6, bodyShade: 6, roofShade: 10 },
+    ],
   },
   {
     id: "west-teaching",
@@ -158,7 +194,8 @@ export const campusBuildings: CampusBuilding[] = [
     y: 16.6,
     w: 1.6,
     d: 2.6,
-    h: 3.0,
+    h: 5.0,
+    shape: "slab",
     color: 0x66777c,
     roof: 0x2c383e,
   },
@@ -170,34 +207,54 @@ export const campusBuildings: CampusBuilding[] = [
     y: 27.6,
     w: 3.8,
     d: 2.0,
-    h: 3.0,
+    h: 3.8,
     color: 0x6f7860,
     roof: 0x35402e,
+    shape: "L",
+    massing: [
+      { dx: 0, dy: 0, w: 3.8, d: 0.9, h: 2.4, bodyShade: -6 },
+      { dx: 0, dy: 0.9, w: 1.0, d: 1.1, h: 2.4, bodyShade: -6 },
+      { dx: 2.9, dy: 0.5, w: 0.9, d: 1.1, h: 3.8, bodyShade: 8, roofShade: 6 },
+    ],
   },
   {
     id: "medical-college",
+    enterable: true,
     name: "医学院",
     zone: "academic",
     x: 11.0,
     y: 28.6,
     w: 3.5,
     d: 1.7,
-    h: 3.0,
+    h: 4.4,
     color: 0x6f7d82,
     roof: 0x2e3941,
+    shape: "L",
+    massing: [
+      { dx: 0, dy: 0, w: 3.5, d: 0.9, h: 2.6, bodyShade: -6 },
+      { dx: 0, dy: 0.9, w: 1.1, d: 0.8, h: 2.6, bodyShade: -6 },
+      { dx: 2.55, dy: 0.55, w: 0.95, d: 1.15, h: 4.4, bodyShade: 10, roofShade: 8 },
+    ],
   },
   {
     id: "library",
+    enterable: true,
     name: "基础图书馆",
     zone: "academic",
     x: 32.1,
     y: 12.0,
     w: 3.2,
     d: 3.0,
-    h: 4.6,
+    h: 7.2,
     color: 0x8b4f3d,
     roof: 0x4e2928,
     labelOffset: -20,
+    shape: "stepped",
+    massing: [
+      { dx: 0, dy: 0, w: 3.2, d: 3.0, h: 2.4, bodyShade: -6 },
+      { dx: 0.5, dy: 0.45, w: 2.2, d: 2.1, h: 4.8, bodyShade: 4 },
+      { dx: 0.95, dy: 0.85, w: 1.3, d: 1.3, h: 7.2, bodyShade: 14, roofShade: 10 },
+    ],
   },
   {
     id: "east-teaching-1",
@@ -207,7 +264,7 @@ export const campusBuildings: CampusBuilding[] = [
     y: 16.2,
     w: 2.2,
     d: 1.7,
-    h: 3.1,
+    h: 2.9,
     color: 0x9a7355,
     roof: 0x4b3b31,
   },
@@ -219,7 +276,12 @@ export const campusBuildings: CampusBuilding[] = [
     y: 18.6,
     w: 2.2,
     d: 1.7,
-    h: 3.1,
+    h: 3.8,
+    shape: "slab",
+    massing: [
+      { dx: 0, dy: 0, w: 2.2, d: 1.7, h: 2.4, bodyShade: -4 },
+      { dx: 0.5, dy: 0.4, w: 1.2, d: 0.95, h: 3.8, bodyShade: 8, roofShade: 6 },
+    ],
     color: 0x927051,
     roof: 0x49382f,
   },
@@ -231,7 +293,7 @@ export const campusBuildings: CampusBuilding[] = [
     y: 21.0,
     w: 2.2,
     d: 1.7,
-    h: 3.4,
+    h: 2.6,
     color: 0x8d684d,
     roof: 0x46362e,
   },
@@ -243,7 +305,12 @@ export const campusBuildings: CampusBuilding[] = [
     y: 23.4,
     w: 2.2,
     d: 1.7,
-    h: 3.4,
+    h: 4.2,
+    shape: "tower",
+    massing: [
+      { dx: 0, dy: 0, w: 2.2, d: 1.7, h: 2.2, bodyShade: -6 },
+      { dx: 0.55, dy: 0.45, w: 1.1, d: 0.85, h: 4.2, bodyShade: 10, roofShade: 8 },
+    ],
     color: 0x9c7655,
     roof: 0x4d3b31,
   },
@@ -251,25 +318,37 @@ export const campusBuildings: CampusBuilding[] = [
     id: "gym",
     name: "体育馆",
     zone: "sport",
-    x: 34.3,
-    y: 4.2,
+    x: 33.2,
+    y: 9.6,
     w: 3.5,
     d: 1.9,
-    h: 2.8,
+    h: 3.4,
     color: 0x5d7076,
     roof: 0x24343b,
+    shape: "hall",
+    massing: [
+      { dx: 0, dy: 0, w: 3.5, d: 1.9, h: 1.7, bodyShade: -4 },
+      { dx: 0.35, dy: 0.28, w: 2.8, d: 1.35, h: 3.4, bodyShade: 6, roofShade: 8 },
+      { dx: 2.85, dy: 0.1, w: 0.65, d: 1.7, h: 2.2, bodyShade: -12 },
+    ],
   },
   {
     id: "medical-library",
+    enterable: true,
     name: "图书馆医学分馆",
     zone: "story",
     x: 17.4,
     y: 28.5,
     w: 3.9,
     d: 1.8,
-    h: 3.2,
+    h: 4.6,
     color: 0x59686e,
     roof: 0x242f35,
+    shape: "tower",
+    massing: [
+      { dx: 0, dy: 0, w: 3.9, d: 1.8, h: 1.8, bodyShade: -8 },
+      { dx: 1.1, dy: 0.28, w: 1.5, d: 1.25, h: 4.6, bodyShade: 8, roofShade: 8 },
+    ],
   },
   {
     id: "life-science",
@@ -279,9 +358,14 @@ export const campusBuildings: CampusBuilding[] = [
     y: 28.2,
     w: 4.0,
     d: 2.0,
-    h: 3.0,
+    h: 3.8,
     color: 0x6d786a,
     roof: 0x333d30,
+    shape: "slab",
+    massing: [
+      { dx: 0, dy: 0, w: 4.0, d: 2.0, h: 2.0, bodyShade: -6 },
+      { dx: 0.35, dy: 0.32, w: 3.3, d: 1.35, h: 3.8, bodyShade: 6, roofShade: 6 },
+    ],
   },
   {
     id: "environment-college",
@@ -291,9 +375,14 @@ export const campusBuildings: CampusBuilding[] = [
     y: 24.3,
     w: 2.4,
     d: 3.4,
-    h: 3.0,
+    h: 4.6,
     color: 0x6a766f,
     roof: 0x303b36,
+    shape: "tower",
+    massing: [
+      { dx: 0, dy: 0, w: 2.4, d: 3.4, h: 2.2, bodyShade: -6 },
+      { dx: 0.4, dy: 0.6, w: 1.6, d: 2.2, h: 4.6, bodyShade: 8, roofShade: 6 },
+    ],
   },
 ];
 
@@ -313,8 +402,10 @@ export const campusRoads: CampusRoad[] = [
     id: "south-main-axis",
     name: "红线主路",
     points: [
-      { x: 6.8, y: 30.6 },
-      { x: 11.0, y: 30.6 },
+      // 起点与 west-medical-road 东端 (10.2,30.0) 共用一个干净路口，
+      // 去掉此前与该路在 x6.8~10 段近乎平行重叠导致的吸附抖动/南大门卡顿。
+      { x: 10.2, y: 30.0 },
+      { x: 11.2, y: 30.5 },
       { x: 17.6, y: 30.6 },
       { x: 24.0, y: 30.6 },
       { x: 31.8, y: 30.4 },
