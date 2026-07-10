@@ -543,6 +543,20 @@ function App() {
     setInteriorBuilding((current) => current ?? nearBuilding);
   }, [nearBuilding]);
 
+  const leaveInterior = useCallback(() => {
+    setInteriorBuilding(null);
+    setPhaserReady(true);
+  }, []);
+
+  const leaveInteriorFromTrigger = useCallback(() => {
+    const scene = storyScenes[storyState.currentSceneId];
+    setInteriorBuilding(null);
+    setPhaserReady(true);
+    if (scene.setting === "outdoor" && scene.locationId === "library") {
+      setActiveSceneId(scene.id);
+    }
+  }, [storyState.currentSceneId]);
+
   const triggerEffect = useCallback(
     (effect?: HorrorEffect, context?: JumpscareContext) => {
       if (!effect) return;
@@ -688,12 +702,17 @@ function App() {
       if (!transition) return;
       const { nextState, nextScene, nextHotspot, changesLocation, effect } = transition;
       const inInterior = Boolean(interiorBuilding);
+      const delayLibraryExit =
+        inInterior &&
+        activeScene.id === "library_sound" &&
+        activeScene.locationId === "library" &&
+        nextScene.setting === "outdoor";
 
       setStoryState(nextState);
       triggerEffect(effect);
 
       // Indoor → outdoor: exit 3D interior, activate 2.5D map
-      if (activeScene.setting === "indoor" && nextScene.setting === "outdoor") {
+      if (activeScene.setting === "indoor" && nextScene.setting === "outdoor" && !delayLibraryExit) {
         setInteriorBuilding(null);
         setPhaserReady(true);
       }
@@ -712,6 +731,9 @@ function App() {
         setActiveSceneId(nextScene.id);
       } else if (inInterior && nextScene.setting === "indoor") {
         // Inside a 3D interior: close modal, let the player walk to the next red trigger
+        setNextObjectiveCue(null);
+        setActiveSceneId(null);
+      } else if (delayLibraryExit) {
         setNextObjectiveCue(null);
         setActiveSceneId(null);
       } else if (!changesLocation) {
@@ -943,8 +965,11 @@ function App() {
       {interiorBuilding && (
         <InteriorOverlay
           building={interiorBuilding}
+          currentSceneId={storyState.currentSceneId}
+          inventory={storyState.inventory}
           isMobile={isMobile}
-          onExit={() => { setInteriorBuilding(null); setPhaserReady(true); }}
+          onExit={leaveInterior}
+          onExitTrigger={leaveInteriorFromTrigger}
         />
       )}
     </main>

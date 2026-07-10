@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { buildRoom, classifyRoom, type AABB, type RoomBuildResult } from "./buildRoom";
+import { buildRoom, classifyRoom, type AABB, type InteriorGuideNode, type RoomBuildResult } from "./buildRoom";
 import { getInteriorBlueprint, type InteriorBlueprint } from "./interiorBlueprints";
 import {
   createMovementContext,
@@ -27,6 +27,12 @@ export interface Interior3DOptions {
   onPickup?: (itemId: string, name: string) => void;
   /** Called when the player walks into a story-trigger zone inside the 3D interior. */
   onStoryTrigger?: (sceneId: string) => void;
+  /** Called when the player walks into an interior exit trigger. */
+  onExitTrigger?: () => void;
+  /** Current story scene id; drives which interior triggers/items are active. */
+  getStorySceneId?: () => string;
+  /** Current player inventory; drives persistent equipment such as the flashlight. */
+  getInventory?: () => string[];
   /** Current stamina 0-100 (read from story state). */
   getStamina?: () => number;
   /** Persist stamina back to story state. */
@@ -37,6 +43,7 @@ export interface Interior3DOptions {
 
 const PLAYER_RADIUS = 0.32;
 const EYE_HEIGHT = 1.6;
+const GUIDE_MAX_POINTS = 32;
 
 /**
  * Self-contained first-person interior renderer. Owns its renderer, scene,
@@ -58,6 +65,10 @@ export class Interior3D {
   private readonly flashlight: THREE.SpotLight;
   private readonly flashTarget: THREE.Object3D;
   private readonly flashlightSys: FlashlightSystem;
+  private readonly ambientLight: THREE.AmbientLight;
+  private readonly fillLight: THREE.HemisphereLight;
+  private readonly nearFillLight: THREE.PointLight;
+  private readonly bloodLight: THREE.PointLight;
 
   private room: RoomBuildResult;
   private colliders: AABB[];
@@ -65,9 +76,15 @@ export class Interior3D {
   private readonly blueprint: InteriorBlueprint;
   private readonly onPickup?: (itemId: string, name: string) => void;
   private readonly onStoryTrigger?: (sceneId: string) => void;
+  private readonly onExitTrigger?: () => void;
+  private readonly getStorySceneId?: () => string;
+  private readonly getInventory?: () => string[];
   private readonly getStamina?: () => number;
   private readonly setStamina?: (value: number) => void;
   private lowStaminaWarning = false;
+  private bloodLightEnabled = false;
+  private nextBloodFlashAt = 0;
+  private bloodFlashUntil = 0;
 
   // ── New movement architecture ──
   private readonly inputManager: InputManager;
@@ -105,6 +122,9 @@ export class Interior3D {
     this.isMobile = options.isMobile ?? false;
     this.onPickup = options.onPickup;
     this.onStoryTrigger = options.onStoryTrigger;
+    this.onExitTrigger = options.onExitTrigger;
+    this.getStorySceneId = options.getStorySceneId;
+    this.getInventory = options.getInventory;
     this.getStamina = options.getStamina;
     this.setStamina = options.setStamina;
 
@@ -137,15 +157,20 @@ export class Interior3D {
 
     // ---- Lights ----
     // 略微抬高环境光/半球光,让房间整体不再纯黑(仍保留昏暗恐怖基调)。
-    const ambient = new THREE.AmbientLight(0x2a3038, 0.85);
-    this.scene.add(ambient);
-    const fill = new THREE.HemisphereLight(0x28303c, 0x0a0c10, 0.55);
-    this.scene.add(fill);
+    this.ambientLight = new THREE.AmbientLight(0x2a3038, 0.85);
+    this.scene.add(this.ambientLight);
+    this.fillLight = new THREE.HemisphereLight(0x28303c, 0x0a0c10, 0.55);
+    this.scene.add(this.fillLight);
 
     // 近距离补光:跟随相机的一盏很弱、短射程点光,只照亮角色周围、脚下和近处墙壁。
-    const nearFill = new THREE.PointLight(0xaeb6c6, 0.85, 5.0, 2.0);
-    nearFill.position.set(0, -0.2, 0.1);
-    this.camera.add(nearFill);
+    this.nearFillLight = new THREE.PointLight(0xaeb6c6, 0.85, 5.0, 2.0);
+    this.nearFillLight.position.set(0, -0.2, 0.1);
+    this.camera.add(this.nearFillLight);
+
+    this.bloodLight = new THREE.PointLight(0x6a0505, 0, 13, 2.2);
+    this.bloodLight.position.set(-1.25, 3.05, -4.75);
+    this.scene.add(this.bloodLight);
+    this.scheduleBloodFlash(0);
 
     // Flashlight follows the camera.
     this.flashlight = new THREE.SpotLight(0xfff2d0, 6.0, 20, Math.PI / 6, 0.4, 1.4);
@@ -167,6 +192,7 @@ export class Interior3D {
 
     // ---- Room ----
     const roomKind = classifyRoom(options.buildingId, options.zone);
+    this.bloodLightEnabled = roomKind === "library";
     this.blueprint = getInteriorBlueprint(roomKind);
     this.room = buildRoom(roomKind);
     this.scene.add(this.room.root);
@@ -174,7 +200,7 @@ export class Interior3D {
     this.bounds = this.room.bounds;
 
     // Spawn at the room's entrance, looking down the corridor (-Z).
-    this.camera.position.copy(this.room.spawn);
+    this.camera.position.copy(this.findClearSpawn(this.room.spawn));
 
     // ── Initialise movement systems ──
     this.inputManager = new InputManager();
@@ -202,6 +228,7 @@ export class Interior3D {
 
     // Create dashed guide line on floor to active story trigger
     this.createGuideLine();
+    this.syncStoryPhase();
 
     this.resize();
   }
@@ -209,9 +236,9 @@ export class Interior3D {
   /** Begin listeners + render loop. */
   start(): void {
     window.addEventListener("resize", this.onResize);
+    window.addEventListener("keydown", this.onKeyDown);
+    window.addEventListener("keyup", this.onKeyUp);
     if (!this.isMobile) {
-      window.addEventListener("keydown", this.onKeyDown);
-      window.addEventListener("keyup", this.onKeyUp);
       document.addEventListener("mousemove", this.onMouseMove);
       document.addEventListener("pointerlockchange", this.onPointerLockChange);
       this.renderer.domElement.addEventListener("click", this.onCanvasClick);
@@ -341,6 +368,7 @@ export class Interior3D {
 
   private collides(x: number, z: number): boolean {
     for (const c of this.colliders) {
+      if (!this.isColliderActive(c)) continue;
       if (
         x > c.minX - PLAYER_RADIUS &&
         x < c.maxX + PLAYER_RADIUS &&
@@ -355,6 +383,121 @@ export class Interior3D {
 
   private clampToBounds(value: number, min: number, max: number): number {
     return THREE.MathUtils.clamp(value, min + PLAYER_RADIUS, max - PLAYER_RADIUS);
+  }
+
+  private findClearSpawn(spawn: THREE.Vector3): THREE.Vector3 {
+    return this.findNearestClearPoint(spawn) ?? spawn;
+  }
+
+  private findNearestClearPoint(origin: THREE.Vector3): THREE.Vector3 | null {
+    const candidates: THREE.Vector3[] = [origin.clone()];
+    const sortedNodes = [...this.room.guideNodes].sort(
+      (a, b) => Math.hypot(origin.x - a.x, origin.z - a.z) - Math.hypot(origin.x - b.x, origin.z - b.z),
+    );
+    for (const node of sortedNodes) candidates.push(new THREE.Vector3(node.x, origin.y, node.z));
+
+    for (const radius of [0.45, 0.75, 1.05, 1.4, 1.8, 2.3]) {
+      for (let i = 0; i < 16; i++) {
+        const a = (Math.PI * 2 * i) / 16;
+        candidates.push(new THREE.Vector3(origin.x + Math.cos(a) * radius, origin.y, origin.z + Math.sin(a) * radius));
+      }
+    }
+
+    for (const candidate of candidates) {
+      const x = this.clampToBounds(candidate.x, this.bounds.minX, this.bounds.maxX);
+      const z = this.clampToBounds(candidate.z, this.bounds.minZ, this.bounds.maxZ);
+      if (!this.collides(x, z)) return new THREE.Vector3(x, origin.y, z);
+    }
+    return null;
+  }
+
+  private resolvePenetration(): void {
+    const pos = this.camera.position;
+    for (let pass = 0; pass < 8; pass++) {
+      let moved = false;
+      for (const collider of this.colliders) {
+        if (!this.isColliderActive(collider)) continue;
+        const push = this.getPenetrationPush(pos.x, pos.z, collider);
+        if (!push) continue;
+        pos.x = this.clampToBounds(pos.x + push.x, this.bounds.minX, this.bounds.maxX);
+        pos.z = this.clampToBounds(pos.z + push.z, this.bounds.minZ, this.bounds.maxZ);
+        moved = true;
+      }
+      if (!moved) return;
+    }
+
+    if (this.collides(pos.x, pos.z)) {
+      const safe = this.findNearestClearPoint(pos);
+      if (safe) pos.set(safe.x, pos.y, safe.z);
+    }
+  }
+
+  private getPenetrationPush(x: number, z: number, collider: AABB): { x: number; z: number } | null {
+    const minX = collider.minX - PLAYER_RADIUS;
+    const maxX = collider.maxX + PLAYER_RADIUS;
+    const minZ = collider.minZ - PLAYER_RADIUS;
+    const maxZ = collider.maxZ + PLAYER_RADIUS;
+    if (x <= minX || x >= maxX || z <= minZ || z >= maxZ) return null;
+
+    const left = x - minX;
+    const right = maxX - x;
+    const top = z - minZ;
+    const bottom = maxZ - z;
+    const min = Math.min(left, right, top, bottom);
+    const nudge = min + 0.015;
+
+    if (min === left) return { x: -nudge, z: 0 };
+    if (min === right) return { x: nudge, z: 0 };
+    if (min === top) return { x: 0, z: -nudge };
+    return { x: 0, z: nudge };
+  }
+
+  private hasInventoryItem(itemId: string): boolean {
+    return this.getInventory?.().includes(itemId) ?? false;
+  }
+
+  private syncLightingState(dt: number, t: number): void {
+    const hasFlashlight = this.hasInventoryItem("flashlight");
+    const targetAmbient = hasFlashlight ? 0.85 : 0.22;
+    const targetFill = hasFlashlight ? 0.55 : 0.14;
+    const targetNear = hasFlashlight ? 0.85 : 0.24;
+    const k = Math.min(1, dt * 6);
+
+    this.ambientLight.intensity = THREE.MathUtils.lerp(this.ambientLight.intensity, targetAmbient, k);
+    this.fillLight.intensity = THREE.MathUtils.lerp(this.fillLight.intensity, targetFill, k);
+    this.nearFillLight.intensity = THREE.MathUtils.lerp(this.nearFillLight.intensity, targetNear, k);
+
+    if (hasFlashlight) {
+      this.flashlightSys.update(dt, t);
+    } else {
+      this.flashlight.intensity = 0;
+    }
+
+    this.updateBloodLight(t);
+  }
+
+  private scheduleBloodFlash(t: number): void {
+    this.nextBloodFlashAt = t + 5 + Math.random() * 3;
+  }
+
+  private updateBloodLight(t: number): void {
+    if (!this.bloodLightEnabled) {
+      this.bloodLight.intensity = 0;
+      return;
+    }
+
+    if (t >= this.nextBloodFlashAt) {
+      this.bloodFlashUntil = t + 0.22 + Math.random() * 0.12;
+      this.scheduleBloodFlash(this.bloodFlashUntil);
+    }
+
+    if (t < this.bloodFlashUntil) {
+      const phase = (this.bloodFlashUntil - t) / 0.34;
+      const pulse = 0.7 + 0.3 * Math.sin(t * 58);
+      this.bloodLight.intensity = 4.8 * Math.max(0.35, phase) * pulse;
+    } else {
+      this.bloodLight.intensity = 0;
+    }
   }
 
   private toggleColliderDebug(): void {
@@ -453,6 +596,8 @@ export class Interior3D {
       }
     }
 
+    this.resolvePenetration();
+
     // 5. Resolve horizontal collision (per-axis wall sliding), preserved from the old code.
     if (ctx.velocity.x !== 0 || ctx.velocity.y !== 0) {
       const pos = this.camera.position;
@@ -472,6 +617,8 @@ export class Interior3D {
       pos.z = nz;
     }
 
+    this.resolvePenetration();
+
     // 6. Resolve vertical movement (gravity + floor snap).
     if (!ctx.isOnGround) {
       const posY = this.camera.position.y + ctx.velocityY * dt;
@@ -489,6 +636,9 @@ export class Interior3D {
     // 7. Camera post-update (FOV, head bob, sync yaw).
     this.cameraController.update(dt, ctx, this.stateMachine.currentName);
 
+    // 7b. Story-state machine: only the current narrative phase is interactive.
+    this.syncStoryPhase();
+
     // 8. Collect pickups.
     this.collectPickups();
     // 9. Check story triggers.
@@ -503,7 +653,7 @@ export class Interior3D {
   private collectPickups(): void {
     const p = this.camera.position;
     for (const item of this.room.pickups) {
-      if (item.taken) continue;
+      if (item.taken || !item.glow.visible) continue;
       const dx = p.x - item.position.x;
       const dz = p.z - item.position.z;
       if (dx * dx + dz * dz <= item.radius * item.radius) {
@@ -520,17 +670,17 @@ export class Interior3D {
     const triggers = this.room.storyTriggers;
     for (let i = 0; i < triggers.length; i++) {
       const trigger = triggers[i];
-      if (trigger.triggered) continue;
+      if (trigger.triggered || !trigger.glow.visible) continue;
       const dx = p.x - trigger.position.x;
       const dz = p.z - trigger.position.z;
       if (dx * dx + dz * dz <= trigger.radius * trigger.radius) {
         trigger.triggered = true;
         trigger.glow.visible = false;
-        // Show the next trigger (if any)
-        if (i + 1 < triggers.length) {
-          triggers[i + 1].glow.visible = true;
+        if (trigger.action === "exit") {
+          this.onExitTrigger?.();
+        } else {
+          this.onStoryTrigger?.(trigger.sceneId);
         }
-        this.onStoryTrigger?.(trigger.sceneId);
         break; // only one trigger per frame
       }
     }
@@ -545,10 +695,10 @@ export class Interior3D {
       linewidth: 1,
       depthTest: false,
     });
-    // Pre-allocate 2-point geometry; updated in-place every frame.
     const geo = new THREE.BufferGeometry();
-    const arr = new Float32Array([0, 0.08, 0, 0, 0.08, 0]);
+    const arr = new Float32Array(GUIDE_MAX_POINTS * 3);
     geo.setAttribute("position", new THREE.BufferAttribute(arr, 3));
+    geo.setDrawRange(0, 0);
     this.guideLine = new THREE.Line(geo, mat);
     this.guideLine.visible = false;
     this.scene.add(this.guideLine);
@@ -557,18 +707,192 @@ export class Interior3D {
   /** Point the dashed line from camera to the first non-triggered story trigger. */
   private updateGuideLine(): void {
     if (!this.guideLine) return;
-    const active = this.room.storyTriggers.find((t) => !t.triggered);
+    const active = this.room.storyTriggers.find((t) => !t.triggered && t.glow.visible);
     if (!active) {
       this.guideLine.visible = false;
       return;
     }
-    const cam = this.camera.position;
-    const pos = this.guideLine.geometry.attributes.position;
-    pos.setXYZ(0, cam.x, 0.08, cam.z);
-    pos.setXYZ(1, active.position.x, 0.08, active.position.z);
+    const points = this.findGuideRoute(this.camera.position, active.position);
+    const count = Math.min(points.length, GUIDE_MAX_POINTS);
+    const pos = this.guideLine.geometry.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < count; i++) {
+      const p = points[i];
+      pos.setXYZ(i, p.x, this.room.floorHeightAt(p.x, p.z) + 0.08, p.z);
+    }
+    this.guideLine.geometry.setDrawRange(0, count);
     pos.needsUpdate = true;
     this.guideLine.computeLineDistances();
-    this.guideLine.visible = true;
+    this.guideLine.visible = count >= 2;
+  }
+
+  private syncStoryPhase(): void {
+    const sceneId = this.getStorySceneId?.();
+
+    for (const trigger of this.room.storyTriggers) {
+      const isActive = !trigger.triggered && this.isTriggerAvailable(trigger, sceneId);
+      trigger.glow.visible = isActive;
+    }
+
+    for (const item of this.room.pickups) {
+      const isActive = !item.taken && !this.hasInventoryItem(item.itemId) && this.isPickupAvailable(item, sceneId);
+      item.glow.visible = isActive;
+    }
+
+    for (const phaseObject of this.room.phaseObjects) {
+      phaseObject.object.visible = this.isPhaseObjectAvailable(phaseObject, sceneId);
+    }
+  }
+
+  private isTriggerAvailable(trigger: { activeSceneIds: string[] }, sceneId?: string): boolean {
+    if (!sceneId) return trigger.activeSceneIds.length === 0;
+    return trigger.activeSceneIds.includes(sceneId);
+  }
+
+  private isPickupAvailable(item: { activeSceneIds?: string[] }, sceneId?: string): boolean {
+    if (!item.activeSceneIds?.length) return true;
+    if (!sceneId) return false;
+    return item.activeSceneIds.includes(sceneId);
+  }
+
+  private isPhaseObjectAvailable(item: { activeSceneIds: string[] }, sceneId?: string): boolean {
+    if (!sceneId) return item.activeSceneIds.length === 0;
+    return item.activeSceneIds.includes(sceneId);
+  }
+
+  private findGuideRoute(start: THREE.Vector3, end: THREE.Vector3): THREE.Vector3[] {
+    const nodes = this.room.guideNodes;
+    const startPoint = new THREE.Vector3(start.x, 0, start.z);
+    const endPoint = new THREE.Vector3(end.x, 0, end.z);
+    if (!nodes.length) return [startPoint, endPoint];
+
+    const startNode = this.findNearestVisibleGuideNode(startPoint);
+    const endNode = this.findNearestVisibleGuideNode(endPoint);
+    if (!startNode || !endNode) return [startPoint, endPoint];
+
+    const nodeIds = this.findGuideNodePath(startNode.id, endNode.id);
+    const route = [startPoint];
+    for (const id of nodeIds) {
+      const node = nodes.find((n) => n.id === id);
+      if (node) route.push(new THREE.Vector3(node.x, 0, node.z));
+    }
+    route.push(endPoint);
+    return this.removeDuplicateGuidePoints(route);
+  }
+
+  private findNearestVisibleGuideNode(point: THREE.Vector3): InteriorGuideNode | null {
+    let nearest: InteriorGuideNode | null = null;
+    let nearestDist = Number.POSITIVE_INFINITY;
+    let nearestVisible: InteriorGuideNode | null = null;
+    let nearestVisibleDist = Number.POSITIVE_INFINITY;
+
+    for (const node of this.room.guideNodes) {
+      const dist = Math.hypot(point.x - node.x, point.z - node.z);
+      if (dist < nearestDist) {
+        nearestDist = dist;
+        nearest = node;
+      }
+      const nodePoint = new THREE.Vector3(node.x, 0, node.z);
+      if (dist < nearestVisibleDist && this.isSegmentClear(point, nodePoint)) {
+        nearestVisibleDist = dist;
+        nearestVisible = node;
+      }
+    }
+
+    return nearestVisible ?? nearest;
+  }
+
+  private findGuideNodePath(startId: string, endId: string): string[] {
+    if (startId === endId) return [startId];
+
+    const byId = new Map(this.room.guideNodes.map((node) => [node.id, node]));
+    const open = new Set(byId.keys());
+    const dist = new Map<string, number>();
+    const prev = new Map<string, string>();
+    for (const id of open) dist.set(id, Number.POSITIVE_INFINITY);
+    dist.set(startId, 0);
+
+    while (open.size > 0) {
+      let current: string | null = null;
+      let currentDist = Number.POSITIVE_INFINITY;
+      for (const id of open) {
+        const d = dist.get(id) ?? Number.POSITIVE_INFINITY;
+        if (d < currentDist) {
+          current = id;
+          currentDist = d;
+        }
+      }
+      if (!current || currentDist === Number.POSITIVE_INFINITY) break;
+      open.delete(current);
+      if (current === endId) break;
+
+      const node = byId.get(current);
+      if (!node) continue;
+      for (const link of node.links) {
+        const next = byId.get(link);
+        if (!next || !open.has(link)) continue;
+        const step = Math.hypot(node.x - next.x, node.z - next.z);
+        const alt = currentDist + step;
+        if (alt < (dist.get(link) ?? Number.POSITIVE_INFINITY)) {
+          dist.set(link, alt);
+          prev.set(link, current);
+        }
+      }
+    }
+
+    const path: string[] = [];
+    let cursor: string | undefined = endId;
+    while (cursor) {
+      path.unshift(cursor);
+      if (cursor === startId) break;
+      cursor = prev.get(cursor);
+    }
+    return path[0] === startId ? path : [startId, endId];
+  }
+
+  private removeDuplicateGuidePoints(points: THREE.Vector3[]): THREE.Vector3[] {
+    const result: THREE.Vector3[] = [];
+    for (const point of points) {
+      const previous = result[result.length - 1];
+      if (!previous || Math.hypot(previous.x - point.x, previous.z - point.z) > 0.08) {
+        result.push(point);
+      }
+    }
+    return result;
+  }
+
+  private isSegmentClear(a: THREE.Vector3, b: THREE.Vector3): boolean {
+    for (const collider of this.colliders) {
+      if (!this.isColliderActive(collider)) continue;
+      if (this.segmentHitsCollider(a, b, collider, PLAYER_RADIUS * 0.65)) return false;
+    }
+    return true;
+  }
+
+  private segmentHitsCollider(a: THREE.Vector3, b: THREE.Vector3, collider: AABB, pad: number): boolean {
+    const dx = b.x - a.x;
+    const dz = b.z - a.z;
+    const length = Math.hypot(dx, dz);
+    const steps = Math.max(2, Math.ceil(length / 0.18));
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const x = a.x + dx * t;
+      const z = a.z + dz * t;
+      if (
+        x > collider.minX - pad &&
+        x < collider.maxX + pad &&
+        z > collider.minZ - pad &&
+        z < collider.maxZ + pad
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private isColliderActive(collider: AABB): boolean {
+    if (!collider.activeSceneIds?.length) return true;
+    const sceneId = this.getStorySceneId?.();
+    return Boolean(sceneId && collider.activeSceneIds.includes(sceneId));
   }
 
   private loop = (): void => {
@@ -582,8 +906,7 @@ export class Interior3D {
     // Update door rotation animations.
     for (const door of this.room.doors) door.update(dt);
 
-    // Flashlight battery decay + flicker (replaces old static flicker).
-    this.flashlightSys.update(dt, t);
+    this.syncLightingState(dt, t);
 
     this.renderer.render(this.scene, this.camera);
   };

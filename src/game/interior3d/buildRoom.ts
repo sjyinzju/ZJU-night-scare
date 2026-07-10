@@ -13,6 +13,7 @@ export interface AABB {
   maxX: number;
   minZ: number;
   maxZ: number;
+  activeSceneIds?: string[];
 }
 
 /** A glowing, collectable item on the floor. */
@@ -20,6 +21,7 @@ export interface Pickup {
   id: string;
   itemId: string;
   name: string;
+  activeSceneIds?: string[];
   glow: THREE.Object3D;
   position: THREE.Vector3;
   radius: number;
@@ -30,10 +32,24 @@ export interface Pickup {
 export interface StoryTrigger {
   id: string;
   sceneId: string;
+  action: "story" | "exit";
+  activeSceneIds: string[];
   glow: THREE.Object3D;
   position: THREE.Vector3;
   radius: number;
   triggered: boolean;
+}
+
+export interface InteriorGuideNode {
+  id: string;
+  x: number;
+  z: number;
+  links: string[];
+}
+
+export interface InteriorPhaseObject {
+  object: THREE.Object3D;
+  activeSceneIds: string[];
 }
 
 export interface RoomBuildResult {
@@ -53,6 +69,10 @@ export interface RoomBuildResult {
   storyTriggers: StoryTrigger[];
   /** Interactive doors in this room. */
   doors: DoorComponent[];
+  /** Walkable guide graph for floor routes that should avoid furniture. */
+  guideNodes: InteriorGuideNode[];
+  /** Visual objects controlled by the current story phase. */
+  phaseObjects: InteriorPhaseObject[];
   /** Suggested spawn point for the camera. */
   spawn: THREE.Vector3;
   /** Free all geometries + materials. */
@@ -116,6 +136,8 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
   const pickups: Pickup[] = [];
   const storyTriggers: StoryTrigger[] = [];
   const doors: DoorComponent[] = [];
+  const guideNodes: InteriorGuideNode[] = [];
+  const phaseObjects: InteriorPhaseObject[] = [];
 
   const geometries: THREE.BufferGeometry[] = [];
   const materials: THREE.Material[] = [];
@@ -211,15 +233,44 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
   };
 
   // A glowing collectable item (floats + bobs, auto-collected on approach).
-  const addPickup = (itemId: string, name: string, x: number, y: number, z: number, color: number): void => {
+  const addPickup = (
+    itemId: string,
+    name: string,
+    x: number,
+    y: number,
+    z: number,
+    color: number,
+    activeSceneIds?: string[],
+  ): void => {
     const g = new THREE.Group();
     g.position.set(x, y, z);
     root.add(g);
-    const coreMat = trackMat(
-      new THREE.MeshStandardMaterial({ color, emissive: new THREE.Color(color), emissiveIntensity: 1.6, roughness: 0.35 }),
-    );
-    const core = new THREE.Mesh(track(new THREE.IcosahedronGeometry(0.12, 0)), coreMat);
-    g.add(core);
+    if (itemId === "flashlight") {
+      const bodyMat = trackMat(new THREE.MeshStandardMaterial({ color: 0x2b3138, roughness: 0.42, metalness: 0.28 }));
+      const rimMat = trackMat(new THREE.MeshStandardMaterial({ color: 0xc9b276, roughness: 0.28, metalness: 0.48 }));
+      const lensMat = trackMat(
+        new THREE.MeshStandardMaterial({ color, emissive: new THREE.Color(color), emissiveIntensity: 1.4, roughness: 0.2 }),
+      );
+      const body = new THREE.Mesh(track(new THREE.CylinderGeometry(0.075, 0.09, 0.48, 16)), bodyMat);
+      body.rotation.z = Math.PI / 2;
+      body.castShadow = true;
+      g.add(body);
+      const head = new THREE.Mesh(track(new THREE.CylinderGeometry(0.13, 0.1, 0.18, 18)), rimMat);
+      head.rotation.z = Math.PI / 2;
+      head.position.x = 0.31;
+      head.castShadow = true;
+      g.add(head);
+      const lens = new THREE.Mesh(track(new THREE.CircleGeometry(0.095, 18)), lensMat);
+      lens.rotation.y = Math.PI / 2;
+      lens.position.x = 0.405;
+      g.add(lens);
+    } else {
+      const coreMat = trackMat(
+        new THREE.MeshStandardMaterial({ color, emissive: new THREE.Color(color), emissiveIntensity: 1.6, roughness: 0.35 }),
+      );
+      const core = new THREE.Mesh(track(new THREE.IcosahedronGeometry(0.12, 0)), coreMat);
+      g.add(core);
+    }
     const haloMat = trackMat(
       new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false }),
     );
@@ -231,6 +282,7 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
       id: `${itemId}-${pickups.length}`,
       itemId,
       name,
+      activeSceneIds,
       glow: g,
       position: new THREE.Vector3(x, y, z),
       radius: 0.9,
@@ -239,7 +291,15 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
   };
 
   // A red glowing story-trigger zone. Player walks in → text popup in the 3D interior.
-  const addStoryTrigger = (sceneId: string, x: number, y: number, z: number): void => {
+  const addStoryTrigger = (
+    sceneId: string,
+    x: number,
+    y: number,
+    z: number,
+    action: "story" | "exit" = "story",
+    activeSceneIds: string[] = [sceneId],
+    radius = 1.2,
+  ): void => {
     const color = 0xd04438;
     const g = new THREE.Group();
     g.position.set(x, y, z);
@@ -259,9 +319,11 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
     storyTriggers.push({
       id: `${sceneId}-${storyTriggers.length}`,
       sceneId,
+      action,
+      activeSceneIds,
       glow: g,
       position: new THREE.Vector3(x, y, z),
-      radius: 1.2,
+      radius,
       triggered: false,
     });
   };
@@ -288,12 +350,12 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
       }
       for (const n of npcs) if (n.group.visible) n.update(t);
       for (const p of pickups) {
-        if (p.taken) continue;
+        if (p.taken || !p.glow.visible) continue;
         p.glow.rotation.y = t * 1.4;
         p.glow.position.y = p.position.y + Math.sin(t * 2.2 + p.position.x) * 0.08;
       }
       for (const s of storyTriggers) {
-        if (s.triggered) continue;
+        if (s.triggered || !s.glow.visible) continue;
         s.glow.rotation.y = t * 0.9;
         s.glow.position.y = s.position.y + Math.sin(t * 1.8 + s.position.x) * 0.1;
       }
@@ -304,7 +366,7 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
       for (const m of materials) m.dispose();
       root.clear();
     };
-    return { root, colliders, bounds, update, floorHeightAt, pickups, storyTriggers, doors, spawn, dispose };
+    return { root, colliders, bounds, update, floorHeightAt, pickups, storyTriggers, doors, guideNodes, phaseObjects, spawn, dispose };
   }
 
   // ---------------------------------------------------------------- LIBRARY
@@ -322,6 +384,8 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
       metalMat,
       accentMat,
       colliders,
+      phaseObjects,
+      guideNodes,
     });
     const npc = buildCharacter({ bodyColor: 0x161b22, skinColor: 0xb7c2c9 });
     npc.group.position.set(built.npc.x, built.npc.y, built.npc.z);
@@ -330,20 +394,24 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
     root.add(npc.group);
     npcs.push(npc);
 
-    ROOM_ITEMS.library.forEach((it, i) => {
+    const librarySceneItems: typeof ROOM_ITEMS.library = [];
+    librarySceneItems.forEach((it, i) => {
       const p = built.pickupSpots[i] ?? built.pickupSpots[0];
-      addPickup(it.itemId, it.name, p.x, p.y, p.z, i === 0 ? 0x8fd0ff : 0xffd27a);
+      addPickup(it.itemId, it.name, p.x, p.y, p.z, i === 0 ? 0x8fd0ff : 0xffd27a, i === 0 ? ["library_intro"] : ["library_sound"]);
     });
+    const flashlightSpot = built.flashlightSpots[Math.floor(Math.random() * built.flashlightSpots.length)] ?? built.flashlightSpots[0];
+    addPickup("flashlight", "手电筒", flashlightSpot.x, 0.72, flashlightSpot.z, 0xfff1a8);
 
     // Story triggers: first one visible, rest hidden until previous triggered
-    addStoryTrigger("library_intro", 0, 0.7, 3.5);    // near the reading table
-    addStoryTrigger("library_sound", 0, 0.7, -3.0);   // near the spiral staircase base
+    addStoryTrigger("library_intro", built.triggers.intro.x, 0.7, built.triggers.intro.z, "story", ["library_intro"], 0.85);
+    addStoryTrigger("library_sound", built.triggers.sound.x, 0.7, built.triggers.sound.z);
+    addStoryTrigger("library_exit", built.triggers.exit.x, 0.7, built.triggers.exit.z, "exit", ["library_police", "dorm_baiqiu"]);
     // Hide all triggers after the first
     for (let i = 1; i < storyTriggers.length; i++) {
       storyTriggers[i].glow.visible = false;
     }
 
-    return finalize(built.bounds, built.spawn, built.floorHeightAt, { revealZ: -99, revealFloor2: true });
+    return finalize(built.bounds, built.spawn, built.floorHeightAt, { revealZ: -6.6, revealFloor2: false });
   }
 
   // -------------------------------------------------- FLAT ROOMS (non-library)
@@ -571,6 +639,8 @@ interface LibCtx {
   metalMat: THREE.Material;
   accentMat: THREE.Material;
   colliders: AABB[];
+  guideNodes: InteriorGuideNode[];
+  phaseObjects: InteriorPhaseObject[];
 }
 
 interface LibResult {
@@ -579,6 +649,12 @@ interface LibResult {
   floorHeightAt: (x: number, z: number) => number;
   npc: { x: number; y: number; z: number; ry: number };
   pickupSpots: { x: number; y: number; z: number }[];
+  flashlightSpots: { x: number; z: number }[];
+  triggers: {
+    intro: { x: number; z: number };
+    sound: { x: number; z: number };
+    exit: { x: number; z: number };
+  };
 }
 
 /**
@@ -586,7 +662,7 @@ interface LibResult {
  * the +Z entrance, bookshelf rows, and a white spiral staircase (centre-back)
  * rising one full turn to a 2nd-floor gallery where the figure waits.
  */
-function buildLibrary(ctx: LibCtx): LibResult {
+function buildLibraryLegacy(ctx: LibCtx) {
   const { addBox, addBookshelf, track, trackMat, floorMat, ceilMat, wallMat, whiteMat, metalMat, accentMat, root, colliders } = ctx;
   const W = 12;
   const L = 18;
@@ -715,5 +791,190 @@ function buildLibrary(ctx: LibCtx): LibResult {
       { x: -halfW + 1.5, y: 0.7, z: 3.2 }, // ground floor, front-left
       { x: -3.0, y: F2Y + 0.7, z: -7.4 }, // upstairs on the mezzanine
     ],
+  };
+}
+
+function buildLibrary(ctx: LibCtx): LibResult {
+  const {
+    addBox,
+    addBookshelf,
+    track,
+    trackMat,
+    floorMat,
+    ceilMat,
+    wallMat,
+    whiteMat,
+    metalMat,
+    accentMat,
+    root,
+    colliders,
+    guideNodes,
+    phaseObjects,
+  } = ctx;
+  const W = 13.5;
+  const L = 18;
+  const WALL_H = 4.2;
+  const halfW = W / 2;
+  const halfL = L / 2;
+  const floorY = 0.018;
+
+  const woodMat = trackMat(new THREE.MeshStandardMaterial({ color: 0x6b4b2e, roughness: 0.82 }));
+  const darkWoodMat = trackMat(new THREE.MeshStandardMaterial({ color: 0x3d2c22, roughness: 0.9 }));
+  const seatMat = trackMat(new THREE.MeshStandardMaterial({ color: 0x334257, roughness: 0.94 }));
+  const brassMat = trackMat(new THREE.MeshStandardMaterial({ color: 0xa77c3f, roughness: 0.48, metalness: 0.35 }));
+  const tileLineMat = trackMat(new THREE.MeshBasicMaterial({ color: 0x50606b, transparent: true, opacity: 0.22 }));
+  const pathMat = trackMat(new THREE.MeshBasicMaterial({ color: 0x793733, transparent: true, opacity: 0.16 }));
+
+  const floor = new THREE.Mesh(track(new THREE.PlaneGeometry(W, L)), floorMat);
+  floor.rotation.x = -Math.PI / 2;
+  floor.receiveShadow = true;
+  root.add(floor);
+
+  const ceil = new THREE.Mesh(track(new THREE.PlaneGeometry(W, L)), ceilMat);
+  ceil.rotation.x = Math.PI / 2;
+  ceil.position.y = WALL_H;
+  root.add(ceil);
+
+  addBox(W + 0.3, WALL_H, 0.3, 0, WALL_H / 2, -halfL, wallMat);
+  addBox(W + 0.3, WALL_H, 0.3, 0, WALL_H / 2, halfL, wallMat);
+  addBox(0.3, WALL_H, L + 0.3, -halfW, WALL_H / 2, 0, wallMat);
+  addBox(0.3, WALL_H, L + 0.3, halfW, WALL_H / 2, 0, wallMat);
+
+  for (let x = -6; x <= 6; x += 1.5) addBox(0.018, 0.01, L - 0.5, x, floorY, 0, tileLineMat, false);
+  for (let z = -8.25; z <= 8.25; z += 1.5) addBox(W - 0.5, 0.01, 0.018, 0, floorY, z, tileLineMat, false);
+
+  const addChair = (x: number, z: number, ry = 0): void => {
+    const g = new THREE.Group();
+    g.position.set(x, 0, z);
+    g.rotation.y = ry;
+    root.add(g);
+    const seat = new THREE.Mesh(track(new THREE.BoxGeometry(0.42, 0.08, 0.42)), seatMat);
+    seat.position.y = 0.45;
+    seat.castShadow = true;
+    g.add(seat);
+    const back = new THREE.Mesh(track(new THREE.BoxGeometry(0.42, 0.48, 0.06)), seatMat);
+    back.position.set(0, 0.72, 0.2);
+    back.castShadow = true;
+    g.add(back);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      const leg = new THREE.Mesh(track(new THREE.BoxGeometry(0.055, 0.45, 0.055)), metalMat);
+      leg.position.set(sx * 0.16, 0.225, sz * 0.16);
+      g.add(leg);
+    }
+  };
+
+  const addStudyTable = (x: number, z: number, w = 1.25, d = 0.78): void => {
+    addBox(w, 0.08, d, x, 0.76, z, woodMat, false);
+    addBox(w - 0.16, 0.035, 0.08, x, 0.82, z, accentMat, false);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      addBox(0.075, 0.72, 0.075, x + sx * (w / 2 - 0.14), 0.36, z + sz * (d / 2 - 0.12), metalMat, false);
+    }
+    colliders.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2 });
+    addChair(x - w * 0.32, z + d * 0.9, 0);
+    addChair(x + w * 0.32, z + d * 0.9, 0);
+    addChair(x - w * 0.32, z - d * 0.9, Math.PI);
+    addChair(x + w * 0.32, z - d * 0.9, Math.PI);
+  };
+
+  const addRouteCarpet = (x: number, z: number, w: number, d: number): void => {
+    addBox(w, 0.012, d, x, 0.026, z, pathMat, false);
+  };
+
+  addRouteCarpet(-3.0, -2.25, 4.8, 1.0);
+  addRouteCarpet(0.3, -3.25, 4.2, 0.9);
+  addStudyTable(-5.0, -5.95);
+  addStudyTable(-5.0, -3.45);
+  addStudyTable(1.0, -5.75);
+  addStudyTable(4.25, -5.75);
+  addStudyTable(1.0, -3.35);
+  addStudyTable(4.25, -3.35);
+
+  const SX = -1.45;
+  const SZ = -4.8;
+  const R_IN = 0.46;
+  const R_OUT = 1.35;
+  const rMid = (R_IN + R_OUT) / 2;
+
+  const col = new THREE.Mesh(track(new THREE.CylinderGeometry(R_IN, R_IN, 3.7, 28)), whiteMat);
+  col.position.set(SX, 1.85, SZ);
+  root.add(col);
+  colliders.push({ minX: SX - R_IN, maxX: SX + R_IN, minZ: SZ - R_IN, maxZ: SZ + R_IN });
+
+  for (let i = 0; i < 22; i++) {
+    const a = -Math.PI * 0.25 + i * 0.34;
+    const y = 0.28 + i * 0.13;
+    const tread = new THREE.Mesh(track(new THREE.BoxGeometry(R_OUT - R_IN + 0.25, 0.08, 0.5)), whiteMat);
+    tread.position.set(SX + Math.cos(a) * rMid, y, SZ + Math.sin(a) * rMid);
+    tread.rotation.y = -a;
+    tread.castShadow = true;
+    root.add(tread);
+    if (i % 3 === 0) {
+      const post = new THREE.Mesh(track(new THREE.CylinderGeometry(0.026, 0.026, 0.9, 6)), brassMat);
+      post.position.set(SX + Math.cos(a) * (R_OUT + 0.08), y + 0.45, SZ + Math.sin(a) * (R_OUT + 0.08));
+      root.add(post);
+    }
+  }
+
+  addBox(4.0, 1.2, 0.18, -4.45, 0.6, 0.45, darkWoodMat);
+  addBox(5.55, 1.2, 0.18, 3.55, 0.6, 0.45, darkWoodMat);
+  const storyGate = addBox(2.7, 0.12, 0.16, -0.8, 1.25, 0.45, whiteMat, false);
+  phaseObjects.push({ object: storyGate, activeSceneIds: ["library_intro"] });
+  colliders.push({ minX: -2.15, maxX: 0.55, minZ: 0.37, maxZ: 0.53, activeSceneIds: ["library_intro"] });
+  addRouteCarpet(-0.9, 1.4, 1.25, 2.2);
+  addRouteCarpet(1.7, 2.25, 5.2, 0.82);
+
+  addBookshelf(2.0, 4.55, 3.8, Math.PI / 2);
+  addBookshelf(3.35, 4.55, 3.8, Math.PI / 2);
+  addBookshelf(4.7, 4.55, 3.8, Math.PI / 2);
+  addBookshelf(5.8, 4.55, 3.8, Math.PI / 2);
+  addBox(3.6, 0.04, 0.8, 3.85, 0.04, 6.88, pathMat, false);
+
+  addBox(2.2, 0.95, 0.48, -4.65, 0.48, 4.7, darkWoodMat);
+  addBox(1.2, 1.7, 0.45, -5.2, 0.85, 6.35, metalMat);
+  addBox(0.8, 0.08, 0.8, -3.65, 0.78, 6.1, accentMat, false);
+
+  const gateZ = 7.35;
+  for (const sx of [-1.1, 0, 1.1]) addBox(0.28, 0.98, 0.34, sx, 0.49, gateZ, metalMat, false);
+  for (const sx of [-0.55, 0.55]) addBox(0.06, 0.1, 0.9, sx, 0.92, gateZ, brassMat, false);
+  addBox(3.5, 0.18, 0.16, 0, 1.6, gateZ, whiteMat, false);
+
+  guideNodes.push(
+    { id: "spawn-left", x: -3.85, z: -2.35, links: ["left-aisle", "upper-cross"] },
+    { id: "left-aisle", x: -3.2, z: -2.85, links: ["spawn-left", "upper-cross"] },
+    { id: "upper-cross", x: -1.1, z: -2.85, links: ["spawn-left", "left-aisle", "right-entry", "passage-top"] },
+    { id: "right-entry", x: 0.75, z: -2.35, links: ["upper-cross", "intro"] },
+    { id: "intro", x: 2.25, z: -2.05, links: ["right-entry"] },
+    { id: "passage-top", x: -0.85, z: 0.05, links: ["upper-cross", "passage-bottom"] },
+    { id: "passage-bottom", x: -0.85, z: 2.2, links: ["passage-top", "shelf-entry", "gate-approach"] },
+    { id: "shelf-entry", x: 4.05, z: 2.35, links: ["passage-bottom", "shelf-aisle"] },
+    { id: "shelf-aisle", x: 4.05, z: 3.35, links: ["shelf-entry", "shelf-exit"] },
+    { id: "shelf-exit", x: 4.05, z: 6.82, links: ["shelf-aisle", "gate-approach"] },
+    { id: "gate-approach", x: 0.35, z: 6.85, links: ["passage-bottom", "shelf-exit", "gate"] },
+    { id: "gate", x: 0.0, z: 7.35, links: ["gate-approach"] },
+  );
+
+  const bounds: AABB = { minX: -halfW + 0.3, maxX: halfW - 0.3, minZ: -halfL + 0.3, maxZ: halfL - 0.3 };
+  const spawn = new THREE.Vector3(-3.85, 1.6, -2.35);
+
+  return {
+    bounds,
+    spawn,
+    floorHeightAt: () => 0,
+    npc: { x: -1.1, y: 0, z: -7.25, ry: Math.PI },
+    pickupSpots: [
+      { x: -5.55, y: 0.7, z: -1.15 },
+      { x: 1.25, y: 0.7, z: 6.15 },
+    ],
+    flashlightSpots: [
+      { x: -3.05, z: -3.0 },
+      { x: -2.65, z: -6.35 },
+      { x: -0.28, z: -3.05 },
+      { x: -3.35, z: -4.0 },
+    ],
+    triggers: {
+      intro: { x: 2.25, z: -2.05 },
+      sound: { x: 4.05, z: 3.35 },
+      exit: { x: 0.0, z: gateZ },
+    },
   };
 }

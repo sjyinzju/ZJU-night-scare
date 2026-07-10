@@ -62,7 +62,7 @@ export const INTERIOR_BLUEPRINTS: Record<RoomKind, InteriorBlueprint> = {
   library: {
     kind: "library",
     label: "Basic Library",
-    spawnYaw: Math.PI,
+    spawnYaw: -0.96,
     movement: {
       ...DEFAULT_MOVEMENT,
       walkSpeed: 2.85,

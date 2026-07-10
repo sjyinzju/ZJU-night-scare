@@ -246,7 +246,7 @@ export const storyScenes: Record<StorySceneId, StoryScene> = {
       {
         id: "leave",
         text: "提议现在就离开图书馆",
-        next: "library_police",
+        next: "library_sound",
         statChanges: { sanity: -4, stamina: -3, clues: 2 },
         effect: "shake",
       },

@@ -4,7 +4,10 @@ import { useGameStore } from "../store";
 
 export interface InteriorOverlayProps {
   building: { id: string; name: string; zone?: string };
+  currentSceneId: string;
+  inventory: string[];
   onExit: () => void;
+  onExitTrigger?: () => void;
   /** When true, shows a virtual joystick + drag-to-look controls. */
   isMobile?: boolean;
 }
@@ -17,11 +20,16 @@ const JOYSTICK_RADIUS = 56;
  */
 export default function InteriorOverlay({
   building,
+  currentSceneId,
+  inventory,
   onExit,
+  onExitTrigger,
   isMobile = false,
 }: InteriorOverlayProps): React.ReactElement {
   const hostRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<Interior3D | null>(null);
+  const currentSceneIdRef = useRef(currentSceneId);
+  const inventoryRef = useRef(inventory);
   // WebGL 初始化失败（部分低端/受限浏览器无法创建 WebGL 上下文）时降级为提示。
   const [failed, setFailed] = useState(false);
   // 拾取道具时的短暂提示文案。
@@ -39,6 +47,14 @@ export default function InteriorOverlay({
   const lookLast = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
   useEffect(() => {
+    currentSceneIdRef.current = currentSceneId;
+  }, [currentSceneId]);
+
+  useEffect(() => {
+    inventoryRef.current = inventory;
+  }, [inventory]);
+
+  useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
     let engine: Interior3D | null = null;
@@ -48,7 +64,9 @@ export default function InteriorOverlay({
         buildingId: building.id,
         zone: building.zone,
         isMobile,
-        getDoorInventory: () => useGameStore.getState().storyState.inventory,
+        getStorySceneId: () => currentSceneIdRef.current,
+        getInventory: () => inventoryRef.current,
+        getDoorInventory: () => inventoryRef.current,
         onPickup: (itemId, name) => {
           // 通知外层剧情系统把道具加入物品栏，并弹一个短暂提示。
           window.dispatchEvent(new CustomEvent("zju-horror-pickup", { detail: { itemId, name } }));
@@ -59,6 +77,10 @@ export default function InteriorOverlay({
         onStoryTrigger: (sceneId) => {
           engineRef.current?.exitPointerLock();
           window.dispatchEvent(new CustomEvent("zju-horror-interior-story", { detail: { sceneId } }));
+        },
+        onExitTrigger: () => {
+          engineRef.current?.exitPointerLock();
+          (onExitTrigger ?? onExit)();
         },
         getStamina: () => useGameStore.getState().storyState.stats.stamina,
         setStamina: (v) => {
