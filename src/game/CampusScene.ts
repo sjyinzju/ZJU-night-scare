@@ -34,8 +34,9 @@ const MAP_D = 34;
 // Old movement used 0.075 * speed per frame. Keep the 60fps feel while
 // making movement frame-rate independent.
 const PLAYER_SPEED = 18.9;
-const ROAD_SNAP_RADIUS = 0.9;
-const JUNCTION_RADIUS = 1.85;
+const ROAD_SNAP_RADIUS = 1.0;
+// 更大的路口判定半径 → 靠近十字/三岔路口时更早、更容易拐进支路。
+const JUNCTION_RADIUS = 2.35;
 // 玩家中心距离可进入建筑中心小于此值时，判定为"可进入"。
 const ENTER_RADIUS = 2.6;
 const WORLD_BOUNDS = { x: -1200, y: 0, width: 4300, height: 2200 };
@@ -2038,9 +2039,9 @@ export class CampusScene extends Phaser.Scene {
     if (this.keys.up.isDown || this.keys.w.isDown) screenY -= 1;
     if (this.keys.down.isDown || this.keys.s.isDown) screenY += 1;
 
-    // 键盘无输入时，用触摸摇杆注入的向量（移动端）。
+    // 键盘无输入时，用触摸/鼠标摇杆注入的向量。死区调小 → 更灵敏、轻推即走。
     if (screenX === 0 && screenY === 0) {
-      if (Math.hypot(this.touchInput.x, this.touchInput.y) > 0.18) {
+      if (Math.hypot(this.touchInput.x, this.touchInput.y) > 0.1) {
         screenX = this.touchInput.x;
         screenY = this.touchInput.y;
       }
@@ -2068,7 +2069,8 @@ export class CampusScene extends Phaser.Scene {
       // ── 三岔路智能匹配：先分上下，再分左右 ──
       const bonuses = this.junctionBonuses(input.screen, options);
       let bestScore = Number.NEGATIVE_INFINITY;
-      const hysteresisThreshold = bonuses.some((bonus) => bonus > 0) ? 0.08 : 0.35;
+      // 直行惯性(hysteresis)调低 → 在路口更容易顺着摇杆拐进支路，不再一味直行冲过路口。
+      const hysteresisThreshold = bonuses.some((bonus) => bonus > 0) ? 0.05 : 0.18;
 
       for (let i = 0; i < options.length; i++) {
         const opt = options[i];

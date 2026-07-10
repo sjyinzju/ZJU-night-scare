@@ -4,10 +4,7 @@ import { useGameStore } from "../store";
 
 export interface InteriorOverlayProps {
   building: { id: string; name: string; zone?: string };
-  currentSceneId: string;
-  inventory: string[];
   onExit: () => void;
-  onExitTrigger?: () => void;
   /** When true, shows a virtual joystick + drag-to-look controls. */
   isMobile?: boolean;
 }
@@ -20,21 +17,23 @@ const JOYSTICK_RADIUS = 56;
  */
 export default function InteriorOverlay({
   building,
-  currentSceneId,
-  inventory,
   onExit,
-  onExitTrigger,
   isMobile = false,
 }: InteriorOverlayProps): React.ReactElement {
   const hostRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<Interior3D | null>(null);
-  const currentSceneIdRef = useRef(currentSceneId);
-  const inventoryRef = useRef(inventory);
   // WebGL 初始化失败（部分低端/受限浏览器无法创建 WebGL 上下文）时降级为提示。
   const [failed, setFailed] = useState(false);
   // 拾取道具时的短暂提示文案。
   const [pickupToast, setPickupToast] = useState<string | null>(null);
   const toastTimer = useRef<number | null>(null);
+  // 镜子惊吓等时刻,由内景派发 zju-horror-interior-dim 临时压暗全屏。
+  const [dimmed, setDimmed] = useState(false);
+  useEffect(() => {
+    const onDim = (e: Event) => setDimmed(!!(e as CustomEvent<{ on: boolean }>).detail?.on);
+    window.addEventListener("zju-horror-interior-dim", onDim);
+    return () => window.removeEventListener("zju-horror-interior-dim", onDim);
+  }, []);
 
   // Joystick state.
   const joyRef = useRef<HTMLDivElement>(null);
@@ -47,14 +46,6 @@ export default function InteriorOverlay({
   const lookLast = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
   useEffect(() => {
-    currentSceneIdRef.current = currentSceneId;
-  }, [currentSceneId]);
-
-  useEffect(() => {
-    inventoryRef.current = inventory;
-  }, [inventory]);
-
-  useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
     let engine: Interior3D | null = null;
@@ -64,9 +55,7 @@ export default function InteriorOverlay({
         buildingId: building.id,
         zone: building.zone,
         isMobile,
-        getStorySceneId: () => currentSceneIdRef.current,
-        getInventory: () => inventoryRef.current,
-        getDoorInventory: () => inventoryRef.current,
+        getDoorInventory: () => useGameStore.getState().storyState.inventory,
         onPickup: (itemId, name) => {
           // 通知外层剧情系统把道具加入物品栏，并弹一个短暂提示。
           window.dispatchEvent(new CustomEvent("zju-horror-pickup", { detail: { itemId, name } }));
@@ -77,10 +66,6 @@ export default function InteriorOverlay({
         onStoryTrigger: (sceneId) => {
           engineRef.current?.exitPointerLock();
           window.dispatchEvent(new CustomEvent("zju-horror-interior-story", { detail: { sceneId } }));
-        },
-        onExitTrigger: () => {
-          engineRef.current?.exitPointerLock();
-          (onExitTrigger ?? onExit)();
         },
         getStamina: () => useGameStore.getState().storyState.stats.stamina,
         setStamina: (v) => {
@@ -201,6 +186,19 @@ export default function InteriorOverlay({
 
       {/* 氛围叠层：暗角 + 轻微冷调，与外层地图的恐怖质感统一。 */}
       <div style={styles.vignette} aria-hidden="true" />
+      {/* 镜子惊吓时刻的临时压暗层（柔和淡入，只在中央留一小圈可视）。 */}
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          zIndex: 3,
+          pointerEvents: "none",
+          background: "radial-gradient(ellipse 90% 90% at 50% 50%, transparent 20%, rgba(2,2,4,0.72) 78%, rgba(0,0,0,0.9) 100%)",
+          opacity: dimmed ? 1 : 0,
+          transition: "opacity 0.6s ease",
+        }}
+        aria-hidden="true"
+      />
       <div style={styles.scanline} aria-hidden="true" />
 
       {/* Mobile look surface covers the right half of the screen. */}

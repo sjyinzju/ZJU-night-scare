@@ -3,6 +3,8 @@ import { buildCharacter, type CharacterHandle } from "./buildCharacter";
 import { DoorComponent } from "./DoorComponent";
 import { buildStraightStairs, buildLStairs } from "./StaircaseBuilder";
 import { RoomDivider } from "./RoomDivider";
+import { woodTexture, floorTexture, tileTexture, wallTexture, fabricTexture, metalTexture } from "./textures";
+import { Reflector } from "three/examples/jsm/objects/Reflector.js";
 
 /** Room archetypes with distinct furniture layouts. */
 export type RoomKind = "library" | "medical" | "dorm" | "hall";
@@ -13,7 +15,6 @@ export interface AABB {
   maxX: number;
   minZ: number;
   maxZ: number;
-  activeSceneIds?: string[];
 }
 
 /** A glowing, collectable item on the floor. */
@@ -21,7 +22,6 @@ export interface Pickup {
   id: string;
   itemId: string;
   name: string;
-  activeSceneIds?: string[];
   glow: THREE.Object3D;
   position: THREE.Vector3;
   radius: number;
@@ -32,24 +32,10 @@ export interface Pickup {
 export interface StoryTrigger {
   id: string;
   sceneId: string;
-  action: "story" | "exit";
-  activeSceneIds: string[];
   glow: THREE.Object3D;
   position: THREE.Vector3;
   radius: number;
   triggered: boolean;
-}
-
-export interface InteriorGuideNode {
-  id: string;
-  x: number;
-  z: number;
-  links: string[];
-}
-
-export interface InteriorPhaseObject {
-  object: THREE.Object3D;
-  activeSceneIds: string[];
 }
 
 export interface RoomBuildResult {
@@ -69,10 +55,6 @@ export interface RoomBuildResult {
   storyTriggers: StoryTrigger[];
   /** Interactive doors in this room. */
   doors: DoorComponent[];
-  /** Walkable guide graph for floor routes that should avoid furniture. */
-  guideNodes: InteriorGuideNode[];
-  /** Visual objects controlled by the current story phase. */
-  phaseObjects: InteriorPhaseObject[];
   /** Suggested spawn point for the camera. */
   spawn: THREE.Vector3;
   /** Free all geometries + materials. */
@@ -126,6 +108,11 @@ const ROOM_ITEMS: Record<RoomKind, { itemId: string; name: string }[]> = {
 
 const WALL_T = 0.28;
 
+/** Dispatch a window CustomEvent, guarded for non-DOM (Node build/test) envs. */
+function emit(name: string, detail: unknown): void {
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(name, { detail }));
+}
+
 export function buildRoom(kind: RoomKind): RoomBuildResult {
   const root = new THREE.Group();
   root.name = `room-${kind}`;
@@ -136,8 +123,10 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
   const pickups: Pickup[] = [];
   const storyTriggers: StoryTrigger[] = [];
   const doors: DoorComponent[] = [];
-  const guideNodes: InteriorGuideNode[] = [];
-  const phaseObjects: InteriorPhaseObject[] = [];
+  // Per-frame ambient animators (flickering lights, a slowly rolling gurney …).
+  const animators: Array<(t: number) => void> = [];
+  // Extra GPU resources (e.g. mirror Reflector render targets) to free on dispose.
+  const reflectorDisposers: Array<() => void> = [];
 
   const geometries: THREE.BufferGeometry[] = [];
   const materials: THREE.Material[] = [];
@@ -151,13 +140,23 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
   };
   const stdMat = (color: number, rough = 0.9, metal = 0.04): THREE.MeshStandardMaterial =>
     trackMat(new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal }));
+  // Give a material a procedural texture map for "质感" (grain/wood/tile). The
+  // texture already bakes in the base colour, so we tint the material white so
+  // it shows at full. Returns null-safe (no-op in a non-DOM build/test env).
+  const withTex = (m: THREE.MeshStandardMaterial, tex: THREE.Texture | null): THREE.MeshStandardMaterial => {
+    if (tex) {
+      m.map = tex;
+      m.color.set(0xffffff);
+    }
+    return m;
+  };
 
-  const floorMat = stdMat(palette.floor, 0.96);
-  const wallMat = stdMat(palette.wall);
+  const floorMat = withTex(stdMat(palette.floor, 0.96), kind === "dorm" ? floorTexture(palette.floor) : tileTexture(palette.floor));
+  const wallMat = withTex(stdMat(palette.wall), wallTexture(palette.wall));
   const ceilMat = stdMat(palette.ceiling);
-  const woodMat = stdMat(palette.wood, 0.8);
-  const accentMat = stdMat(palette.accent, 0.55, 0.1);
-  const metalMat = stdMat(0x3f444b, 0.4, 0.55);
+  const woodMat = withTex(stdMat(palette.wood, 0.82), woodTexture(palette.wood));
+  const accentMat = withTex(stdMat(palette.accent, 0.55, 0.1), fabricTexture(palette.accent));
+  const metalMat = withTex(stdMat(0x3f444b, 0.4, 0.55), metalTexture(0x3f444b));
   const whiteMat = stdMat(0xd7dee4, 0.5, 0.15);
   const fabricMat = stdMat(0x394152, 0.95);
 
@@ -233,44 +232,15 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
   };
 
   // A glowing collectable item (floats + bobs, auto-collected on approach).
-  const addPickup = (
-    itemId: string,
-    name: string,
-    x: number,
-    y: number,
-    z: number,
-    color: number,
-    activeSceneIds?: string[],
-  ): void => {
+  const addPickup = (itemId: string, name: string, x: number, y: number, z: number, color: number): void => {
     const g = new THREE.Group();
     g.position.set(x, y, z);
     root.add(g);
-    if (itemId === "flashlight") {
-      const bodyMat = trackMat(new THREE.MeshStandardMaterial({ color: 0x2b3138, roughness: 0.42, metalness: 0.28 }));
-      const rimMat = trackMat(new THREE.MeshStandardMaterial({ color: 0xc9b276, roughness: 0.28, metalness: 0.48 }));
-      const lensMat = trackMat(
-        new THREE.MeshStandardMaterial({ color, emissive: new THREE.Color(color), emissiveIntensity: 1.4, roughness: 0.2 }),
-      );
-      const body = new THREE.Mesh(track(new THREE.CylinderGeometry(0.075, 0.09, 0.48, 16)), bodyMat);
-      body.rotation.z = Math.PI / 2;
-      body.castShadow = true;
-      g.add(body);
-      const head = new THREE.Mesh(track(new THREE.CylinderGeometry(0.13, 0.1, 0.18, 18)), rimMat);
-      head.rotation.z = Math.PI / 2;
-      head.position.x = 0.31;
-      head.castShadow = true;
-      g.add(head);
-      const lens = new THREE.Mesh(track(new THREE.CircleGeometry(0.095, 18)), lensMat);
-      lens.rotation.y = Math.PI / 2;
-      lens.position.x = 0.405;
-      g.add(lens);
-    } else {
-      const coreMat = trackMat(
-        new THREE.MeshStandardMaterial({ color, emissive: new THREE.Color(color), emissiveIntensity: 1.6, roughness: 0.35 }),
-      );
-      const core = new THREE.Mesh(track(new THREE.IcosahedronGeometry(0.12, 0)), coreMat);
-      g.add(core);
-    }
+    const coreMat = trackMat(
+      new THREE.MeshStandardMaterial({ color, emissive: new THREE.Color(color), emissiveIntensity: 1.6, roughness: 0.35 }),
+    );
+    const core = new THREE.Mesh(track(new THREE.IcosahedronGeometry(0.12, 0)), coreMat);
+    g.add(core);
     const haloMat = trackMat(
       new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false }),
     );
@@ -282,7 +252,6 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
       id: `${itemId}-${pickups.length}`,
       itemId,
       name,
-      activeSceneIds,
       glow: g,
       position: new THREE.Vector3(x, y, z),
       radius: 0.9,
@@ -291,15 +260,7 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
   };
 
   // A red glowing story-trigger zone. Player walks in → text popup in the 3D interior.
-  const addStoryTrigger = (
-    sceneId: string,
-    x: number,
-    y: number,
-    z: number,
-    action: "story" | "exit" = "story",
-    activeSceneIds: string[] = [sceneId],
-    radius = 1.2,
-  ): void => {
+  const addStoryTrigger = (sceneId: string, x: number, y: number, z: number): void => {
     const color = 0xd04438;
     const g = new THREE.Group();
     g.position.set(x, y, z);
@@ -319,11 +280,9 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
     storyTriggers.push({
       id: `${sceneId}-${storyTriggers.length}`,
       sceneId,
-      action,
-      activeSceneIds,
       glow: g,
       position: new THREE.Vector3(x, y, z),
-      radius,
+      radius: 1.2,
       triggered: false,
     });
   };
@@ -333,9 +292,18 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
     bounds: AABB,
     spawn: THREE.Vector3,
     floorHeightAt: (x: number, z: number) => number,
-    opts: { revealZ: number; revealFloor2: boolean; revealNear?: { x: number; z: number; r: number } },
+    opts: {
+      revealZ: number;
+      revealFloor2: boolean;
+      revealNear?: { x: number; z: number; r: number };
+      /** Dorm mirror scare: reveal the figure at this spot, dim, then jumpscare when the player moves/turns away. */
+      mirrorScare?: { x: number; z: number };
+    },
   ): RoomBuildResult {
     let revealed = false;
+    let scareFired = false;
+    const revealPos = new THREE.Vector3();
+    let revealT = 0;
     const update = (t: number, playerPos: THREE.Vector3): void => {
       if (!revealed) {
         const deep = opts.revealFloor2
@@ -346,27 +314,48 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
         if (deep) {
           revealed = true;
           for (const n of npcs) n.group.visible = true;
+          if (opts.mirrorScare) {
+            // 走到镜前红点的一刻:鬼在镜中现形 + 视野压暗。
+            revealPos.copy(playerPos);
+            revealT = t;
+            emit("zju-horror-interior-dim", { on: true });
+          }
+        }
+      }
+      // 转身/往旁边挪(离开镜前) → 鬼扑到脸前跳脸。留一个 2.6s 兜底,始终会触发。
+      if (revealed && opts.mirrorScare && !scareFired) {
+        const moved = playerPos.distanceTo(revealPos) > 0.8 || t - revealT > 2.6;
+        if (moved) {
+          scareFired = true;
+          for (const n of npcs) {
+            n.group.position.set(playerPos.x, 0, playerPos.z + 0.35); // 扑到玩家脚前
+            n.group.visible = true;
+          }
+          emit("zju-horror-interior-dim", { on: false });
+          emit("zju-horror-jumpscare", { context: "dorm", intensity: 0.95, sanityCost: -10, customMessage: "镜子里的那张脸，就贴在你背后。" });
         }
       }
       for (const n of npcs) if (n.group.visible) n.update(t);
+      for (const a of animators) a(t);
       for (const p of pickups) {
-        if (p.taken || !p.glow.visible) continue;
+        if (p.taken) continue;
         p.glow.rotation.y = t * 1.4;
         p.glow.position.y = p.position.y + Math.sin(t * 2.2 + p.position.x) * 0.08;
       }
       for (const s of storyTriggers) {
-        if (s.triggered || !s.glow.visible) continue;
+        if (s.triggered) continue;
         s.glow.rotation.y = t * 0.9;
         s.glow.position.y = s.position.y + Math.sin(t * 1.8 + s.position.x) * 0.1;
       }
     };
     const dispose = (): void => {
       for (const n of npcs) n.dispose();
+      for (const d of reflectorDisposers) d();
       for (const g of geometries) g.dispose();
       for (const m of materials) m.dispose();
       root.clear();
     };
-    return { root, colliders, bounds, update, floorHeightAt, pickups, storyTriggers, doors, guideNodes, phaseObjects, spawn, dispose };
+    return { root, colliders, bounds, update, floorHeightAt, pickups, storyTriggers, doors, spawn, dispose };
   }
 
   // ---------------------------------------------------------------- LIBRARY
@@ -384,8 +373,6 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
       metalMat,
       accentMat,
       colliders,
-      phaseObjects,
-      guideNodes,
     });
     const npc = buildCharacter({ bodyColor: 0x161b22, skinColor: 0xb7c2c9 });
     npc.group.position.set(built.npc.x, built.npc.y, built.npc.z);
@@ -394,24 +381,20 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
     root.add(npc.group);
     npcs.push(npc);
 
-    const librarySceneItems: typeof ROOM_ITEMS.library = [];
-    librarySceneItems.forEach((it, i) => {
+    ROOM_ITEMS.library.forEach((it, i) => {
       const p = built.pickupSpots[i] ?? built.pickupSpots[0];
-      addPickup(it.itemId, it.name, p.x, p.y, p.z, i === 0 ? 0x8fd0ff : 0xffd27a, i === 0 ? ["library_intro"] : ["library_sound"]);
+      addPickup(it.itemId, it.name, p.x, p.y, p.z, i === 0 ? 0x8fd0ff : 0xffd27a);
     });
-    const flashlightSpot = built.flashlightSpots[Math.floor(Math.random() * built.flashlightSpots.length)] ?? built.flashlightSpots[0];
-    addPickup("flashlight", "手电筒", flashlightSpot.x, 0.72, flashlightSpot.z, 0xfff1a8);
 
     // Story triggers: first one visible, rest hidden until previous triggered
-    addStoryTrigger("library_intro", built.triggers.intro.x, 0.7, built.triggers.intro.z, "story", ["library_intro"], 0.85);
-    addStoryTrigger("library_sound", built.triggers.sound.x, 0.7, built.triggers.sound.z);
-    addStoryTrigger("library_exit", built.triggers.exit.x, 0.7, built.triggers.exit.z, "exit", ["library_police", "dorm_baiqiu"]);
+    addStoryTrigger("library_intro", 0, 0.7, 3.5);    // near the reading table
+    addStoryTrigger("library_sound", 0, 0.7, -3.0);   // near the spiral staircase base
     // Hide all triggers after the first
     for (let i = 1; i < storyTriggers.length; i++) {
       storyTriggers[i].glow.visible = false;
     }
 
-    return finalize(built.bounds, built.spawn, built.floorHeightAt, { revealZ: -6.6, revealFloor2: false });
+    return finalize(built.bounds, built.spawn, built.floorHeightAt, { revealZ: -99, revealFloor2: true });
   }
 
   // -------------------------------------------------- FLAT ROOMS (non-library)
@@ -466,10 +449,27 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
       doors.push(medDivider.door);
       colliders.push(medDivider.door.closedCollider);
     }
-    // 隔间内：黑暗储物柜 + 解剖台暗示
+    // 隔间内：不锈钢停尸柜 + 解剖台(novel: 小剧场临时停尸间/人体解剖学)
     addBox(1.2, 0.5, 2.0, 1.5, 0.35, -halfL + 6.6, metalMat);
     addBox(1.2, 0.5, 2.0, -1.5, 0.35, -halfL + 6.6, metalMat);
-    addBox(2.0, 0.8, 0.8, 0, 0.55, -halfL + 6.3, stdMat(0x6f7d82, 0.85));
+    addBox(2.0, 0.85, 0.9, 0, 0.55, -halfL + 6.3, metalMat); // 解剖台
+    addBox(1.9, 0.06, 0.85, 0, 1.0, -halfL + 6.3, stdMat(0xb7bcc0, 0.5, 0.2), false); // 台面
+    // 盖着白布的推床(novel: 走廊尽头一寸一寸经过的旧病床)
+    addBox(1.0, 0.55, 2.1, halfW - 1.6, 0.35, 0.2, metalMat);
+    addBox(1.05, 0.2, 2.0, halfW - 1.6, 0.72, 0.2, stdMat(0xcfd2d0, 0.95), false); // 白布隆起
+    // 幽绿应急灯(novel: 应急灯发出幽幽的绿光)——墙上一盏 + 环境点光
+    addBox(0.28, 0.14, 0.08, -halfW + 0.35, 2.5, 0, stdMat(0x1a2a1e), false);
+    const emGlow = trackMat(new THREE.MeshBasicMaterial({ color: 0x2bff7a }));
+    addBox(0.2, 0.08, 0.03, -halfW + 0.4, 2.5, 0, emGlow, false);
+    const greenLight = new THREE.PointLight(0x36ff86, 0.65, 9, 2);
+    greenLight.position.set(-halfW + 1.0, 2.4, 0);
+    root.add(greenLight);
+    // 应急灯幽幽明灭 + 偶尔一次骤暗(novel: 幽幽的绿光)
+    animators.push((t) => {
+      greenLight.intensity = 0.5 + Math.abs(Math.sin(t * 1.7)) * 0.25 + (Math.sin(t * 37) > 0.92 ? -0.35 : 0);
+    });
+    // 红点:医学院入口剧情(novel: medical_entry)
+    addStoryTrigger("medical_entry", -1.2, 0.7, 1.5);
   } else if (kind === "dorm") {
     // ── 浙大白沙式"上床下桌":上层黑色金属高架床，下层木书桌+书架柜+绿椅+爬梯 ──
     const blueFabric = stdMat(0x3f5a86, 0.95); // 蓝色被褥/窗帘
@@ -509,11 +509,29 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
     addBox(3.0, 2.0, 0.06, -0.8, 1.7, -halfL + 0.16, blueFabric, false);
     // 木衣柜(靠近入口右侧)
     addBox(0.85, 2.05, 0.62, halfW - 0.7, 1.02, halfL - 2.2, woodMat);
-    // ── 镜子(右墙中前段):靠近先见自己倒影,随后红眼鬼现形 ──
+    // ── 镜子(右墙中前段):真·镜面反射。玩家在镜中看见站在身后的红眼鬼,
+    //    转身即与鬼面对面(见下方 npc 定位 + finalize 的 mirrorScare)。 ──
     const mirrorZ = -1.2;
-    addBox(0.06, 1.5, 0.9, halfW - 0.22, 1.45, mirrorZ, woodMat, false); // 镜框
-    const glass = trackMat(new THREE.MeshStandardMaterial({ color: 0x9fb0bd, roughness: 0.12, metalness: 0.85 }));
-    addBox(0.02, 1.3, 0.72, halfW - 0.27, 1.45, mirrorZ, glass, false); // 镜面
+    addBox(0.09, 1.55, 0.95, halfW - 0.2, 1.45, mirrorZ, woodMat, false); // 镜框
+    if (typeof document !== "undefined") {
+      const mirror = new Reflector(track(new THREE.PlaneGeometry(0.74, 1.32)), {
+        textureWidth: 512,
+        textureHeight: 512,
+        color: 0x6f7d88,
+        clipBias: 0.003,
+      });
+      mirror.position.set(halfW - 0.27, 1.45, mirrorZ);
+      mirror.rotation.y = -Math.PI / 2; // 镜面法线朝 -X(面向房间内)
+      root.add(mirror);
+      // Reflector 自带 render target,需在 dispose 时释放。
+      animators.push(() => {});
+      const rdispose = () => mirror.dispose();
+      reflectorDisposers.push(rdispose);
+    } else {
+      // 非 DOM(Node 测试)环境:退化为反光盒子。
+      const glass = trackMat(new THREE.MeshStandardMaterial({ color: 0x9fb0bd, roughness: 0.12, metalness: 0.85 }));
+      addBox(0.02, 1.32, 0.74, halfW - 0.27, 1.45, mirrorZ, glass, false);
+    }
 
     // ── 走廊隔断 + 门（宿舍后段分隔出走廊/卫生间区域）──
     const dormDivider = new RoomDivider({
@@ -531,8 +549,8 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
     // 隔断后面：一个小卫生间（洗手台 + 蹲位示意）
     addBox(0.6, 0.8, 0.4, 0, 0.4, -halfL + 6.7, whiteMat);
     addBox(0.7, 1.8, 0.06, 1.6, 0.9, -halfL + 6.8, fabricMat, false);
-    // Story triggers for dorm: forum scene at the desk area
-    addStoryTrigger("dorm_forum", -halfW + 1.1, 0.85, -3.6); // near first loft desk
+    // 红点就在镜子面前:走到这里的一刻,鬼在镜中现形(见 finalize 的 mirrorScare)。
+    addStoryTrigger("dorm_forum", halfW - 1.6, 0.6, -1.2);
   } else {
     // ── 小剧场/大厅布局：舞台 + 观众席 + 后台门 ──
     const stageY = 0.5;
@@ -544,13 +562,38 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
     for (const sx of [-2.8, -1.4, 0, 1.4, 2.8]) {
       addBox(0.25, WALL_H - stageY, 0.3, sx, stageY + (WALL_H - stageY) / 2, stageZ + 1.8, curtainMat, false);
     }
-    // 观众席（几排木长凳）
+    // 观众席（几排木长凳）+ 每个座位一根红绳,绳头拖地、汇向舞台中央(novel)
+    const ropeMat = stdMat(0x7d1518, 0.75);
     for (let row = 0; row < 3; row++) {
       const rz = stageZ + 2.5 + row * 1.8;
       addBox(4.5, 0.12, 0.4, 0, 0.06, rz, woodMat, false);
       addBox(4.5, 0.45, 0.06, 0, 0.28, rz, woodMat, false); // 靠背
       colliders.push({ minX: -2.3, maxX: 2.3, minZ: rz - 0.3, maxZ: rz + 0.3 });
+      // 每排几根红绳:座位上一小段 + 沿地面拖向舞台中心的细线
+      for (const sx of [-1.6, -0.5, 0.6, 1.7]) {
+        addBox(0.03, 0.16, 0.03, sx, 0.2, rz, ropeMat, false); // 座位上的绳结
+        const midZ = (rz + stageZ) / 2;
+        const len = rz - stageZ;
+        const rope = new THREE.Mesh(track(new THREE.BoxGeometry(0.02, 0.01, len)), ropeMat);
+        rope.position.set(sx * (1 - (rz - stageZ) * 0.06), 0.015, midZ); // 略微向中央收拢
+        rope.rotation.y = Math.atan2(-sx, len) * 0.5;
+        root.add(rope);
+      }
     }
+    // 舞台中心一束白光(novel: 舞台灯一盏盏熄灭,只剩中心一束白光)
+    const spot = new THREE.SpotLight(0xf3f0e8, 3.2, 14, Math.PI / 7, 0.55, 1.2);
+    spot.position.set(0, WALL_H - 0.1, stageZ + 0.2);
+    spot.target.position.set(0, 0, stageZ);
+    root.add(spot);
+    root.add(spot.target);
+    // 聚光灯偶尔明灭,像一盏快熄灭的舞台灯
+    animators.push((t) => {
+      spot.intensity = 3.2 * (0.82 + 0.18 * Math.sin(t * 2.3)) * (Math.sin(t * 26) > 0.94 ? 0.35 : 1);
+    });
+    // 舞台中央的旧木椅(novel: 白秋被绑在旧木椅上)
+    addBox(0.5, 0.06, 0.5, 0, stageY + 0.5, stageZ, woodMat, false);
+    addBox(0.5, 0.6, 0.06, 0, stageY + 0.8, stageZ - 0.22, woodMat, false); // 椅背
+    for (const cxx of [-0.2, 0.2]) for (const czz of [-0.2, 0.2]) addBox(0.05, 0.5, 0.05, cxx, stageY + 0.25, stageZ + czz, woodMat, false);
     // 走廊两侧柱
     for (const sx of [-1, 1]) {
       addBox(0.5, 3.2, 0.5, sx * (halfW - 1.2), 1.6, -1.0, accentMat);
@@ -585,11 +628,14 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
     skinColor: kind === "medical" ? 0xcdc7bb : 0xb9a894,
   });
   let revealNear: { x: number; z: number; r: number } | undefined;
+  let mirrorScare: { x: number; z: number } | undefined;
   if (kind === "dorm") {
-    // 红眼鬼站在镜前,面向玩家;靠近镜子时现形(先照见自己,再看见鬼)。
-    npc.group.position.set(halfW - 1.35, 0, -1.2);
-    npc.group.rotation.y = -Math.PI / 2;
-    revealNear = { x: halfW - 1.6, z: -1.2, r: 2.4 };
+    // 红眼鬼站在玩家【身后】,面向镜子/玩家:走到镜前红点时才现形——
+    // 此刻只能在镜中看到它;转身即与它面对面(jumpscare)。
+    npc.group.position.set(halfW - 3.4, 0, -1.2);
+    npc.group.rotation.y = Math.PI / 2; // 面向 +X(镜子方向)
+    revealNear = { x: halfW - 1.6, z: -1.2, r: 1.35 };
+    mirrorScare = { x: halfW - 1.6, z: -1.2 };
   } else {
     const npcZ = -halfL + 1.6;
     npc.group.position.set(0.2, 0, npcZ);
@@ -622,7 +668,7 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
   const spawn = new THREE.Vector3(0, 1.6, halfL - 1.2);
   const revealZ = halfL - 6;
 
-  return finalize(bounds, spawn, () => 0, { revealZ, revealFloor2: false, revealNear });
+  return finalize(bounds, spawn, () => 0, { revealZ, revealFloor2: false, revealNear, mirrorScare });
 }
 
 // ============================================================ LIBRARY BUILDER
@@ -639,8 +685,6 @@ interface LibCtx {
   metalMat: THREE.Material;
   accentMat: THREE.Material;
   colliders: AABB[];
-  guideNodes: InteriorGuideNode[];
-  phaseObjects: InteriorPhaseObject[];
 }
 
 interface LibResult {
@@ -649,12 +693,6 @@ interface LibResult {
   floorHeightAt: (x: number, z: number) => number;
   npc: { x: number; y: number; z: number; ry: number };
   pickupSpots: { x: number; y: number; z: number }[];
-  flashlightSpots: { x: number; z: number }[];
-  triggers: {
-    intro: { x: number; z: number };
-    sound: { x: number; z: number };
-    exit: { x: number; z: number };
-  };
 }
 
 /**
@@ -662,7 +700,7 @@ interface LibResult {
  * the +Z entrance, bookshelf rows, and a white spiral staircase (centre-back)
  * rising one full turn to a 2nd-floor gallery where the figure waits.
  */
-function buildLibraryLegacy(ctx: LibCtx) {
+function buildLibrary(ctx: LibCtx): LibResult {
   const { addBox, addBookshelf, track, trackMat, floorMat, ceilMat, wallMat, whiteMat, metalMat, accentMat, root, colliders } = ctx;
   const W = 12;
   const L = 18;
@@ -791,190 +829,5 @@ function buildLibraryLegacy(ctx: LibCtx) {
       { x: -halfW + 1.5, y: 0.7, z: 3.2 }, // ground floor, front-left
       { x: -3.0, y: F2Y + 0.7, z: -7.4 }, // upstairs on the mezzanine
     ],
-  };
-}
-
-function buildLibrary(ctx: LibCtx): LibResult {
-  const {
-    addBox,
-    addBookshelf,
-    track,
-    trackMat,
-    floorMat,
-    ceilMat,
-    wallMat,
-    whiteMat,
-    metalMat,
-    accentMat,
-    root,
-    colliders,
-    guideNodes,
-    phaseObjects,
-  } = ctx;
-  const W = 13.5;
-  const L = 18;
-  const WALL_H = 4.2;
-  const halfW = W / 2;
-  const halfL = L / 2;
-  const floorY = 0.018;
-
-  const woodMat = trackMat(new THREE.MeshStandardMaterial({ color: 0x6b4b2e, roughness: 0.82 }));
-  const darkWoodMat = trackMat(new THREE.MeshStandardMaterial({ color: 0x3d2c22, roughness: 0.9 }));
-  const seatMat = trackMat(new THREE.MeshStandardMaterial({ color: 0x334257, roughness: 0.94 }));
-  const brassMat = trackMat(new THREE.MeshStandardMaterial({ color: 0xa77c3f, roughness: 0.48, metalness: 0.35 }));
-  const tileLineMat = trackMat(new THREE.MeshBasicMaterial({ color: 0x50606b, transparent: true, opacity: 0.22 }));
-  const pathMat = trackMat(new THREE.MeshBasicMaterial({ color: 0x793733, transparent: true, opacity: 0.16 }));
-
-  const floor = new THREE.Mesh(track(new THREE.PlaneGeometry(W, L)), floorMat);
-  floor.rotation.x = -Math.PI / 2;
-  floor.receiveShadow = true;
-  root.add(floor);
-
-  const ceil = new THREE.Mesh(track(new THREE.PlaneGeometry(W, L)), ceilMat);
-  ceil.rotation.x = Math.PI / 2;
-  ceil.position.y = WALL_H;
-  root.add(ceil);
-
-  addBox(W + 0.3, WALL_H, 0.3, 0, WALL_H / 2, -halfL, wallMat);
-  addBox(W + 0.3, WALL_H, 0.3, 0, WALL_H / 2, halfL, wallMat);
-  addBox(0.3, WALL_H, L + 0.3, -halfW, WALL_H / 2, 0, wallMat);
-  addBox(0.3, WALL_H, L + 0.3, halfW, WALL_H / 2, 0, wallMat);
-
-  for (let x = -6; x <= 6; x += 1.5) addBox(0.018, 0.01, L - 0.5, x, floorY, 0, tileLineMat, false);
-  for (let z = -8.25; z <= 8.25; z += 1.5) addBox(W - 0.5, 0.01, 0.018, 0, floorY, z, tileLineMat, false);
-
-  const addChair = (x: number, z: number, ry = 0): void => {
-    const g = new THREE.Group();
-    g.position.set(x, 0, z);
-    g.rotation.y = ry;
-    root.add(g);
-    const seat = new THREE.Mesh(track(new THREE.BoxGeometry(0.42, 0.08, 0.42)), seatMat);
-    seat.position.y = 0.45;
-    seat.castShadow = true;
-    g.add(seat);
-    const back = new THREE.Mesh(track(new THREE.BoxGeometry(0.42, 0.48, 0.06)), seatMat);
-    back.position.set(0, 0.72, 0.2);
-    back.castShadow = true;
-    g.add(back);
-    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-      const leg = new THREE.Mesh(track(new THREE.BoxGeometry(0.055, 0.45, 0.055)), metalMat);
-      leg.position.set(sx * 0.16, 0.225, sz * 0.16);
-      g.add(leg);
-    }
-  };
-
-  const addStudyTable = (x: number, z: number, w = 1.25, d = 0.78): void => {
-    addBox(w, 0.08, d, x, 0.76, z, woodMat, false);
-    addBox(w - 0.16, 0.035, 0.08, x, 0.82, z, accentMat, false);
-    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-      addBox(0.075, 0.72, 0.075, x + sx * (w / 2 - 0.14), 0.36, z + sz * (d / 2 - 0.12), metalMat, false);
-    }
-    colliders.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2 });
-    addChair(x - w * 0.32, z + d * 0.9, 0);
-    addChair(x + w * 0.32, z + d * 0.9, 0);
-    addChair(x - w * 0.32, z - d * 0.9, Math.PI);
-    addChair(x + w * 0.32, z - d * 0.9, Math.PI);
-  };
-
-  const addRouteCarpet = (x: number, z: number, w: number, d: number): void => {
-    addBox(w, 0.012, d, x, 0.026, z, pathMat, false);
-  };
-
-  addRouteCarpet(-3.0, -2.25, 4.8, 1.0);
-  addRouteCarpet(0.3, -3.25, 4.2, 0.9);
-  addStudyTable(-5.0, -5.95);
-  addStudyTable(-5.0, -3.45);
-  addStudyTable(1.0, -5.75);
-  addStudyTable(4.25, -5.75);
-  addStudyTable(1.0, -3.35);
-  addStudyTable(4.25, -3.35);
-
-  const SX = -1.45;
-  const SZ = -4.8;
-  const R_IN = 0.46;
-  const R_OUT = 1.35;
-  const rMid = (R_IN + R_OUT) / 2;
-
-  const col = new THREE.Mesh(track(new THREE.CylinderGeometry(R_IN, R_IN, 3.7, 28)), whiteMat);
-  col.position.set(SX, 1.85, SZ);
-  root.add(col);
-  colliders.push({ minX: SX - R_IN, maxX: SX + R_IN, minZ: SZ - R_IN, maxZ: SZ + R_IN });
-
-  for (let i = 0; i < 22; i++) {
-    const a = -Math.PI * 0.25 + i * 0.34;
-    const y = 0.28 + i * 0.13;
-    const tread = new THREE.Mesh(track(new THREE.BoxGeometry(R_OUT - R_IN + 0.25, 0.08, 0.5)), whiteMat);
-    tread.position.set(SX + Math.cos(a) * rMid, y, SZ + Math.sin(a) * rMid);
-    tread.rotation.y = -a;
-    tread.castShadow = true;
-    root.add(tread);
-    if (i % 3 === 0) {
-      const post = new THREE.Mesh(track(new THREE.CylinderGeometry(0.026, 0.026, 0.9, 6)), brassMat);
-      post.position.set(SX + Math.cos(a) * (R_OUT + 0.08), y + 0.45, SZ + Math.sin(a) * (R_OUT + 0.08));
-      root.add(post);
-    }
-  }
-
-  addBox(4.0, 1.2, 0.18, -4.45, 0.6, 0.45, darkWoodMat);
-  addBox(5.55, 1.2, 0.18, 3.55, 0.6, 0.45, darkWoodMat);
-  const storyGate = addBox(2.7, 0.12, 0.16, -0.8, 1.25, 0.45, whiteMat, false);
-  phaseObjects.push({ object: storyGate, activeSceneIds: ["library_intro"] });
-  colliders.push({ minX: -2.15, maxX: 0.55, minZ: 0.37, maxZ: 0.53, activeSceneIds: ["library_intro"] });
-  addRouteCarpet(-0.9, 1.4, 1.25, 2.2);
-  addRouteCarpet(1.7, 2.25, 5.2, 0.82);
-
-  addBookshelf(2.0, 4.55, 3.8, Math.PI / 2);
-  addBookshelf(3.35, 4.55, 3.8, Math.PI / 2);
-  addBookshelf(4.7, 4.55, 3.8, Math.PI / 2);
-  addBookshelf(5.8, 4.55, 3.8, Math.PI / 2);
-  addBox(3.6, 0.04, 0.8, 3.85, 0.04, 6.88, pathMat, false);
-
-  addBox(2.2, 0.95, 0.48, -4.65, 0.48, 4.7, darkWoodMat);
-  addBox(1.2, 1.7, 0.45, -5.2, 0.85, 6.35, metalMat);
-  addBox(0.8, 0.08, 0.8, -3.65, 0.78, 6.1, accentMat, false);
-
-  const gateZ = 7.35;
-  for (const sx of [-1.1, 0, 1.1]) addBox(0.28, 0.98, 0.34, sx, 0.49, gateZ, metalMat, false);
-  for (const sx of [-0.55, 0.55]) addBox(0.06, 0.1, 0.9, sx, 0.92, gateZ, brassMat, false);
-  addBox(3.5, 0.18, 0.16, 0, 1.6, gateZ, whiteMat, false);
-
-  guideNodes.push(
-    { id: "spawn-left", x: -3.85, z: -2.35, links: ["left-aisle", "upper-cross"] },
-    { id: "left-aisle", x: -3.2, z: -2.85, links: ["spawn-left", "upper-cross"] },
-    { id: "upper-cross", x: -1.1, z: -2.85, links: ["spawn-left", "left-aisle", "right-entry", "passage-top"] },
-    { id: "right-entry", x: 0.75, z: -2.35, links: ["upper-cross", "intro"] },
-    { id: "intro", x: 2.25, z: -2.05, links: ["right-entry"] },
-    { id: "passage-top", x: -0.85, z: 0.05, links: ["upper-cross", "passage-bottom"] },
-    { id: "passage-bottom", x: -0.85, z: 2.2, links: ["passage-top", "shelf-entry", "gate-approach"] },
-    { id: "shelf-entry", x: 4.05, z: 2.35, links: ["passage-bottom", "shelf-aisle"] },
-    { id: "shelf-aisle", x: 4.05, z: 3.35, links: ["shelf-entry", "shelf-exit"] },
-    { id: "shelf-exit", x: 4.05, z: 6.82, links: ["shelf-aisle", "gate-approach"] },
-    { id: "gate-approach", x: 0.35, z: 6.85, links: ["passage-bottom", "shelf-exit", "gate"] },
-    { id: "gate", x: 0.0, z: 7.35, links: ["gate-approach"] },
-  );
-
-  const bounds: AABB = { minX: -halfW + 0.3, maxX: halfW - 0.3, minZ: -halfL + 0.3, maxZ: halfL - 0.3 };
-  const spawn = new THREE.Vector3(-3.85, 1.6, -2.35);
-
-  return {
-    bounds,
-    spawn,
-    floorHeightAt: () => 0,
-    npc: { x: -1.1, y: 0, z: -7.25, ry: Math.PI },
-    pickupSpots: [
-      { x: -5.55, y: 0.7, z: -1.15 },
-      { x: 1.25, y: 0.7, z: 6.15 },
-    ],
-    flashlightSpots: [
-      { x: -3.05, z: -3.0 },
-      { x: -2.65, z: -6.35 },
-      { x: -0.28, z: -3.05 },
-      { x: -3.35, z: -4.0 },
-    ],
-    triggers: {
-      intro: { x: 2.25, z: -2.05 },
-      sound: { x: 4.05, z: 3.35 },
-      exit: { x: 0.0, z: gateZ },
-    },
   };
 }
