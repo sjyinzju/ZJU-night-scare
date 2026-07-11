@@ -15,9 +15,12 @@ vite.config.d.ts
 *.jpeg
 *.webp
 
+.log
+
 /ppt
 
 /reference
 
 /design
 
+/tmp
