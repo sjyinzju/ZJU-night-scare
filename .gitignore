@@ -15,6 +15,10 @@ vite.config.d.ts
 *.jpeg
 *.webp
 
+# Homepage character images must be tracked for GitHub Pages deploy
+!site/assets/characters/*.png
+!site/assets/characters/*.jpg
+
 .log
 
 /ppt
