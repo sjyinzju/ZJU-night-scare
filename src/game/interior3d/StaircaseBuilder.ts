@@ -7,8 +7,7 @@ import type { AABB } from "./buildRoom";
  * Three types:
  * - "straight":  a single flight, good for dorm corridors, basements.
  * - "L":         two flights with a landing, good for tighter spaces.
- * - "spiral":    already handled inside buildRoom.ts (library); this
- *                builder does NOT replace that one.
+ * - "spiral":    reserved for future multi-floor interiors.
  *
  * Each builder returns:
  * - root: THREE.Group     → add to the scene

@@ -16,6 +16,7 @@ import { InputManager } from "./InputManager";
 import { CameraController } from "./CameraController";
 import { FlashlightSystem } from "./FlashlightSystem";
 import { getInteriorNpcRevealSceneIds } from "../storyEngine";
+import { loadInteriorAsset, type InteriorAssetHandle } from "./InteriorAssetLoader";
 
 export interface Interior3DOptions {
   /** Element the WebGL canvas is appended into. Sized to fill it. */
@@ -76,6 +77,17 @@ export class Interior3D {
   private colliders: AABB[];
   private bounds: AABB;
   private readonly blueprint: InteriorBlueprint;
+  private assetHandle?: InteriorAssetHandle;
+  private readonly assetPickupVisuals = new Map<string, THREE.Object3D[]>();
+  private readonly assetPhaseVisuals: Array<{ objects: THREE.Object3D[]; activeSceneIds: string[] }> = [];
+  private readonly assetFlickerLights: Array<{
+    light: THREE.PointLight;
+    baseIntensity: number;
+    speed: number;
+    phase: number;
+    y: number;
+    followPickupId?: string;
+  }> = [];
   private readonly onPickup?: (itemId: string, name: string) => void;
   private readonly onStoryTrigger?: (sceneId: string) => void;
   private readonly onExitTrigger?: () => void;
@@ -85,6 +97,7 @@ export class Interior3D {
   private readonly setStamina?: (value: number) => void;
   private lowStaminaWarning = false;
   private bloodLightEnabled = false;
+  private bloodLightMaxIntensity = 4.8;
   private nextBloodFlashAt = 0;
   private bloodFlashUntil = 0;
 
@@ -135,6 +148,9 @@ export class Interior3D {
       antialias: !this.isMobile,
       powerPreference: "high-performance",
     });
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 0.68;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.isMobile ? 1.5 : 2));
     if (!this.isMobile) {
       this.renderer.shadowMap.enabled = true;
@@ -200,6 +216,7 @@ export class Interior3D {
     this.scene.add(this.room.root);
     this.colliders = this.room.colliders;
     this.bounds = this.room.bounds;
+    this.loadStaticInteriorAsset(options.buildingId);
 
     // Spawn at the room's entrance, looking down the corridor (-Z).
     this.camera.position.copy(this.findClearSpawn(this.room.spawn));
@@ -343,6 +360,11 @@ export class Interior3D {
     this.exitPointerLock();
 
     if (this.debugColliders) this.toggleColliderDebug();
+    this.assetHandle?.dispose();
+    this.assetHandle = undefined;
+    this.assetPickupVisuals.clear();
+    this.assetPhaseVisuals.length = 0;
+    this.clearAssetFlickerLights();
     this.room.dispose();
     this.scene.clear();
 
@@ -366,6 +388,195 @@ export class Interior3D {
   private handleMouseMove(e: MouseEvent): void {
     if (!this.pointerLocked) return;
     this.cameraController.addMouseLook(e.movementX, e.movementY);
+  }
+
+  private async loadStaticInteriorAsset(buildingId: string): Promise<void> {
+    try {
+      const handle = await loadInteriorAsset({
+        buildingId,
+        roomKind: this.roomKind,
+        isMobile: this.isMobile,
+      });
+      if (!handle) return;
+      if (this.disposed) {
+        handle.dispose();
+        return;
+      }
+
+      this.assetHandle = handle;
+      this.scene.add(handle.root);
+      this.bindInteriorAssetMetadata(handle);
+      this.setProceduralRoomVisualsVisible(false);
+      window.dispatchEvent(new CustomEvent("zju-horror-interior-asset-state", {
+        detail: {
+          buildingId,
+          roomKind: this.roomKind,
+          loaded: true,
+          assetVersion: handle.meta?.assetVersion,
+        },
+      }));
+    } catch (err) {
+      console.warn("[Interior3D] Failed to load static interior asset, using procedural fallback:", err);
+      this.setProceduralRoomVisualsVisible(true);
+      window.dispatchEvent(new CustomEvent("zju-horror-interior-asset-state", {
+        detail: { buildingId, roomKind: this.roomKind, loaded: false },
+      }));
+    }
+  }
+
+  private bindInteriorAssetMetadata(handle: InteriorAssetHandle): void {
+    const redLight = handle.meta?.redLights?.[0];
+    if (redLight) {
+      this.bloodLight.position.set(redLight.x, redLight.y, redLight.z);
+      this.bloodLight.color.setHex(redLight.color ?? 0x6a0505);
+      this.bloodLight.distance = redLight.distance ?? 13;
+      this.bloodLightMaxIntensity = redLight.intensity ?? 4.8;
+    }
+
+    this.assetPickupVisuals.clear();
+    this.assetPhaseVisuals.length = 0;
+    this.clearAssetFlickerLights();
+    this.applyAssetPickupSpots(handle);
+    this.createAssetFlickerLights(handle);
+    const pickupVisuals = handle.meta?.pickupVisuals ?? {};
+    const phaseVisuals = handle.meta?.phaseVisuals ?? [];
+    const visualNames = new Set([
+      ...Object.values(pickupVisuals).flat(),
+      ...phaseVisuals.flatMap((phaseVisual) => phaseVisual.names),
+    ]);
+    this.setProceduralStoryTriggerMarkersVisible(true);
+    if (visualNames.size === 0) return;
+
+    const matched = new Map<string, THREE.Object3D[]>();
+    handle.root.traverse((obj) => {
+      for (const visualName of visualNames) {
+        if (obj.name === visualName || obj.name.startsWith(`${visualName}_`)) {
+          const objects = matched.get(visualName) ?? [];
+          objects.push(obj);
+          matched.set(visualName, objects);
+        }
+      }
+    });
+
+    for (const [itemId, names] of Object.entries(pickupVisuals)) {
+      const objects = names.flatMap((name) => matched.get(name) ?? []);
+      if (objects.length === 0) continue;
+      this.assetPickupVisuals.set(itemId, objects);
+      this.placeAssetPickupVisuals(itemId, objects);
+      this.setProceduralPickupMarkerVisible(itemId, false);
+      this.setAssetPickupVisualVisible(itemId, !this.hasInventoryItem(itemId));
+    }
+
+    for (const phaseVisual of phaseVisuals) {
+      const objects = phaseVisual.names.flatMap((name) => matched.get(name) ?? []);
+      if (objects.length === 0) continue;
+      this.assetPhaseVisuals.push({ objects, activeSceneIds: phaseVisual.activeSceneIds });
+    }
+    this.syncAssetPhaseVisuals(this.getStorySceneId?.());
+  }
+
+  private applyAssetPickupSpots(handle: InteriorAssetHandle): void {
+    const pickupSpots = handle.meta?.pickupSpots ?? {};
+    for (const [itemId, spots] of Object.entries(pickupSpots)) {
+      const pickup = this.room.pickups.find((p) => p.itemId === itemId);
+      if (!pickup || spots.length === 0) continue;
+      const clearSpots = spots.filter((spot) => !this.collides(spot.x, spot.z));
+      const choices = clearSpots.length > 0 ? clearSpots : spots;
+      const spot = choices[Math.floor(Math.random() * choices.length)];
+      pickup.position.set(spot.x, pickup.position.y, spot.z);
+      pickup.glow.position.set(spot.x, pickup.glow.position.y, spot.z);
+    }
+  }
+
+  private placeAssetPickupVisuals(itemId: string, objects: THREE.Object3D[]): void {
+    const pickup = this.room.pickups.find((p) => p.itemId === itemId);
+    if (!pickup || objects.length === 0) return;
+
+    const box = new THREE.Box3();
+    for (const obj of objects) box.expandByObject(obj);
+    if (box.isEmpty()) return;
+
+    const center = new THREE.Vector3();
+    box.getCenter(center);
+    const delta = new THREE.Vector3(pickup.position.x - center.x, 0, pickup.position.z - center.z);
+    for (const obj of objects) {
+      obj.position.add(delta);
+      obj.updateMatrixWorld(true);
+    }
+  }
+
+  private clearAssetFlickerLights(): void {
+    for (const entry of this.assetFlickerLights) {
+      this.scene.remove(entry.light);
+    }
+    this.assetFlickerLights.length = 0;
+  }
+
+  private createAssetFlickerLights(handle: InteriorAssetHandle): void {
+    for (const def of handle.meta?.flickerLights ?? []) {
+      if (!def.followPickupId && (typeof def.x !== "number" || typeof def.z !== "number")) continue;
+      const light = new THREE.PointLight(def.color ?? 0xff2a21, 0, def.distance ?? 4, 2.1);
+      light.name = def.name ?? "asset_red_flicker_light";
+      light.position.set(def.x ?? 0, def.y, def.z ?? 0);
+      this.scene.add(light);
+      this.assetFlickerLights.push({
+        light,
+        baseIntensity: def.intensity ?? 1.4,
+        speed: def.speed ?? 3.4,
+        phase: def.phase ?? Math.random() * Math.PI * 2,
+        y: def.y,
+        followPickupId: def.followPickupId,
+      });
+    }
+  }
+
+  private setProceduralPickupMarkerVisible(itemId: string, visible: boolean): void {
+    for (const pickup of this.room.pickups) {
+      if (pickup.itemId !== itemId) continue;
+      pickup.glow.traverse((child) => {
+        if (child !== pickup.glow) child.visible = visible;
+      });
+    }
+  }
+
+  private setProceduralStoryTriggerMarkersVisible(visible: boolean): void {
+    for (const trigger of this.room.storyTriggers) {
+      trigger.glow.traverse((child) => {
+        if (child !== trigger.glow) child.visible = visible;
+      });
+    }
+  }
+
+  private setAssetPickupVisualVisible(itemId: string, visible: boolean): void {
+    const objects = this.assetPickupVisuals.get(itemId);
+    if (!objects) return;
+    for (const obj of objects) obj.visible = visible;
+  }
+
+  private syncAssetPhaseVisuals(sceneId?: string): void {
+    for (const phaseVisual of this.assetPhaseVisuals) {
+      const visible = sceneId ? phaseVisual.activeSceneIds.includes(sceneId) : phaseVisual.activeSceneIds.length === 0;
+      for (const obj of phaseVisual.objects) obj.visible = visible;
+    }
+  }
+
+  private setProceduralRoomVisualsVisible(visible: boolean): void {
+    const preserved = new Set<THREE.Object3D>();
+    const preserveTree = (obj?: THREE.Object3D | null): void => {
+      if (!obj) return;
+      obj.traverse((child) => preserved.add(child));
+    };
+
+    for (const pickup of this.room.pickups) preserveTree(pickup.glow);
+    for (const trigger of this.room.storyTriggers) preserveTree(trigger.glow);
+    for (const door of this.room.doors) preserveTree(door.group);
+    for (const phaseObject of this.room.phaseObjects) preserveTree(phaseObject.object);
+    for (const npcGroup of this.room.npcGroups) preserveTree(npcGroup);
+
+    this.room.root.traverse((obj) => {
+      if (obj === this.room.root || preserved.has(obj)) return;
+      obj.visible = visible;
+    });
   }
 
   private collides(x: number, z: number): boolean {
@@ -460,9 +671,10 @@ export class Interior3D {
 
   private syncLightingState(dt: number, t: number): void {
     const hasFlashlight = this.hasInventoryItem("flashlight");
-    const targetAmbient = hasFlashlight ? 0.85 : 0.22;
-    const targetFill = hasFlashlight ? 0.55 : 0.14;
-    const targetNear = hasFlashlight ? 0.85 : 0.24;
+    const libraryProfile = this.roomKind === "library";
+    const targetAmbient = hasFlashlight ? (libraryProfile ? 0.5 : 0.85) : libraryProfile ? 0.1 : 0.22;
+    const targetFill = hasFlashlight ? (libraryProfile ? 0.32 : 0.55) : libraryProfile ? 0.06 : 0.14;
+    const targetNear = hasFlashlight ? (libraryProfile ? 0.5 : 0.85) : libraryProfile ? 0.08 : 0.24;
     const k = Math.min(1, dt * 6);
 
     this.ambientLight.intensity = THREE.MathUtils.lerp(this.ambientLight.intensity, targetAmbient, k);
@@ -476,6 +688,7 @@ export class Interior3D {
     }
 
     this.updateBloodLight(t);
+    this.updateAssetFlickerLights(t);
   }
 
   private scheduleBloodFlash(t: number): void {
@@ -496,9 +709,31 @@ export class Interior3D {
     if (t < this.bloodFlashUntil) {
       const phase = (this.bloodFlashUntil - t) / 0.34;
       const pulse = 0.7 + 0.3 * Math.sin(t * 58);
-      this.bloodLight.intensity = 4.8 * Math.max(0.35, phase) * pulse;
+      this.bloodLight.intensity = this.bloodLightMaxIntensity * Math.max(0.35, phase) * pulse;
     } else {
-      this.bloodLight.intensity = 0;
+      const ember = 0.08 + 0.035 * Math.sin(t * 2.7);
+      this.bloodLight.intensity = this.bloodLightMaxIntensity * ember;
+    }
+  }
+
+  private updateAssetFlickerLights(t: number): void {
+    for (const entry of this.assetFlickerLights) {
+      if (entry.followPickupId) {
+        const pickup = this.room.pickups.find((p) => p.itemId === entry.followPickupId);
+        const visible = !!pickup && !pickup.taken && pickup.glow.visible && !this.hasInventoryItem(entry.followPickupId);
+        entry.light.visible = visible;
+        if (!visible || !pickup) {
+          entry.light.intensity = 0;
+          continue;
+        }
+        entry.light.position.set(pickup.position.x, entry.y, pickup.position.z);
+      }
+
+      const shimmer =
+        0.48 +
+        0.34 * Math.sin(t * entry.speed + entry.phase) +
+        0.18 * Math.sin(t * entry.speed * 2.73 + entry.phase * 1.7);
+      entry.light.intensity = entry.baseIntensity * THREE.MathUtils.clamp(shimmer, 0.12, 1.0);
     }
   }
 
@@ -661,6 +896,7 @@ export class Interior3D {
       if (dx * dx + dz * dz <= item.radius * item.radius) {
         item.taken = true;
         item.glow.visible = false;
+        this.setAssetPickupVisualVisible(item.itemId, false);
         this.onPickup?.(item.itemId, item.name);
       }
     }
@@ -738,15 +974,17 @@ export class Interior3D {
     for (const item of this.room.pickups) {
       const isActive = !item.taken && !this.hasInventoryItem(item.itemId) && this.isPickupAvailable(item, sceneId);
       item.glow.visible = isActive;
+      this.setAssetPickupVisualVisible(item.itemId, isActive);
     }
 
     for (const phaseObject of this.room.phaseObjects) {
-      phaseObject.object.visible = this.isPhaseObjectAvailable(phaseObject, sceneId);
+      phaseObject.object.visible = this.assetPhaseVisuals.length === 0 && this.isPhaseObjectAvailable(phaseObject, sceneId);
     }
+    this.syncAssetPhaseVisuals(sceneId);
 
     // ── NPC 显现由 storyEngine 统一管理 ──
     const npcRevealIds = getInteriorNpcRevealSceneIds(this.roomKind);
-    const shouldShowNpc = sceneId ? npcRevealIds.includes(sceneId as any) : false;
+    const shouldShowNpc = this.roomKind !== "library" && !!sceneId && npcRevealIds.includes(sceneId as any);
     for (const npcGroup of this.room.npcGroups) {
       npcGroup.visible = shouldShowNpc;
     }

@@ -102,8 +102,8 @@ interface Palette {
 }
 
 const PALETTES: Record<RoomKind, Palette> = {
-  // Library uses the real ZJU library's blue/white scheme, dimmed for horror.
-  library: { floor: 0x1b2733, wall: 0x28323d, ceiling: 0x0e141b, accent: 0x8fb8d6, wood: 0x6b4b2e },
+  // Library: warm red-brick tone, dimmed for horror atmosphere.
+  library: { floor: 0x1f1a18, wall: 0x4a3035, ceiling: 0x161012, accent: 0xb87060, wood: 0x6b4b2e },
   medical: { floor: 0x20262a, wall: 0x2b333a, ceiling: 0x12171b, accent: 0x6fa6ad, wood: 0x4a4038 },
   dorm: { floor: 0x2b333d, wall: 0x3b3a3f, ceiling: 0x17161a, accent: 0x5f7fa8, wood: 0x9a744a },
   hall: { floor: 0x22242a, wall: 0x2c2f37, ceiling: 0x14161b, accent: 0x8a8fa0, wood: 0x5a4a38 },
@@ -189,6 +189,8 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
   };
 
   // A tall bookshelf full of colourful spines.
+  // Books placed only on shelves 2 & 3 from the top (indices 1 & 2),
+  // scaled up for readability, sitting on the shelf front face.
   const addBookshelf = (cx: number, cz: number, w: number, rot: number, baseY = 0): void => {
     const g = new THREE.Group();
     g.position.set(cx, baseY, cz);
@@ -200,15 +202,19 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
     frame.castShadow = true;
     g.add(frame);
     const spineColors = [0x7a3b34, 0x35506b, 0x5c6b3a, 0x6b5a35, 0x45364f, 0x2f5a55];
-    const count = Math.floor(w / 0.13);
-    for (let shelf = 0; shelf < 4; shelf++) {
-      const y = 0.35 + shelf * 0.6;
+    // Shelf Y positions (4 shelves): 0.35, 0.95, 1.55, 2.15 — use only [1] & [2].
+    const shelfYs = [0.35, 0.95, 1.55, 2.15];
+    for (const si of [1, 2]) {
+      const y = shelfYs[si];
+      const usableW = w - 0.16; // inset from frame edges
+      const bookW = 0.13;       // wider, readable book spine
+      const count = Math.floor(usableW / (bookW + 0.02));
       for (let b = 0; b < count; b++) {
-        const bw = 0.07 + (b % 3) * 0.02;
-        const bh = 0.34 + ((b * 7) % 5) * 0.03;
-        const bm = stdMat(spineColors[(b + shelf) % spineColors.length], 0.9);
-        const book = new THREE.Mesh(track(new THREE.BoxGeometry(bw, bh, 0.24)), bm);
-        book.position.set(-w / 2 + 0.1 + b * 0.13, y + bh / 2, 0.02);
+        const bh = 0.44 + ((b * 7) % 6) * 0.025; // taller books
+        const bm = stdMat(spineColors[(b + si) % spineColors.length], 0.9);
+        const book = new THREE.Mesh(track(new THREE.BoxGeometry(bookW, bh, 0.24)), bm);
+        // Place on the shelf front face (frame depth 0.4 → front at z=0.2, inset books to z=0.22).
+        book.position.set(-usableW / 2 + bookW / 2 + b * (bookW + 0.02), y + bh / 2, 0.22);
         g.add(book);
       }
     }
@@ -261,7 +267,11 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
     );
     const halo = new THREE.Mesh(track(new THREE.SphereGeometry(0.3, 12, 12)), haloMat);
     g.add(halo);
-    const light = new THREE.PointLight(color, 1.1, 3.2, 2);
+    // Flashlight emits a strong red guide light so the player can spot it from across the room.
+    const guideColor = itemId === "flashlight" ? 0xcc3333 : color;
+    const guideIntensity = itemId === "flashlight" ? 3.5 : 1.1;
+    const guideRange = itemId === "flashlight" ? 7.0 : 3.2;
+    const light = new THREE.PointLight(guideColor, guideIntensity, guideRange, 2);
     g.add(light);
     pickups.push({
       id: `${itemId}-${pickups.length}`,
@@ -311,6 +321,30 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
       radius,
       triggered: false,
     });
+  };
+
+  // Chinese-style ceiling lantern: red barrel body, brass rings, cord to ceiling.
+  const addCeilingLantern = (x: number, z: number, ceilingY: number): void => {
+    const g = new THREE.Group();
+    g.position.set(x, ceilingY - 0.4, z);
+    root.add(g);
+    const bodyColor = 0xb8443a;
+    const mat = trackMat(new THREE.MeshStandardMaterial({ color: bodyColor, emissive: new THREE.Color(bodyColor), emissiveIntensity: 1.2, roughness: 0.35 }));
+    const body = new THREE.Mesh(track(new THREE.CylinderGeometry(0.16, 0.2, 0.45, 12)), mat);
+    g.add(body);
+    const ringMat = trackMat(new THREE.MeshStandardMaterial({ color: 0x8a6d40, roughness: 0.35, metalness: 0.55 }));
+    const topRing = new THREE.Mesh(track(new THREE.TorusGeometry(0.16, 0.025, 8, 12)), ringMat);
+    topRing.position.y = 0.24;
+    g.add(topRing);
+    const botRing = new THREE.Mesh(track(new THREE.TorusGeometry(0.16, 0.025, 8, 12)), ringMat);
+    botRing.position.y = -0.24;
+    g.add(botRing);
+    const cord = new THREE.Mesh(track(new THREE.CylinderGeometry(0.012, 0.012, 0.38, 6)), trackMat(new THREE.MeshBasicMaterial({ color: 0x2a2018 })));
+    cord.position.y = 0.4;
+    g.add(cord);
+    const light = new THREE.PointLight(bodyColor, 0.65, 5.0, 2);
+    light.position.y = 0;
+    g.add(light);
   };
 
   // Shared finalizer (hoisted). Closes over root/npcs/pickups/storyTriggers/geometries/materials.
@@ -449,15 +483,25 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
     addBox(2.0, 0.8, 0.8, 0, 0.55, -halfL + 6.3, stdMat(0x6f7d82, 0.85));
 
     // ── 剧情触发区（医学院内景：鬼现形 + 苏婉照片）──
+    // 触发器碰撞区保持在地面，视觉改为天花板中式灯笼（不再悬空红球）
+    const medTriggerCountBefore = storyTriggers.length;
     getInteriorStoryTriggers("medical").forEach((trigger) => {
       if (trigger.position === "ghost") {
-        // 地下仓库隔间前方，鬼出现的走廊位置
         addStoryTrigger(trigger.sceneId, 0, 0.7, -halfL + 3.4, trigger.action, trigger.activeSceneIds, trigger.radius);
+        addCeilingLantern(0, -halfL + 3.4, WALL_H);
       } else if (trigger.position === "stand") {
-        // 房间中央，苏婉给予照片的位置
         addStoryTrigger(trigger.sceneId, 0, 0.7, 1.0, trigger.action, trigger.activeSceneIds, trigger.radius);
+        addCeilingLantern(0, 1.0, WALL_H);
       }
     });
+    // 隐藏医疗室触发器的浮空红球视觉（保留碰撞检测），用天花板灯笼替代
+    for (let i = medTriggerCountBefore; i < storyTriggers.length; i++) {
+      storyTriggers[i].glow.visible = false;
+    }
+    // 检查床上方天花板灯笼
+    addCeilingLantern(-halfW + 1.3, -3.5, WALL_H);
+    addCeilingLantern(-halfW + 1.3, 0.1, WALL_H);
+    addCeilingLantern(-halfW + 1.3, 3.7, WALL_H);
   } else if (kind === "dorm") {
     // ── 浙大白沙式"上床下桌":上层黑色金属高架床，下层木书桌+书架柜+绿椅+爬梯 ──
     const blueFabric = stdMat(0x3f5a86, 0.95); // 蓝色被褥/窗帘
@@ -648,145 +692,6 @@ interface LibResult {
   };
 }
 
-/**
- * Two-storey library modelled on the real ZJU basic library: turnstile gate at
- * the +Z entrance, bookshelf rows, and a white spiral staircase (centre-back)
- * rising one full turn to a 2nd-floor gallery where the figure waits.
- */
-function buildLibraryLegacy(ctx: LibCtx) {
-  const { addBox, addBookshelf, track, trackMat, floorMat, ceilMat, wallMat, whiteMat, metalMat, accentMat, root, colliders } = ctx;
-  const W = 12;
-  const L = 18;
-  const H1 = 3.4;
-  const WALL_H = H1 * 2;
-  const halfW = W / 2;
-  const halfL = L / 2;
-
-  const floor = new THREE.Mesh(track(new THREE.PlaneGeometry(W, L)), floorMat);
-  floor.rotation.x = -Math.PI / 2;
-  floor.receiveShadow = true;
-  root.add(floor);
-  const ceil = new THREE.Mesh(track(new THREE.PlaneGeometry(W, L)), ceilMat);
-  ceil.rotation.x = Math.PI / 2;
-  ceil.position.y = WALL_H;
-  root.add(ceil);
-  addBox(W + 0.3, WALL_H, 0.3, 0, WALL_H / 2, -halfL, wallMat);
-  addBox(W + 0.3, WALL_H, 0.3, 0, WALL_H / 2, halfL, wallMat);
-  addBox(0.3, WALL_H, L + 0.3, -halfW, WALL_H / 2, 0, wallMat);
-  addBox(0.3, WALL_H, L + 0.3, halfW, WALL_H / 2, 0, wallMat);
-
-  // Turnstile gate at the entrance (+Z) — posts are visual only, not solid.
-  const gateZ = halfL - 2.2;
-  for (const sx of [-1.3, 0, 1.3]) addBox(0.4, 1.0, 0.4, sx, 0.5, gateZ, metalMat, false);
-  for (const sx of [-0.65, 0.65]) addBox(0.06, 0.1, 0.9, sx, 0.95, gateZ, whiteMat, false);
-  addBox(W, 0.3, 0.3, 0, 2.6, gateZ, whiteMat, false);
-
-  // Bookshelf rows down both sides of the ground floor.
-  // Shifted away from the spiral staircase (z ≈ -5..-7) so the
-  // library_sound trigger area near the stairs has breathing room.
-  for (let i = 0; i < 3; i++) {
-    const z = -1 + i * 3.5;
-    addBookshelf(-halfW + 1.4, z, 3.0, Math.PI / 2);
-    addBookshelf(halfW - 1.4, z, 3.0, Math.PI / 2);
-  }
-  // Reading table between the rows (4 legs).
-  addBox(2.0, 0.08, 1.0, 0, 0.78, 4.5, accentMat, false);
-  for (const sx of [-1, 1]) for (const sz of [-1, 1]) addBox(0.09, 0.74, 0.09, sx * 0.85, 0.37, 4.5 + sz * 0.4, metalMat, false);
-  colliders.push({ minX: -1.1, maxX: 1.1, minZ: 4.0, maxZ: 5.0 });
-
-  // ── Half-turn (180°) spiral staircase on the -X side ──
-  // Bottom faces the +Z entrance; the flight curves around the central column
-  // and tops out at the back (-Z), stepping straight onto the mezzanine. A
-  // half turn keeps top & bottom at *different* positions, so it is a valid
-  // position→height field (a full turn would make top and bottom coincide and
-  // become unreachable). The solid central column blocks the x=0 shortcut, so
-  // the only path up is around the visible steps.
-  const SX = 0;
-  const SZ = -5;
-  const R_IN = 0.7;
-  const R_OUT = 1.9;
-  const rMid = (R_IN + R_OUT) / 2;
-  const ENTRY = Math.PI / 2; // bottom step at +Z side of the column
-  const TURN = Math.PI; // 180°
-  const F2Y = H1; // mezzanine height
-  const MEZZ_Z = -6.2; // everything behind this line is the 2nd-floor mezzanine
-
-  // Central column.
-  const col = new THREE.Mesh(track(new THREE.CylinderGeometry(R_IN, R_IN, F2Y + 0.2, 20)), whiteMat);
-  col.position.set(SX, (F2Y + 0.2) / 2, SZ);
-  root.add(col);
-  colliders.push({ minX: SX - R_IN, maxX: SX + R_IN, minZ: SZ - R_IN, maxZ: SZ + R_IN });
-
-  // Treads + outer railing posts along the walkable half (a: 0 → π).
-  const STEPS = 16;
-  for (let i = 0; i <= STEPS; i++) {
-    const a = ENTRY + (i / STEPS) * TURN;
-    const y = (i / STEPS) * F2Y + 0.06;
-    const tread = new THREE.Mesh(track(new THREE.BoxGeometry(R_OUT - R_IN + 0.2, 0.1, 0.62)), whiteMat);
-    tread.position.set(SX + Math.cos(a) * rMid, y, SZ + Math.sin(a) * rMid);
-    tread.rotation.y = -a;
-    tread.castShadow = true;
-    root.add(tread);
-    if (i % 2 === 0) {
-      const post = new THREE.Mesh(track(new THREE.CylinderGeometry(0.028, 0.028, 1.0, 6)), whiteMat);
-      post.position.set(SX + Math.cos(a) * (R_OUT + 0.05), y + 0.5, SZ + Math.sin(a) * (R_OUT + 0.05));
-      root.add(post);
-    }
-  }
-
-  // ── Mezzanine slab (everything behind MEZZ_Z), at y = F2Y ──
-  const galleryMat = trackMat(new THREE.MeshStandardMaterial({ color: 0x22323f, roughness: 0.9 }));
-  const mezzD = MEZZ_Z - (-halfL); // depth from back wall to the front edge
-  const mezz = new THREE.Mesh(track(new THREE.BoxGeometry(W - 0.3, 0.25, mezzD)), galleryMat);
-  mezz.position.set(0, F2Y - 0.125, (-halfL + MEZZ_Z) / 2);
-  mezz.receiveShadow = true;
-  root.add(mezz);
-
-  // Mezzanine front railing, with a gap at x∈[-1,1] where the stairs arrive.
-  addBox(halfW - 1.0, 0.9, 0.12, -(1 + (halfW - 1) / 2), F2Y + 0.45, MEZZ_Z, whiteMat, false);
-  addBox(halfW - 1.0, 0.9, 0.12, 1 + (halfW - 1) / 2, F2Y + 0.45, MEZZ_Z, whiteMat, false);
-  // Rail-height side blockers so you can't walk off the mezzanine sides.
-  colliders.push({ minX: -halfW + 0.2, maxX: -halfW + 0.35, minZ: -halfL, maxZ: MEZZ_Z });
-  colliders.push({ minX: halfW - 0.35, maxX: halfW - 0.2, minZ: -halfL, maxZ: MEZZ_Z });
-  // Front-edge blocker (except the stair gap) so you don't fall off the front.
-  colliders.push({ minX: -halfW + 0.3, maxX: -1, minZ: MEZZ_Z - 0.15, maxZ: MEZZ_Z });
-  colliders.push({ minX: 1, maxX: halfW - 0.3, minZ: MEZZ_Z - 0.15, maxZ: MEZZ_Z });
-
-  // Mezzanine bookshelves (raised onto the slab).
-  addBookshelf(-halfW + 1.5, -7.6, 2.6, Math.PI / 2, F2Y);
-  addBookshelf(halfW - 1.5, -7.6, 2.6, Math.PI / 2, F2Y);
-
-  const floorHeightAt = (x: number, z: number): number => {
-    const dx = x - SX;
-    const dz = z - SZ;
-    const r = Math.hypot(dx, dz);
-    // On the walkable stair half → helix height.
-    if (r >= R_IN - 0.2 && r <= R_OUT + 0.25) {
-      let a = Math.atan2(dz, dx) - ENTRY;
-      a = ((a % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
-      if (a <= TURN + 0.02) return THREE.MathUtils.clamp((a / TURN) * F2Y, 0, F2Y);
-    }
-    // Behind the front edge → mezzanine.
-    if (z <= MEZZ_Z && Math.abs(x) < halfW - 0.3) return F2Y;
-    return 0;
-  };
-
-  const bounds: AABB = { minX: -halfW + 0.3, maxX: halfW - 0.3, minZ: -halfL + 0.3, maxZ: halfL - 0.3 };
-  // Spawn in clear space between the entrance and the reading table.
-  const spawn = new THREE.Vector3(1.8, 1.6, 6.0);
-
-  return {
-    bounds,
-    spawn,
-    floorHeightAt,
-    npc: { x: 0.4, y: F2Y, z: -7.9, ry: 0 }, // on the mezzanine, facing the stairs
-    pickupSpots: [
-      { x: -halfW + 1.5, y: 0.7, z: 3.2 }, // ground floor, front-left
-      { x: -3.0, y: F2Y + 0.7, z: -7.4 }, // upstairs on the mezzanine
-    ],
-  };
-}
-
 function buildLibrary(ctx: LibCtx): LibResult {
   const {
     addBox,
@@ -863,10 +768,10 @@ function buildLibrary(ctx: LibCtx): LibResult {
       addBox(0.075, 0.72, 0.075, x + sx * (w / 2 - 0.14), 0.36, z + sz * (d / 2 - 0.12), metalMat, false);
     }
     colliders.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2 });
-    addChair(x - w * 0.32, z + d * 0.9, 0);
-    addChair(x + w * 0.32, z + d * 0.9, 0);
-    addChair(x - w * 0.32, z - d * 0.9, Math.PI);
-    addChair(x + w * 0.32, z - d * 0.9, Math.PI);
+    addChair(x - w * 0.32, z + d * 0.9, Math.PI);
+    addChair(x + w * 0.32, z + d * 0.9, Math.PI);
+    addChair(x - w * 0.32, z - d * 0.9, 0);
+    addChair(x + w * 0.32, z - d * 0.9, 0);
   };
 
   const addRouteCarpet = (x: number, z: number, w: number, d: number): void => {
@@ -882,89 +787,18 @@ function buildLibrary(ctx: LibCtx): LibResult {
   addStudyTable(1.0, -3.35);
   addStudyTable(4.25, -3.35);
 
-  const SX = -1.45;
-  const SZ = -4.8;
-  const R_IN = 0.46;
-  const R_OUT = 1.35;
-  const rMid = (R_IN + R_OUT) / 2;
-  const columnColliderR = 0.44;
-  const STAIR_ENTRY = Math.PI / 2;
-  const STAIR_TURN = Math.PI;
-  const STAIR_STEPS = 16;
-  const STAIR_TOP_Y = 2.55;
-  const STAIR_WALK_INNER_R = R_IN + 0.34;
-  const STAIR_WALK_OUTER_R = R_OUT + 0.18;
-  const STAIR_EXIT_PAD = 0.16;
-  const MEZZ_W = 3.9;
-  const MEZZ_D = 1.45;
-  const MEZZ_X = SX;
-  const MEZZ_Z = SZ - R_OUT - MEZZ_D / 2 + 0.28;
-
-  const rampGeo = track(new THREE.BufferGeometry());
-  const rampPositions: number[] = [];
-  const rampIndices: number[] = [];
-  const rampSegments = 56;
-  for (let i = 0; i <= rampSegments; i++) {
-    const p = i / rampSegments;
-    const a = STAIR_ENTRY + p * STAIR_TURN;
-    const y = p * STAIR_TOP_Y + 0.018;
-    rampPositions.push(
-      SX + Math.cos(a) * (R_IN + 0.14), y, SZ + Math.sin(a) * (R_IN + 0.14),
-      SX + Math.cos(a) * (R_OUT + 0.18), y, SZ + Math.sin(a) * (R_OUT + 0.18),
-    );
-  }
-  for (let i = 0; i < rampSegments; i++) {
-    const a = i * 2;
-    rampIndices.push(a, a + 1, a + 3, a, a + 3, a + 2);
-  }
-  rampGeo.setAttribute("position", new THREE.Float32BufferAttribute(rampPositions, 3));
-  rampGeo.setIndex(rampIndices);
-  rampGeo.computeVertexNormals();
-  const rampMat = trackMat(new THREE.MeshStandardMaterial({ color: 0xb6c0c8, roughness: 0.72, metalness: 0.08, side: THREE.DoubleSide }));
-  const ramp = new THREE.Mesh(rampGeo, rampMat);
-  ramp.receiveShadow = true;
-  root.add(ramp);
-
-  const col = new THREE.Mesh(track(new THREE.CylinderGeometry(R_IN, R_IN, STAIR_TOP_Y + 0.9, 28)), whiteMat);
-  col.position.set(SX, (STAIR_TOP_Y + 0.9) / 2, SZ);
-  root.add(col);
-  colliders.push({ minX: SX - columnColliderR, maxX: SX + columnColliderR, minZ: SZ - columnColliderR, maxZ: SZ + columnColliderR });
-
-  for (let i = 0; i <= STAIR_STEPS; i++) {
-    const a = STAIR_ENTRY + (i / STAIR_STEPS) * STAIR_TURN;
-    const y = 0.04 + (i / STAIR_STEPS) * STAIR_TOP_Y;
-    const tread = new THREE.Mesh(track(new THREE.BoxGeometry(R_OUT - R_IN + 0.25, 0.08, 0.5)), whiteMat);
-    tread.position.set(SX + Math.cos(a) * rMid, y, SZ + Math.sin(a) * rMid);
-    tread.rotation.y = -a;
-    tread.castShadow = true;
-    root.add(tread);
-    if (i % 3 === 0) {
-      const post = new THREE.Mesh(track(new THREE.CylinderGeometry(0.026, 0.026, 0.9, 6)), brassMat);
-      post.position.set(SX + Math.cos(a) * (R_OUT + 0.08), y + 0.45, SZ + Math.sin(a) * (R_OUT + 0.08));
-      root.add(post);
-    }
-  }
-  const mezzMat = trackMat(new THREE.MeshStandardMaterial({ color: 0x263443, roughness: 0.9 }));
-  const mezz = new THREE.Mesh(track(new THREE.BoxGeometry(MEZZ_W, 0.18, MEZZ_D)), mezzMat);
-  mezz.position.set(MEZZ_X, STAIR_TOP_Y - 0.09, MEZZ_Z);
-  mezz.receiveShadow = true;
-  root.add(mezz);
-  addBox(MEZZ_W, 0.72, 0.08, MEZZ_X, STAIR_TOP_Y + 0.36, MEZZ_Z - MEZZ_D / 2, brassMat, false);
-  addBox(0.08, 0.72, MEZZ_D, MEZZ_X - MEZZ_W / 2, STAIR_TOP_Y + 0.36, MEZZ_Z, brassMat, false);
-  addBox(0.08, 0.72, MEZZ_D, MEZZ_X + MEZZ_W / 2, STAIR_TOP_Y + 0.36, MEZZ_Z, brassMat, false);
-
-  addBox(4.0, 1.2, 0.18, -4.45, 0.6, 0.45, darkWoodMat);
-  addBox(5.55, 1.2, 0.18, 3.55, 0.6, 0.45, darkWoodMat);
-  const storyGate = addBox(2.7, 0.12, 0.16, -0.8, 1.25, 0.45, whiteMat, false);
+  addBox(4.2, 3.7, 0.2, -4.65, 1.85, 0.45, wallMat);
+  addBox(6.1, 3.7, 0.2, 3.45, 1.85, 0.45, wallMat);
+  const storyGate = addBox(2.7, 2.45, 0.16, -0.8, 1.25, 0.45, whiteMat, false);
   phaseObjects.push({ object: storyGate, activeSceneIds: ["library_intro"] });
   colliders.push({ minX: -2.15, maxX: 0.55, minZ: 0.37, maxZ: 0.53, activeSceneIds: ["library_intro"] });
   addRouteCarpet(-0.9, 1.4, 1.25, 2.2);
   addRouteCarpet(1.7, 2.25, 5.2, 0.82);
 
-  addBookshelf(2.0, 4.55, 3.8, Math.PI / 2);
-  addBookshelf(3.35, 4.55, 3.8, Math.PI / 2);
-  addBookshelf(4.7, 4.55, 3.8, Math.PI / 2);
-  addBookshelf(5.8, 4.55, 3.8, Math.PI / 2);
+  for (const [x, z] of [[2.0, 2.05], [2.0, 4.75], [2.0, 7.05], [5.15, 2.05], [5.15, 4.75], [5.15, 7.05]] as const) {
+    addBookshelf(x, z, 1.65, Math.PI / 2);
+    colliders.push({ minX: x - 0.42, maxX: x + 0.42, minZ: z - 0.88, maxZ: z + 0.88 });
+  }
   addBox(3.6, 0.04, 0.8, 3.85, 0.04, 6.88, pathMat, false);
 
   addBox(2.2, 0.95, 0.48, -4.65, 0.48, 4.7, darkWoodMat);
@@ -973,11 +807,11 @@ function buildLibrary(ctx: LibCtx): LibResult {
 
   const gateZ = 7.35;
   const exitZ = 7.84;
-  addBox(4.9, 0.86, 0.2, -3.25, 0.43, gateZ, metalMat);
-  addBox(4.9, 0.86, 0.2, 3.25, 0.43, gateZ, metalMat);
-  for (const sx of [-0.82, 0.82]) addBox(0.24, 0.98, 0.56, sx, 0.49, gateZ, metalMat);
-  for (const sx of [-0.55, 0.55]) addBox(0.06, 0.1, 0.9, sx, 0.92, gateZ, brassMat, false);
-  addBox(3.5, 0.18, 0.16, 0, 1.6, gateZ, whiteMat, false);
+  for (const sx of [-1.2, -0.6, 0, 0.6, 1.2]) addBox(0.08, 2.2, 0.08, sx, 1.1, gateZ, metalMat, false);
+  addBox(2.7, 0.08, 0.08, 0, 0.25, gateZ, metalMat, false);
+  addBox(2.7, 0.08, 0.08, 0, 2.05, gateZ, metalMat, false);
+  addBox(0.08, 2.2, 0.08, -1.38, 1.1, gateZ, brassMat, false);
+  addBox(0.08, 2.2, 0.08, 1.38, 1.1, gateZ, brassMat, false);
 
   guideNodes.push(
     { id: "spawn-left", x: -3.85, z: -2.35, links: ["left-aisle", "upper-cross"] },
@@ -987,36 +821,16 @@ function buildLibrary(ctx: LibCtx): LibResult {
     { id: "intro", x: 2.25, z: -2.05, links: ["right-entry"] },
     { id: "passage-top", x: -0.85, z: 0.05, links: ["upper-cross", "passage-bottom"] },
     { id: "passage-bottom", x: -0.85, z: 2.2, links: ["passage-top", "shelf-entry", "gate-approach"] },
-    { id: "shelf-entry", x: 4.05, z: 2.35, links: ["passage-bottom", "shelf-aisle"] },
-    { id: "shelf-aisle", x: 4.05, z: 3.35, links: ["shelf-entry", "shelf-exit"] },
-    { id: "shelf-exit", x: 4.05, z: 6.82, links: ["shelf-aisle", "gate-approach"] },
+    { id: "shelf-entry", x: 5.0, z: 2.35, links: ["passage-bottom", "shelf-aisle"] },
+    { id: "shelf-aisle", x: 5.0, z: 3.35, links: ["shelf-entry", "shelf-exit"] },
+    { id: "shelf-exit", x: 5.0, z: 6.82, links: ["shelf-aisle", "gate-approach"] },
     { id: "gate-approach", x: 0.35, z: 6.85, links: ["passage-bottom", "shelf-exit", "gate"] },
     { id: "gate", x: 0.0, z: exitZ, links: ["gate-approach"] },
   );
 
   const bounds: AABB = { minX: -halfW + 0.3, maxX: halfW - 0.3, minZ: -halfL + 0.3, maxZ: halfL - 0.3 };
   const spawn = new THREE.Vector3(-3.85, 1.6, -2.35);
-  const floorHeightAt = (x: number, z: number): number => {
-    const dx = x - SX;
-    const dz = z - SZ;
-    const r = Math.hypot(dx, dz);
-    if (
-      x >= MEZZ_X - MEZZ_W / 2 + 0.2 &&
-      x <= MEZZ_X + MEZZ_W / 2 - 0.2 &&
-      z >= MEZZ_Z - MEZZ_D / 2 + 0.15 &&
-      z <= MEZZ_Z + MEZZ_D / 2 - 0.15
-    ) {
-      return STAIR_TOP_Y;
-    }
-    if (r >= STAIR_WALK_INNER_R && r <= STAIR_WALK_OUTER_R) {
-      let a = Math.atan2(dz, dx) - STAIR_ENTRY;
-      a = ((a % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
-      if (a <= STAIR_TURN + STAIR_EXIT_PAD) {
-        return THREE.MathUtils.clamp((a / STAIR_TURN) * STAIR_TOP_Y, 0, STAIR_TOP_Y);
-      }
-    }
-    return 0;
-  };
+  const floorHeightAt = (): number => 0;
 
   return {
     bounds,
@@ -1028,14 +842,13 @@ function buildLibrary(ctx: LibCtx): LibResult {
       { x: 1.25, y: 0.7, z: 6.15 },
     ],
     flashlightSpots: [
-      { x: -3.05, z: -3.0 },
-      { x: -2.65, z: -6.35 },
-      { x: -0.28, z: -3.05 },
-      { x: -3.35, z: -4.0 },
+      { x: -3.35, z: -1.45 },
+      { x: -1.85, z: -1.55 },
+      { x: -2.65, z: -0.95 },
     ],
     triggers: {
       intro: { x: 2.25, z: -2.05 },
-      sound: { x: 4.05, z: 3.35 },
+      sound: { x: 5.0, z: 3.35 },
       exit: { x: 0.0, z: exitZ },
     },
   };

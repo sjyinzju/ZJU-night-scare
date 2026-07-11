@@ -1,12 +1,213 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>浙大恐怖地图原型</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>浙大夜惊魂 · THE HAUNTING OF ZJU｜校园悬疑侦探系列</title>
+<meta name="description" content="国内首部高校实景恐怖小说改编 · 2.5D 校园悬疑探索游戏。以浙江大学紫金港校区为舞台，风水堪舆、七大学园、求是会……深夜降临，谁在敲你的窗？" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;900&family=ZCOOL+XiaoWei&family=Cinzel:wght@500;700;900&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="./site/styles.css" />
+</head>
+<body>
+<!-- 全局氛围叠层 -->
+<div class="fx-vignette" aria-hidden="true"></div>
+<div class="fx-grain" aria-hidden="true"></div>
+<div class="fx-scanline" aria-hidden="true"></div>
+
+<!-- 导航 -->
+<header class="nav" id="nav">
+  <a class="nav__brand" href="#top">
+    <span class="nav__brand-cn">浙大夜惊魂</span>
+    <span class="nav__brand-en">THE HAUNTING OF ZJU</span>
+  </a>
+  <nav class="nav__links">
+    <a href="#story">故事缘起</a>
+    <a href="#feng-shui">风水档案</a>
+    <a href="#characters">人物图鉴</a>
+    <a href="#game">玩法</a>
+    <a href="#feedback">反馈</a>
+    <a class="nav__cta" href="./game/">▸ 进入校园</a>
+  </nav>
+  <button class="nav__burger" id="burger" aria-label="菜单">☰</button>
+</header>
+
+<!-- HERO -->
+<section class="hero" id="top">
+  <div class="hero__threads" aria-hidden="true">
+    <svg viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice">
+      <g stroke="#7a1417" stroke-width="1" fill="none" opacity="0.55">
+        <path d="M120 80 L620 420 L300 760" />
+        <path d="M1320 120 L780 400 L1100 820" />
+        <path d="M620 420 L780 400" />
+        <path d="M300 760 L1100 820" />
+        <path d="M620 420 L120 500 L780 400" />
+      </g>
+      <g fill="#8b1a1a">
+        <circle cx="120" cy="80" r="4"/><circle cx="620" cy="420" r="5"/>
+        <circle cx="300" cy="760" r="4"/><circle cx="1320" cy="120" r="4"/>
+        <circle cx="780" cy="400" r="5"/><circle cx="1100" cy="820" r="4"/>
+        <circle cx="120" cy="500" r="4"/>
+      </g>
+    </svg>
+  </div>
+
+  <div class="hero__inner">
+    <p class="hero__eyebrow">国内首部 · 高校实景恐怖小说改编</p>
+    <h1 class="hero__title glitch" data-text="浙大夜惊魂">浙大夜惊魂</h1>
+    <p class="hero__en">THE HAUNTING OF ZJU</p>
+    <p class="hero__series">校 园 悬 疑 侦 探 系 列</p>
+    <p class="hero__tag">紫金港的夜里，先放烟花，再动土。<br/>他们说，那叫「扫地」——赶走不干净的东西。</p>
+    <div class="hero__cta hero__cta--single">
+      <a class="btn btn--blood btn--hero" href="./game/">
+        <span>▶ 直接开始游戏</span>
+        <small>无需下载 · 网页即玩</small>
+      </a>
+    </div>
+    <p class="hero__scroll">向下滚动，查看档案与更多内容 ↓</p>
+  </div>
+</section>
+
+<!-- 故事缘起 -->
+<section class="section story" id="story">
+  <div class="section__label"><span>档案 01</span> 故事缘起</div>
+  <div class="story__grid">
+    <div class="story__lead">
+      <h2>深夜自修，回不去的寝室</h2>
+      <p>08 年 3 月初，生命科学系大三学生<strong>张超</strong>，跟着室友去了全校最偏僻的西南角——医学院图书馆自修。</p>
+      <p>十点整，一直埋头做题的同伴忽然抬起头，压低声音：「你有没有听到<em>什么声音</em>？」</p>
+      <p>草地里没有虫鸣，走廊尽头没有人影。可从那一夜起，敲窗声、镜中的倒影、飘忽的歌声，开始一件件找上门来。而三年恋人<strong>白秋</strong>，正是在那样一个深夜，选择沉默地离开。</p>
+      <p class="story__quote">"但尽管学校改造好了，一些不小心的人，总是……"</p>
+    </div>
+    <aside class="story__meta">
+      <h3>作品档案</h3>
+      <dl>
+        <dt>原著</dt><dd>《浙大夜惊魂》· 紫金陈</dd>
+        <dt>类型</dt><dd>校园 · 悬疑 · 恐怖 · 侦探推理</dd>
+        <dt>舞台</dt><dd>Z 大紫金港校区（实景）</dd>
+        <dt>时间</dt><dd>2008 年初春 · 连绵深夜</dd>
+        <dt>形态</dt><dd>2.5D 等距视角探索游戏</dd>
+      </dl>
+    </aside>
+  </div>
+</section>
+
+<!-- 风水档案 -->
+<section class="section feng" id="feng-shui">
+  <div class="section__label"><span>档案 02</span> 风水堪舆 · 校园秘密</div>
+  <p class="feng__intro">紫金港建成前，是杭州西面的一片大沼泽。多水之地，阴气重。整座校区的布局、命名、乃至一草一木，据说都暗合五行——为的是<strong>镇住</strong>些什么。</p>
+
+  <div class="feng__questions">
+    <article><span>?</span><p>校区周边每逢夜晚施工，为何总是<strong>先放烟花</strong>？</p></article>
+    <article><span>?</span><p>七大学园，为何以<strong>天地金木水火土</strong>命名？</p></article>
+    <article><span>?</span><p>主要建筑的布置与命名，为何<strong>全部暗合五行</strong>？</p></article>
+    <article><span>?</span><p>半个世纪前创立的神秘学生社团——<strong>求是会</strong>，是否至今仍存？</p></article>
+  </div>
+
+  <h3 class="feng__sub">七大学园 · 五行归位</h3>
+  <div class="feng__yuan">
+    <div class="yuan" data-el="天"><b>紫云</b><span>天</span></div>
+    <div class="yuan" data-el="地"><b>蓝田</b><span>地</span></div>
+    <div class="yuan" data-el="金"><b>碧峰</b><span>金</span></div>
+    <div class="yuan" data-el="木"><b>翠柏</b><span>木</span></div>
+    <div class="yuan" data-el="水"><b>青溪</b><span>水</span></div>
+    <div class="yuan" data-el="火"><b>丹阳</b><span>火</span></div>
+    <div class="yuan" data-el="土"><b>白沙</b><span>土</span></div>
+  </div>
+  <p class="feng__foot">图书馆旁的行政楼，俯视是一只<strong>眼睛</strong>的形状——有眼珠，有睫毛。据说，就是为了镇住整个紫金港。</p>
+</section>
+
+<!-- 人物图鉴 -->
+<section class="section chars" id="characters">
+  <div class="section__label"><span>档案 03</span> 人物图鉴</div>
+  <p class="chars__intro">卷入这场惊魂夜的人。点击卡片，翻开他们的档案。</p>
+  <div class="chars__grid" id="charsGrid"><!-- JS 注入 --></div>
+  <div class="chars__more">
+    <span>其余角色档案正在解封中……</span>
+    <small>更多人物立绘将陆续上传</small>
+  </div>
+</section>
+
+<!-- 玩法 -->
+<section class="section game" id="game">
+  <div class="section__label"><span>档案 04</span> 玩法 · 进入游戏</div>
+  <div class="game__grid">
+    <div class="game__copy">
+      <h2>在深夜的紫金港里，活到天亮</h2>
+      <p>2.5D 等距视角恐怖探索。你将扮演张超，在漆黑的校园里调查一连串坠楼与失踪事件背后的真相。</p>
+      <ul class="game__feats">
+        <li><b>多分支剧情</b><span>选择决定你走向哪一个结局</span></li>
+        <li><b>理智管理</b><span>看得越多，越接近崩溃的边缘</span></li>
+        <li><b>道具系统</b><span>红色羽绒服、日记本、校园卡……每样都有来历</span></li>
+        <li><b>鬼魂追逐</b><span>有些走廊，你只能一直往前，不能回头</span></li>
+      </ul>
+      <div class="game__cta">
+        <a class="btn btn--blood" href="./game/"><span>▶ 网页直接开玩</span></a>
+        <a class="btn btn--ghost" href="https://github.com/sjyinzju/ZJU-night-scare" target="_blank" rel="noopener">
+          <span>⌥ GitHub 仓库</span>
+          <small>源码 · Star · Fork</small>
+        </a>
+      </div>
+    </div>
+    <div class="game__panel">
+      <div class="game__screen">
+        <div class="game__hud"><span>SANITY</span><i></i></div>
+        <p class="game__typed" id="typed"></p>
+        <div class="game__url">
+          <label>直达地址</label>
+          <a href="./game/">sjyinzju.github.io/ZJU-night-scare</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 反馈 -->
+<section class="section feedback" id="feedback">
+  <div class="section__label"><span>档案 05</span> 用户反馈 · 留下线索</div>
+  <div class="feedback__grid">
+    <div class="feedback__intro">
+      <h2>你在校园里，看见了什么？</h2>
+      <p>Bug、剧情建议、灵异体验、或者只是想吐槽——都欢迎留言。你的每一条反馈，都会被记入档案。</p>
+      <div class="feedback__links">
+        <a href="https://github.com/sjyinzju/ZJU-night-scare/issues" target="_blank" rel="noopener">🗂 在 GitHub Issues 浏览全部反馈</a>
+      </div>
+    </div>
+    <form class="feedback__form" id="fbForm">
+      <label>类型
+        <select id="fbType">
+          <option value="Bug 反馈">🐞 Bug 反馈</option>
+          <option value="剧情 / 玩法建议">💡 剧情 / 玩法建议</option>
+          <option value="灵异体验分享">👻 灵异体验分享</option>
+          <option value="其他">✉ 其他</option>
+        </select>
+      </label>
+      <label>一句话标题
+        <input id="fbTitle" type="text" placeholder="例如：西区厕所的镜子闪了一下" maxlength="60" />
+      </label>
+      <label>详细描述
+        <textarea id="fbBody" rows="5" placeholder="发生在哪里？你看到 / 遇到了什么？"></textarea>
+      </label>
+      <button type="submit" class="btn btn--blood"><span>提交到 GitHub Issues ▸</span></button>
+      <p class="feedback__note">提交将带着你填写的内容跳转到 GitHub 新建 Issue 页面，需登录 GitHub 账号确认发送。</p>
+    </form>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="footer__brand">
+    <span class="footer__cn">浙大夜惊魂</span>
+    <span class="footer__en">THE HAUNTING OF ZJU · 校园悬疑侦探系列</span>
+  </div>
+  <div class="footer__links">
+    <a href="./game/">开始游戏</a>
+    <a href="https://github.com/sjyinzju/ZJU-night-scare" target="_blank" rel="noopener">GitHub 仓库</a>
+    <a href="#feedback">用户反馈</a>
+  </div>
+  <p class="footer__fine">原著《浙大夜惊魂》· 紫金陈　｜　本站为同人改编游戏官网，仅供学习与非商业交流。故事纯属虚构。</p>
+</footer>
+
+<script src="./main.js"></script>
+</body>
 </html>

@@ -1,0 +1,160 @@
+{
+  "assetVersion": 3,
+  "buildingId": "medical-library",
+  "roomKind": "library",
+  "model": "scene.glb",
+  "lodModel": "scene.lod.glb",
+  "units": "meters",
+  "qualityProfile": "medium-high-real-assets",
+  "sourceAssets": [
+    "WoodenTable_03_2k",
+    "modern_arm_chair_01_2k",
+    "wooden_bookshelf_worn_1k",
+    "decorative_book_set_01_2k",
+    "book_encyclopedia_set_01_2k",
+    "large_iron_gate_1k",
+    "peeling_painted_wall_1k",
+    "tool_cart_2k",
+    "old_bed_frame_2k",
+    "wall_clock_1k",
+    "chinese_chandelier_2k",
+    "small_plastic_torch_2k",
+    "diagonal_parquet_2k"
+  ],
+  "assetStats": {
+    "desktop": {
+      "meshCount": 252,
+      "triangles": 473689,
+      "materials": 28,
+      "images": 70,
+      "bytes": 15317916
+    },
+    "lod": {
+      "meshCount": 155,
+      "triangles": 180309,
+      "materials": 27,
+      "images": 63,
+      "bytes": 6152444
+    }
+  },
+  "spawn": {
+    "x": -3.85,
+    "y": 1.6,
+    "z": -2.35,
+    "yaw": -0.96
+  },
+  "bounds": {
+    "minX": -6.45,
+    "maxX": 6.45,
+    "minZ": -8.7,
+    "maxZ": 8.7
+  },
+  "redLights": [
+    {
+      "x": 5.0,
+      "y": 1.35,
+      "z": 3.35,
+      "color": 11145233,
+      "intensity": 3.8,
+      "distance": 7.0
+    }
+  ],
+  "pickupVisuals": {
+    "flashlight": [
+      "pickup_flashlight_visual"
+    ]
+  },
+  "pickupSpots": {
+    "flashlight": [
+      {
+        "x": -3.15,
+        "y": 0.08,
+        "z": -2.15
+      },
+      {
+        "x": -2.25,
+        "y": 0.08,
+        "z": -3.25
+      },
+      {
+        "x": -3.25,
+        "y": 0.08,
+        "z": -4.75
+      },
+      {
+        "x": -1.55,
+        "y": 0.08,
+        "z": -5.15
+      }
+    ]
+  },
+  "flickerLights": [
+    {
+      "name": "flashlight_red_guide",
+      "followPickupId": "flashlight",
+      "y": 0.9,
+      "color": 16718353,
+      "intensity": 1.35,
+      "distance": 3.2,
+      "speed": 3.1,
+      "phase": 0.4
+    },
+    {
+      "name": "tool_cart_red_flicker",
+      "x": -1.15,
+      "y": 1.55,
+      "z": 5.65,
+      "color": 16718353,
+      "intensity": 1.8,
+      "distance": 4.2,
+      "speed": 4.2,
+      "phase": 1.8
+    },
+    {
+      "name": "bed_frame_red_flicker",
+      "x": -4.45,
+      "y": 1.72,
+      "z": 2.75,
+      "color": 16718353,
+      "intensity": 1.9,
+      "distance": 4.4,
+      "speed": 3.7,
+      "phase": 2.6
+    }
+  ],
+  "phaseVisuals": [
+    {
+      "names": [
+        "library_intro_gate_visual"
+      ],
+      "activeSceneIds": [
+        "library_intro"
+      ]
+    }
+  ],
+  "storySpots": {
+    "library_intro": {
+      "x": 2.25,
+      "y": 0.7,
+      "z": -2.05,
+      "radius": 0.85
+    },
+    "library_sound": {
+      "x": 5.0,
+      "y": 0.7,
+      "z": 3.35,
+      "radius": 1.2
+    },
+    "library_exit": {
+      "x": 0.0,
+      "y": 0.7,
+      "z": 7.84,
+      "radius": 1.2
+    }
+  },
+  "notes": [
+    "Static visuals use real local Blender assets and PBR textures from 3D_Assets.",
+    "Gameplay colliders, story triggers, NPC reveal, and fallback remain authoritative in TypeScript.",
+    "ATISS/AnyHome/Text2Room/Holodeck are reference-only and not production asset dependencies."
+  ]
+}

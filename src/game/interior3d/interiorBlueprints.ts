@@ -3,20 +3,20 @@ import type { RoomKind } from "./buildRoom";
 export type InteriorMovementState = "idle" | "walk" | "run" | "jump" | "inair" | "crouch";
 
 export interface InteriorMovementProfile {
-  // ── Horizontal speeds ──
+  // Horizontal speeds
   walkSpeed: number;
   sprintSpeed: number;
   crouchSpeed: number;
-  // ── Acceleration (ground) ──
+  // Acceleration (ground)
   acceleration: number;
   deceleration: number;
-  // ── Sprint-specific (overrides acceleration when sprinting) ──
+  // Sprint-specific (overrides acceleration when sprinting)
   sprintAccel?: number;
   sprintDecel?: number;
-  // ── Air movement ──
+  // Air movement
   /** Multiplier on ground acceleration when airborne. 0.3 = 30%. */
   airControl: number;
-  // ── Jump physics ──
+  // Jump physics
   /** Initial upward velocity impulse in m/s. */
   jumpVelocity: number;
   /** Gravity while rising (velocityY > 0). */
@@ -67,7 +67,7 @@ export const INTERIOR_BLUEPRINTS: Record<RoomKind, InteriorBlueprint> = {
       ...DEFAULT_MOVEMENT,
       walkSpeed: 2.85,
       sprintSpeed: 4.0,
-      // Library has high ceilings (mezzanine) — full jump feels good.
+      // Library is now a single-floor reading room; keep jump restrained.
       jumpVelocity: 5.0,
       jumpGravity: 16.0,
       fallGravity: 20.0,
@@ -81,7 +81,7 @@ export const INTERIOR_BLUEPRINTS: Record<RoomKind, InteriorBlueprint> = {
       ...DEFAULT_MOVEMENT,
       walkSpeed: 2.75,
       sprintSpeed: 3.85,
-      // Medical — heavy atmosphere, slightly weightier feel.
+      // Medical interior uses a slightly weightier feel.
       jumpVelocity: 4.8,
       fallGravity: 24.0,
     },
@@ -94,7 +94,7 @@ export const INTERIOR_BLUEPRINTS: Record<RoomKind, InteriorBlueprint> = {
       ...DEFAULT_MOVEMENT,
       walkSpeed: 2.65,
       sprintSpeed: 3.7,
-      // Dorm — low ceiling, reduced jump.
+      // Dorm has a low ceiling and reduced jump.
       jumpVelocity: 3.5,
       jumpGravity: 20.0,
       fallGravity: 26.0,
