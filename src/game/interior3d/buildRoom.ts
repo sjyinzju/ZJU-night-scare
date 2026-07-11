@@ -3,6 +3,7 @@ import { buildCharacter, type CharacterHandle } from "./buildCharacter";
 import { DoorComponent } from "./DoorComponent";
 import { buildStraightStairs, buildLStairs } from "./StaircaseBuilder";
 import { RoomDivider } from "./RoomDivider";
+import { getInteriorStoryItems, getInteriorStoryTriggers, getStoryItemName } from "../storyEngine";
 
 /** Room archetypes with distinct furniture layouts. */
 export type RoomKind = "library" | "medical" | "dorm" | "hall";
@@ -73,6 +74,8 @@ export interface RoomBuildResult {
   guideNodes: InteriorGuideNode[];
   /** Visual objects controlled by the current story phase. */
   phaseObjects: InteriorPhaseObject[];
+  /** NPC character groups — visibility controlled by story engine via activeSceneIds. */
+  npcGroups: THREE.Group[];
   /** Suggested spawn point for the camera. */
   spawn: THREE.Vector3;
   /** Free all geometries + materials. */
@@ -104,24 +107,6 @@ const PALETTES: Record<RoomKind, Palette> = {
   medical: { floor: 0x20262a, wall: 0x2b333a, ceiling: 0x12171b, accent: 0x6fa6ad, wood: 0x4a4038 },
   dorm: { floor: 0x2b333d, wall: 0x3b3a3f, ceiling: 0x17161a, accent: 0x5f7fa8, wood: 0x9a744a },
   hall: { floor: 0x22242a, wall: 0x2c2f37, ceiling: 0x14161b, accent: 0x8a8fa0, wood: 0x5a4a38 },
-};
-
-// Which useful story item each archetype hands out. key_card / photograph /
-// cat_hair are required by later story choices; the rest are consumables.
-const ROOM_ITEMS: Record<RoomKind, { itemId: string; name: string }[]> = {
-  library: [
-    { itemId: "cat_hair", name: "黑猫毛发" },
-    { itemId: "diary", name: "日记残页" },
-  ],
-  medical: [
-    { itemId: "key_card", name: "门禁卡" },
-    { itemId: "medicine", name: "镇定药" },
-  ],
-  dorm: [
-    { itemId: "photograph", name: "老照片" },
-    { itemId: "energy", name: "能量饮料" },
-  ],
-  hall: [{ itemId: "talisman", name: "护身符" }],
 };
 
 const WALL_T = 0.28;
@@ -333,21 +318,10 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
     bounds: AABB,
     spawn: THREE.Vector3,
     floorHeightAt: (x: number, z: number) => number,
-    opts: { revealZ: number; revealFloor2: boolean; revealNear?: { x: number; z: number; r: number } },
   ): RoomBuildResult {
-    let revealed = false;
-    const update = (t: number, playerPos: THREE.Vector3): void => {
-      if (!revealed) {
-        const deep = opts.revealFloor2
-          ? floorHeightAt(playerPos.x, playerPos.z) > 1.4
-          : opts.revealNear
-            ? Math.hypot(playerPos.x - opts.revealNear.x, playerPos.z - opts.revealNear.z) < opts.revealNear.r
-            : playerPos.z < opts.revealZ;
-        if (deep) {
-          revealed = true;
-          for (const n of npcs) n.group.visible = true;
-        }
-      }
+    // NPC visibility is now controlled by Interior3D.syncStoryPhase() via story engine.
+    // NPCs start hidden and are shown only when currentSceneId matches reveal scene IDs.
+    const update = (t: number, _playerPos: THREE.Vector3): void => {
       for (const n of npcs) if (n.group.visible) n.update(t);
       for (const p of pickups) {
         if (p.taken || !p.glow.visible) continue;
@@ -366,7 +340,8 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
       for (const m of materials) m.dispose();
       root.clear();
     };
-    return { root, colliders, bounds, update, floorHeightAt, pickups, storyTriggers, doors, guideNodes, phaseObjects, spawn, dispose };
+    const npcGroups = npcs.map((n) => n.group);
+    return { root, colliders, bounds, update, floorHeightAt, pickups, storyTriggers, doors, guideNodes, phaseObjects, npcGroups, spawn, dispose };
   }
 
   // ---------------------------------------------------------------- LIBRARY
@@ -394,24 +369,26 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
     root.add(npc.group);
     npcs.push(npc);
 
-    const librarySceneItems: typeof ROOM_ITEMS.library = [];
+    const librarySceneItems = getInteriorStoryItems("library");
     librarySceneItems.forEach((it, i) => {
-      const p = built.pickupSpots[i] ?? built.pickupSpots[0];
-      addPickup(it.itemId, it.name, p.x, p.y, p.z, i === 0 ? 0x8fd0ff : 0xffd27a, i === 0 ? ["library_intro"] : ["library_sound"]);
+      const p = it.placement === "flashlight"
+        ? built.flashlightSpots[Math.floor(Math.random() * built.flashlightSpots.length)] ?? built.flashlightSpots[0]
+        : built.pickupSpots[i] ?? built.pickupSpots[0];
+      const pointY = (p as unknown as { y?: number }).y;
+      const y = typeof pointY === "number" ? pointY : 0.72;
+      addPickup(it.itemId, getStoryItemName(it.itemId), p.x, y, p.z, it.color ?? (i === 0 ? 0x8fd0ff : 0xffd27a), it.activeSceneIds);
     });
-    const flashlightSpot = built.flashlightSpots[Math.floor(Math.random() * built.flashlightSpots.length)] ?? built.flashlightSpots[0];
-    addPickup("flashlight", "手电筒", flashlightSpot.x, 0.72, flashlightSpot.z, 0xfff1a8);
 
-    // Story triggers: first one visible, rest hidden until previous triggered
-    addStoryTrigger("library_intro", built.triggers.intro.x, 0.7, built.triggers.intro.z, "story", ["library_intro"], 0.85);
-    addStoryTrigger("library_sound", built.triggers.sound.x, 0.7, built.triggers.sound.z);
-    addStoryTrigger("library_exit", built.triggers.exit.x, 0.7, built.triggers.exit.z, "exit", ["library_police", "dorm_baiqiu"]);
+    getInteriorStoryTriggers("library").forEach((trigger) => {
+      const p = built.triggers[trigger.position as keyof typeof built.triggers];
+      if (p) addStoryTrigger(trigger.sceneId, p.x, 0.7, p.z, trigger.action, trigger.activeSceneIds, trigger.radius);
+    });
     // Hide all triggers after the first
     for (let i = 1; i < storyTriggers.length; i++) {
       storyTriggers[i].glow.visible = false;
     }
 
-    return finalize(built.bounds, built.spawn, built.floorHeightAt, { revealZ: -6.6, revealFloor2: false });
+    return finalize(built.bounds, built.spawn, built.floorHeightAt);
   }
 
   // -------------------------------------------------- FLAT ROOMS (non-library)
@@ -470,6 +447,17 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
     addBox(1.2, 0.5, 2.0, 1.5, 0.35, -halfL + 6.6, metalMat);
     addBox(1.2, 0.5, 2.0, -1.5, 0.35, -halfL + 6.6, metalMat);
     addBox(2.0, 0.8, 0.8, 0, 0.55, -halfL + 6.3, stdMat(0x6f7d82, 0.85));
+
+    // ── 剧情触发区（医学院内景：鬼现形 + 苏婉照片）──
+    getInteriorStoryTriggers("medical").forEach((trigger) => {
+      if (trigger.position === "ghost") {
+        // 地下仓库隔间前方，鬼出现的走廊位置
+        addStoryTrigger(trigger.sceneId, 0, 0.7, -halfL + 3.4, trigger.action, trigger.activeSceneIds, trigger.radius);
+      } else if (trigger.position === "stand") {
+        // 房间中央，苏婉给予照片的位置
+        addStoryTrigger(trigger.sceneId, 0, 0.7, 1.0, trigger.action, trigger.activeSceneIds, trigger.radius);
+      }
+    });
   } else if (kind === "dorm") {
     // ── 浙大白沙式"上床下桌":上层黑色金属高架床，下层木书桌+书架柜+绿椅+爬梯 ──
     const blueFabric = stdMat(0x3f5a86, 0.95); // 蓝色被褥/窗帘
@@ -531,8 +519,11 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
     // 隔断后面：一个小卫生间（洗手台 + 蹲位示意）
     addBox(0.6, 0.8, 0.4, 0, 0.4, -halfL + 6.7, whiteMat);
     addBox(0.7, 1.8, 0.06, 1.6, 0.9, -halfL + 6.8, fabricMat, false);
-    // Story triggers for dorm: forum scene at the desk area
-    addStoryTrigger("dorm_forum", -halfW + 1.1, 0.85, -3.6); // near first loft desk
+    getInteriorStoryTriggers("dorm").forEach((trigger) => {
+      if (trigger.position === "forum") {
+        addStoryTrigger(trigger.sceneId, -halfW + 1.1, 0.85, -3.6, trigger.action, trigger.activeSceneIds, trigger.radius);
+      }
+    });
   } else {
     // ── 小剧场/大厅布局：舞台 + 观众席 + 后台门 ──
     const stageY = 0.5;
@@ -575,21 +566,22 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
     addBox(1.6, 0.02, 0.9, 0, stageY + 0.01, -halfL + 1.2, fabricMat, false);
     addBox(0.9, 0.7, 0.5, -1.8, stageY + 0.35, -halfL + 0.9, woodMat);
 
-    // Story triggers for theater indoor scenes
-    addStoryTrigger("final_plan", 0, stageY + 0.7, stageZ + 1.2);
+    getInteriorStoryTriggers("hall").forEach((trigger) => {
+      if (trigger.position === "stage") {
+        addStoryTrigger(trigger.sceneId, 0, stageY + 0.7, stageZ + 1.2, trigger.action, trigger.activeSceneIds, trigger.radius);
+      }
+    });
   }
 
-  // Deep horror figure (hidden until the player walks in / approaches the mirror).
+  // NPC visibility is now controlled by Interior3D.syncStoryPhase() via story engine.
+  // See INTERIOR_NPC_REVEAL_SCENE_IDS in storyEngine.ts for per-room reveal scenes.
   const npc = buildCharacter({
     bodyColor: kind === "medical" ? 0xaeb4b8 : 0x14181e,
     skinColor: kind === "medical" ? 0xcdc7bb : 0xb9a894,
   });
-  let revealNear: { x: number; z: number; r: number } | undefined;
   if (kind === "dorm") {
-    // 红眼鬼站在镜前,面向玩家;靠近镜子时现形(先照见自己,再看见鬼)。
     npc.group.position.set(halfW - 1.35, 0, -1.2);
     npc.group.rotation.y = -Math.PI / 2;
-    revealNear = { x: halfW - 1.6, z: -1.2, r: 2.4 };
   } else {
     const npcZ = -halfL + 1.6;
     npc.group.position.set(0.2, 0, npcZ);
@@ -601,7 +593,7 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
   npcs.push(npc);
 
   // Pickups on open, reachable floor (avoid furniture footprints per room).
-  const items = ROOM_ITEMS[kind];
+  const items = getInteriorStoryItems(kind);
   const spotsByKind: Record<string, { x: number; z: number }[]> = {
     medical: [{ x: 1.6, z: 2.2 }, { x: -1.4, z: -1.2 }],
     dorm: [{ x: 0, z: 2.6 }, { x: 1.8, z: 1.4 }],
@@ -610,7 +602,7 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
   const spots = spotsByKind[kind] ?? spotsByKind.hall;
   items.forEach((it, i) => {
     const s = spots[i] ?? spots[0];
-    addPickup(it.itemId, it.name, s.x, 0.75, s.z, i === 0 ? 0xffe08a : 0x8fd0ff);
+    addPickup(it.itemId, getStoryItemName(it.itemId), s.x, 0.75, s.z, it.color ?? (i === 0 ? 0xffe08a : 0x8fd0ff), it.activeSceneIds);
   });
 
   const bounds: AABB = {
@@ -620,9 +612,8 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
     maxZ: halfL - WALL_T,
   };
   const spawn = new THREE.Vector3(0, 1.6, halfL - 1.2);
-  const revealZ = halfL - 6;
 
-  return finalize(bounds, spawn, () => 0, { revealZ, revealFloor2: false, revealNear });
+  return finalize(bounds, spawn, () => 0);
 }
 
 // ============================================================ LIBRARY BUILDER
@@ -691,8 +682,10 @@ function buildLibraryLegacy(ctx: LibCtx) {
   addBox(W, 0.3, 0.3, 0, 2.6, gateZ, whiteMat, false);
 
   // Bookshelf rows down both sides of the ground floor.
+  // Shifted away from the spiral staircase (z ≈ -5..-7) so the
+  // library_sound trigger area near the stairs has breathing room.
   for (let i = 0; i < 3; i++) {
-    const z = -4 + i * 3.2;
+    const z = -1 + i * 3.5;
     addBookshelf(-halfW + 1.4, z, 3.0, Math.PI / 2);
     addBookshelf(halfW - 1.4, z, 3.0, Math.PI / 2);
   }
@@ -894,15 +887,52 @@ function buildLibrary(ctx: LibCtx): LibResult {
   const R_IN = 0.46;
   const R_OUT = 1.35;
   const rMid = (R_IN + R_OUT) / 2;
+  const columnColliderR = 0.44;
+  const STAIR_ENTRY = Math.PI / 2;
+  const STAIR_TURN = Math.PI;
+  const STAIR_STEPS = 16;
+  const STAIR_TOP_Y = 2.55;
+  const STAIR_WALK_INNER_R = R_IN + 0.34;
+  const STAIR_WALK_OUTER_R = R_OUT + 0.18;
+  const STAIR_EXIT_PAD = 0.16;
+  const MEZZ_W = 3.9;
+  const MEZZ_D = 1.45;
+  const MEZZ_X = SX;
+  const MEZZ_Z = SZ - R_OUT - MEZZ_D / 2 + 0.28;
 
-  const col = new THREE.Mesh(track(new THREE.CylinderGeometry(R_IN, R_IN, 3.7, 28)), whiteMat);
-  col.position.set(SX, 1.85, SZ);
+  const rampGeo = track(new THREE.BufferGeometry());
+  const rampPositions: number[] = [];
+  const rampIndices: number[] = [];
+  const rampSegments = 56;
+  for (let i = 0; i <= rampSegments; i++) {
+    const p = i / rampSegments;
+    const a = STAIR_ENTRY + p * STAIR_TURN;
+    const y = p * STAIR_TOP_Y + 0.018;
+    rampPositions.push(
+      SX + Math.cos(a) * (R_IN + 0.14), y, SZ + Math.sin(a) * (R_IN + 0.14),
+      SX + Math.cos(a) * (R_OUT + 0.18), y, SZ + Math.sin(a) * (R_OUT + 0.18),
+    );
+  }
+  for (let i = 0; i < rampSegments; i++) {
+    const a = i * 2;
+    rampIndices.push(a, a + 1, a + 3, a, a + 3, a + 2);
+  }
+  rampGeo.setAttribute("position", new THREE.Float32BufferAttribute(rampPositions, 3));
+  rampGeo.setIndex(rampIndices);
+  rampGeo.computeVertexNormals();
+  const rampMat = trackMat(new THREE.MeshStandardMaterial({ color: 0xb6c0c8, roughness: 0.72, metalness: 0.08, side: THREE.DoubleSide }));
+  const ramp = new THREE.Mesh(rampGeo, rampMat);
+  ramp.receiveShadow = true;
+  root.add(ramp);
+
+  const col = new THREE.Mesh(track(new THREE.CylinderGeometry(R_IN, R_IN, STAIR_TOP_Y + 0.9, 28)), whiteMat);
+  col.position.set(SX, (STAIR_TOP_Y + 0.9) / 2, SZ);
   root.add(col);
-  colliders.push({ minX: SX - R_IN, maxX: SX + R_IN, minZ: SZ - R_IN, maxZ: SZ + R_IN });
+  colliders.push({ minX: SX - columnColliderR, maxX: SX + columnColliderR, minZ: SZ - columnColliderR, maxZ: SZ + columnColliderR });
 
-  for (let i = 0; i < 22; i++) {
-    const a = -Math.PI * 0.25 + i * 0.34;
-    const y = 0.28 + i * 0.13;
+  for (let i = 0; i <= STAIR_STEPS; i++) {
+    const a = STAIR_ENTRY + (i / STAIR_STEPS) * STAIR_TURN;
+    const y = 0.04 + (i / STAIR_STEPS) * STAIR_TOP_Y;
     const tread = new THREE.Mesh(track(new THREE.BoxGeometry(R_OUT - R_IN + 0.25, 0.08, 0.5)), whiteMat);
     tread.position.set(SX + Math.cos(a) * rMid, y, SZ + Math.sin(a) * rMid);
     tread.rotation.y = -a;
@@ -914,6 +944,14 @@ function buildLibrary(ctx: LibCtx): LibResult {
       root.add(post);
     }
   }
+  const mezzMat = trackMat(new THREE.MeshStandardMaterial({ color: 0x263443, roughness: 0.9 }));
+  const mezz = new THREE.Mesh(track(new THREE.BoxGeometry(MEZZ_W, 0.18, MEZZ_D)), mezzMat);
+  mezz.position.set(MEZZ_X, STAIR_TOP_Y - 0.09, MEZZ_Z);
+  mezz.receiveShadow = true;
+  root.add(mezz);
+  addBox(MEZZ_W, 0.72, 0.08, MEZZ_X, STAIR_TOP_Y + 0.36, MEZZ_Z - MEZZ_D / 2, brassMat, false);
+  addBox(0.08, 0.72, MEZZ_D, MEZZ_X - MEZZ_W / 2, STAIR_TOP_Y + 0.36, MEZZ_Z, brassMat, false);
+  addBox(0.08, 0.72, MEZZ_D, MEZZ_X + MEZZ_W / 2, STAIR_TOP_Y + 0.36, MEZZ_Z, brassMat, false);
 
   addBox(4.0, 1.2, 0.18, -4.45, 0.6, 0.45, darkWoodMat);
   addBox(5.55, 1.2, 0.18, 3.55, 0.6, 0.45, darkWoodMat);
@@ -934,7 +972,10 @@ function buildLibrary(ctx: LibCtx): LibResult {
   addBox(0.8, 0.08, 0.8, -3.65, 0.78, 6.1, accentMat, false);
 
   const gateZ = 7.35;
-  for (const sx of [-1.1, 0, 1.1]) addBox(0.28, 0.98, 0.34, sx, 0.49, gateZ, metalMat, false);
+  const exitZ = 7.84;
+  addBox(4.9, 0.86, 0.2, -3.25, 0.43, gateZ, metalMat);
+  addBox(4.9, 0.86, 0.2, 3.25, 0.43, gateZ, metalMat);
+  for (const sx of [-0.82, 0.82]) addBox(0.24, 0.98, 0.56, sx, 0.49, gateZ, metalMat);
   for (const sx of [-0.55, 0.55]) addBox(0.06, 0.1, 0.9, sx, 0.92, gateZ, brassMat, false);
   addBox(3.5, 0.18, 0.16, 0, 1.6, gateZ, whiteMat, false);
 
@@ -950,16 +991,37 @@ function buildLibrary(ctx: LibCtx): LibResult {
     { id: "shelf-aisle", x: 4.05, z: 3.35, links: ["shelf-entry", "shelf-exit"] },
     { id: "shelf-exit", x: 4.05, z: 6.82, links: ["shelf-aisle", "gate-approach"] },
     { id: "gate-approach", x: 0.35, z: 6.85, links: ["passage-bottom", "shelf-exit", "gate"] },
-    { id: "gate", x: 0.0, z: 7.35, links: ["gate-approach"] },
+    { id: "gate", x: 0.0, z: exitZ, links: ["gate-approach"] },
   );
 
   const bounds: AABB = { minX: -halfW + 0.3, maxX: halfW - 0.3, minZ: -halfL + 0.3, maxZ: halfL - 0.3 };
   const spawn = new THREE.Vector3(-3.85, 1.6, -2.35);
+  const floorHeightAt = (x: number, z: number): number => {
+    const dx = x - SX;
+    const dz = z - SZ;
+    const r = Math.hypot(dx, dz);
+    if (
+      x >= MEZZ_X - MEZZ_W / 2 + 0.2 &&
+      x <= MEZZ_X + MEZZ_W / 2 - 0.2 &&
+      z >= MEZZ_Z - MEZZ_D / 2 + 0.15 &&
+      z <= MEZZ_Z + MEZZ_D / 2 - 0.15
+    ) {
+      return STAIR_TOP_Y;
+    }
+    if (r >= STAIR_WALK_INNER_R && r <= STAIR_WALK_OUTER_R) {
+      let a = Math.atan2(dz, dx) - STAIR_ENTRY;
+      a = ((a % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+      if (a <= STAIR_TURN + STAIR_EXIT_PAD) {
+        return THREE.MathUtils.clamp((a / STAIR_TURN) * STAIR_TOP_Y, 0, STAIR_TOP_Y);
+      }
+    }
+    return 0;
+  };
 
   return {
     bounds,
     spawn,
-    floorHeightAt: () => 0,
+    floorHeightAt,
     npc: { x: -1.1, y: 0, z: -7.25, ry: Math.PI },
     pickupSpots: [
       { x: -5.55, y: 0.7, z: -1.15 },
@@ -974,7 +1036,7 @@ function buildLibrary(ctx: LibCtx): LibResult {
     triggers: {
       intro: { x: 2.25, z: -2.05 },
       sound: { x: 4.05, z: 3.35 },
-      exit: { x: 0.0, z: gateZ },
+      exit: { x: 0.0, z: exitZ },
     },
   };
 }

@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { buildRoom, classifyRoom, type AABB, type InteriorGuideNode, type RoomBuildResult } from "./buildRoom";
+import { buildRoom, classifyRoom, type AABB, type InteriorGuideNode, type RoomBuildResult, type RoomKind } from "./buildRoom";
 import { getInteriorBlueprint, type InteriorBlueprint } from "./interiorBlueprints";
 import {
   createMovementContext,
@@ -15,6 +15,7 @@ import {
 import { InputManager } from "./InputManager";
 import { CameraController } from "./CameraController";
 import { FlashlightSystem } from "./FlashlightSystem";
+import { getInteriorNpcRevealSceneIds } from "../storyEngine";
 
 export interface Interior3DOptions {
   /** Element the WebGL canvas is appended into. Sized to fill it. */
@@ -71,6 +72,7 @@ export class Interior3D {
   private readonly bloodLight: THREE.PointLight;
 
   private room: RoomBuildResult;
+  private readonly roomKind: RoomKind;
   private colliders: AABB[];
   private bounds: AABB;
   private readonly blueprint: InteriorBlueprint;
@@ -191,10 +193,10 @@ export class Interior3D {
     this.flashlightSys = new FlashlightSystem(this.flashlight);
 
     // ---- Room ----
-    const roomKind = classifyRoom(options.buildingId, options.zone);
-    this.bloodLightEnabled = roomKind === "library";
-    this.blueprint = getInteriorBlueprint(roomKind);
-    this.room = buildRoom(roomKind);
+    this.roomKind = classifyRoom(options.buildingId, options.zone);
+    this.bloodLightEnabled = this.roomKind === "library";
+    this.blueprint = getInteriorBlueprint(this.roomKind);
+    this.room = buildRoom(this.roomKind);
     this.scene.add(this.room.root);
     this.colliders = this.room.colliders;
     this.bounds = this.room.bounds;
@@ -740,6 +742,13 @@ export class Interior3D {
 
     for (const phaseObject of this.room.phaseObjects) {
       phaseObject.object.visible = this.isPhaseObjectAvailable(phaseObject, sceneId);
+    }
+
+    // ── NPC 显现由 storyEngine 统一管理 ──
+    const npcRevealIds = getInteriorNpcRevealSceneIds(this.roomKind);
+    const shouldShowNpc = sceneId ? npcRevealIds.includes(sceneId as any) : false;
+    for (const npcGroup of this.room.npcGroups) {
+      npcGroup.visible = shouldShowNpc;
     }
   }
 

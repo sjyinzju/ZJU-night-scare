@@ -85,6 +85,8 @@ export interface StoryScene {
   ending?: "good" | "bad" | "true" | "escape" | "death";
   /** Where the scene physically takes place. Drives 3D interior vs 2.5D popup choice. */
   setting: "indoor" | "outdoor";
+  /** 0-1 视觉扭曲加成。关键时刻（鬼现形、终章）自动提升后期特效强度。 */
+  distortionBoost?: number;
 }
 
 export interface StoryHotspot {
@@ -169,7 +171,7 @@ export const storyHotspots: StoryHotspot[] = [
     y: 30.0,
     radius: 1.8,
     order: 4,
-    mode: "indoor-3d",
+    mode: "outdoor-text",
   },
   {
     id: "medical-college",
@@ -258,6 +260,7 @@ export const storyScenes: Record<StorySceneId, StoryScene> = {
     chapter: "第一章",
     locationId: "library",
     setting: "indoor",
+    distortionBoost: 0.15,
     body: [
       "你们顺着歌声往楼梯间走。声控灯一盏盏亮起，又一盏盏熄灭，像有人在前面替你们开路。",
       "林伟突然冲向栏杆。你只来得及看见一双不该出现在那里的脚——悬在二楼转角的黑暗里，脚底朝着走廊这边。",
@@ -497,7 +500,7 @@ export const storyScenes: Record<StorySceneId, StoryScene> = {
     title: "杜学民的旧档案",
     chapter: "第四章",
     locationId: "du-office",
-    setting: "indoor",
+    setting: "outdoor",
     body: [
       "通过张一诚找到了杜学民。一个五十多岁的中年男人，戴着金丝眼镜。他看见你并不意外。「你就是张超？白秋经常提到你。」",
       "你把日记残页递给他。他翻阅后脸色变了：「这……这是我师兄的笔迹！原来他一直在暗中调查千绳会，直到被灭口。」他从抽屉里拿出一瓶镇定药，又把医学分馆的旧档案摊在桌上。",
@@ -535,7 +538,7 @@ export const storyScenes: Record<StorySceneId, StoryScene> = {
     title: "千绳会",
     chapter: "第四章",
     locationId: "du-office",
-    setting: "indoor",
+    setting: "outdoor",
     body: [
       "杜学民说，千绳会从来不是学生社团。它是一套献祭关系——每个人都以为自己只是旁观者，直到绳子收紧。",
       "医学院那块地，建校之前是坟场。学校的建筑群全都是按风水格局布置的，为的是压住下面的东西。但最近几年，有人——或者说一个组织——在试图破坏这个格局。他们想要「唤醒」下面的东西。",
@@ -619,6 +622,7 @@ export const storyScenes: Record<StorySceneId, StoryScene> = {
     chapter: "第五章",
     locationId: "east-teaching",
     setting: "indoor",
+    distortionBoost: 0.25,
     body: [
       "推开铁门，走进教学楼。走廊很暗，只有应急灯发出幽幽的绿光。手电的光束扫过一排排紧闭的教室门。走到二楼时，你听到了一个声音——有人在哼唱。是个女声，调子很老，像是什么戏曲选段。",
       "循着声音走过去。走廊尽头的窗户边，站着一个穿白色古装的女人。她背对着你，长发披散。你以为自己会尖叫，但喉咙像被冰水灌满。她缓缓转过身来——惨白的皮肤，漆黑的眼瞳。你的眼睛在抗拒，拒绝把她看成一个完整的人。",
@@ -725,6 +729,7 @@ export const storyScenes: Record<StorySceneId, StoryScene> = {
     chapter: "终章",
     locationId: "theater",
     setting: "indoor",
+    distortionBoost: 0.28,
     body: [
       "小剧场的舞台灯一盏盏熄灭，只剩中心一束白光。白秋被绑在旧木椅上，陈九站在她身后。",
       "如果你掌握的线索足够多，这里不会变成恐怖故事的最后一页。它会变成一个骗局崩塌的现场。观众席空无一人，但每个座位上都放着一根红绳。绳头垂到地面，像细长的血线，最终汇向舞台中央。",
@@ -785,6 +790,7 @@ export const storyScenes: Record<StorySceneId, StoryScene> = {
     chapter: "终章",
     locationId: "theater",
     setting: "indoor",
+    distortionBoost: 0.32,
     body: [
       "陈九的刀尖抵着绳结。台下的黑暗里像坐满了观众。",
       "你能用道具、线索和白秋对你的信任，决定这场夜惊魂停在哪里。",

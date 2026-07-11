@@ -41,7 +41,41 @@ export class JumpscarePipeline {
   private static recent: JumpscareContext[] = [];     // last 5 contexts for variety
 
   /**
+   * Execute a story-driven effect (no cooldown — story beats must always fire).
+   * Used by App.tsx when `advanceStory` returns an `effect`.
+   */
+  static executeStoryEffect(context: JumpscareContext, intensity = 0.5, customMessage?: string): void {
+    JumpscarePipeline.recent.push(context);
+    if (JumpscarePipeline.recent.length > 5) JumpscarePipeline.recent.shift();
+
+    const sanityCost = Math.round(intensity * 6);
+
+    window.dispatchEvent(new CustomEvent("zju-horror-effect", {
+      detail: { effect: "jumpscare" },
+    }));
+
+    window.dispatchEvent(new CustomEvent("zju-horror-jumpscare", {
+      detail: {
+        context,
+        intensity,
+        duration: 600 + Math.round(intensity * 500),
+        sanityCost,
+        customMessage,
+        recent: [...JumpscarePipeline.recent],
+        storyDriven: true,
+      },
+    }));
+
+    if (sanityCost > 0) {
+      window.dispatchEvent(new CustomEvent("zju-horror-sanity-hit", {
+        detail: { amount: -sanityCost, source: "jumpscare", context },
+      }));
+    }
+  }
+
+  /**
    * Fire a jumpscare.  Silently ignored if within the cooldown window.
+   * Use this for ambient/ghost-driven scares. For story beats, use executeStoryEffect.
    *
    * Returns `true` if the scare was actually dispatched, `false` if
    * suppressed by cooldown.

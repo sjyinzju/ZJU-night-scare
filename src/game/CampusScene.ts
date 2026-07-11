@@ -10,7 +10,6 @@ import {
 import {
   ambientEvents,
   buildingThemes,
-  defaultStoryStage,
   fogLayers,
   horrorZones,
   hotspotBuildingMap,
@@ -18,12 +17,19 @@ import {
   stageProfiles,
   type StoryStage,
 } from "./horrorConfig";
-import { storyHotspots, type HorrorEffect, type HotspotId, type StoryHotspot, type StorySceneId } from "./storyData";
+import { storyHotspots, storyScenes, type HorrorEffect, type HotspotId, type StoryHotspot, type StorySceneId } from "./storyData";
 import { audioManager } from "./audio/audioManager";
 import { useGameStore, getStore, type GhostFSM } from "./store";
 import { campusRoadGraph, type RoadProjection } from "./mapGraph";
 import { decideGhostAction } from "./horrorDirector";
 import { HORROR_POST_FX_KEY, HorrorPostFxPipeline } from "./visualFxPipeline";
+import {
+  resolveStoryBuildingEntry,
+  resolveStoryHotspotInteraction,
+  isHotspotAccessible,
+  getStoryStageForState,
+  type StoryHotspotInteraction,
+} from "./storyEngine";
 
 const TILE_W = 96;
 const TILE_H = 48;
@@ -99,6 +105,8 @@ type MapStateEvent = {
   visitedHotspotIds: HotspotId[];
   sanity: number;
   activeStory: boolean;
+  storyStage: StoryStage;
+  activeSceneId: StorySceneId | null;
 };
 
 type PickupSprite = {
@@ -164,8 +172,9 @@ export class CampusScene extends Phaser.Scene {
   private lakeExtraFigure?: Phaser.GameObjects.Container;
   private baisha216Window?: Phaser.GameObjects.Rectangle;
   private buildingLabels = new Map<string, Phaser.GameObjects.Text>();
-  private storyStage: StoryStage = defaultStoryStage;
-  private realityDistortion = stageProfiles[defaultStoryStage].baseDistortion;
+  private storyStage: StoryStage = 1; // 由 React 层通过 handleMapState 动态更新
+  private activeSceneId: StorySceneId | null = null; // 当前活跃的剧情场景（用于 distortionBoost）
+  private realityDistortion = stageProfiles[1].baseDistortion;
   private statusLabel = "校园静默";
   private timeLabel = "00:47";
   private lastAtmosphereEmit = 0;
@@ -1856,7 +1865,7 @@ export class CampusScene extends Phaser.Scene {
   }
 
   private updateAtmosphere(time: number) {
-    const profile = stageProfiles[this.storyStage];
+    const profile = stageProfiles[this.storyStage] ?? stageProfiles[1];
     const medical = this.zoneFactor("medical", this.playerIso);
     const medicalLibrary = this.zoneFactor("medicalLibrary", this.playerIso);
     const swamp = this.zoneFactor("swamp", this.playerIso);
@@ -1864,6 +1873,11 @@ export class CampusScene extends Phaser.Scene {
     const baisha = this.zoneFactor("baisha", this.playerIso);
     const bridge = this.zoneFactor("yangmingBridge", this.playerIso);
     const theater = this.zoneFactor("theater", this.playerIso);
+
+    // 从当前活跃剧情场景获取 distortionBoost（0-0.35）
+    const sceneDistortionBoost = this.activeSceneId
+      ? (storyScenes[this.activeSceneId]?.distortionBoost ?? 0)
+      : 0;
 
     this.realityDistortion = Phaser.Math.Clamp(
       profile.baseDistortion +
@@ -1873,7 +1887,8 @@ export class CampusScene extends Phaser.Scene {
         lake * 0.12 +
         baisha * 0.12 +
         bridge * 0.1 +
-        theater * 0.04,
+        theater * 0.04 +
+        sceneDistortionBoost,
       0,
       1,
     );
@@ -2745,47 +2760,11 @@ export class CampusScene extends Phaser.Scene {
 
     if (!inRange) return;
 
-    const mode = hotspot.mode;
-
-    switch (mode) {
-      case "indoor-3d": {
-        // 直接进入 3D 内景，剧情在内景中由红点触发
-        if (time - this.lastInteract > 800) {
-          this.lastInteract = time;
-          this.visitedHotspots.add(hotspot.id);
-          this.updateHotspotMarkerStates();
-          this.enter3DForStory(hotspot);
-        }
-        break;
-      }
-      case "outdoor-text": {
-        // 纯室外 → 2.5D 文字弹窗
-        if (time - this.lastInteract > 800) {
-          this.lastInteract = time;
-          this.visitedHotspots.add(hotspot.id);
-          this.updateHotspotMarkerStates();
-          window.dispatchEvent(
-            new CustomEvent<{ hotspotId: HotspotId; sceneId: StorySceneId }>("zju-horror-open-story", {
-              detail: { hotspotId: hotspot.id, sceneId: hotspot.sceneId },
-            }),
-          );
-        }
-        break;
-      }
-      case "outdoor-to-indoor": {
-        // 先文字弹窗（室外部分），choice 中 "进入建筑" 会触发 3D
-        if (time - this.lastInteract > 800) {
-          this.lastInteract = time;
-          this.visitedHotspots.add(hotspot.id);
-          this.updateHotspotMarkerStates();
-          window.dispatchEvent(
-            new CustomEvent<{ hotspotId: HotspotId; sceneId: StorySceneId }>("zju-horror-open-story", {
-              detail: { hotspotId: hotspot.id, sceneId: hotspot.sceneId },
-            }),
-          );
-        }
-        break;
-      }
+    if (time - this.lastInteract > 800) {
+      this.lastInteract = time;
+      this.visitedHotspots.add(hotspot.id);
+      this.updateHotspotMarkerStates();
+      this.dispatchStoryInteraction(resolveStoryHotspotInteraction(hotspot.id));
     }
 
     // 同时检测可进入建筑（用于非剧情目标的探索 / E 键兜底）
@@ -2794,13 +2773,15 @@ export class CampusScene extends Phaser.Scene {
 
   /** 进入 3D 内景以推进故事。黑屏转场 → 进入建筑 → 内景红点引导剧情。 */
   private enter3DForStory(hotspot: StoryHotspot) {
-    const targetIds = hotspotBuildingMap[hotspot.id] ?? [];
-    const building = campusBuildings.find((b) => targetIds.includes(b.id) && b.enterable);
-    if (!building) {
-      // 无 enterable 建筑时回退到文字弹窗
+    this.dispatchStoryInteraction(resolveStoryBuildingEntry(hotspot.id));
+  }
+
+  private dispatchStoryInteraction(interaction: StoryHotspotInteraction) {
+    if (interaction.kind === "none") return;
+    if (interaction.kind === "open-story") {
       window.dispatchEvent(
         new CustomEvent<{ hotspotId: HotspotId; sceneId: StorySceneId }>("zju-horror-open-story", {
-          detail: { hotspotId: hotspot.id, sceneId: hotspot.sceneId },
+          detail: { hotspotId: interaction.hotspotId, sceneId: interaction.sceneId },
         }),
       );
       return;
@@ -2808,19 +2789,19 @@ export class CampusScene extends Phaser.Scene {
 
     window.dispatchEvent(
       new CustomEvent("zju-horror-building-transition", {
-        detail: { building: { id: building.id, name: building.name, zone: building.zone } },
+        detail: { building: interaction.building },
       }),
     );
     this.time.delayedCall(320, () => {
       window.dispatchEvent(
         new CustomEvent("zju-horror-enter-building", {
-          detail: { building: { id: building.id, name: building.name, zone: building.zone }, storyMode: true },
+          detail: { building: interaction.building, storyMode: interaction.storyMode },
         }),
       );
     });
   }
 
-  /** 非剧情目标的建筑靠近检测：显示按钮 + E 键进入（兜底）。 */
+  /** 非剧情目标的建筑靠近检测：仅对当前剧情热点对应的建筑显示按钮/E键（严格按剧情顺序）。 */
   private updateEnterableProximityFallback() {
     const targetBuildingIds = hotspotBuildingMap[this.guideHotspotId] ?? [];
 
@@ -2828,6 +2809,8 @@ export class CampusScene extends Phaser.Scene {
     let best = ENTER_RADIUS;
     for (const building of campusBuildings) {
       if (!building.enterable) continue;
+      // 严格准入：只允许当前引导热点对应的建筑
+      if (!targetBuildingIds.includes(building.id)) continue;
       const center = { x: building.x + building.w / 2, y: building.y + building.d / 2 };
       const d = Math.hypot(this.playerIso.x - center.x, this.playerIso.y - center.y);
       if (d < best) {
@@ -2846,7 +2829,7 @@ export class CampusScene extends Phaser.Scene {
       );
     }
 
-    // 所有可进入建筑均允许 E 键进入（indoor-3d 的热点自动触发为主，E 键为兜底）
+    // E 键进入：仅对当前剧情热点对应的建筑生效（与按钮一致）
     if (near && this.keys && Phaser.Input.Keyboard.JustDown(this.keys.e)) {
       window.dispatchEvent(
         new CustomEvent("zju-horror-enter-building", {
@@ -2981,6 +2964,9 @@ export class CampusScene extends Phaser.Scene {
     this.visitedHotspots = new Set(detail.visitedHotspotIds);
     this.sanity = detail.sanity;
     this.storyOpen = detail.activeStory;
+    // ── StoryStage 联动：由 React 层根据当前剧情场景实时计算并传入 ──
+    this.storyStage = detail.storyStage;
+    this.activeSceneId = detail.activeSceneId;
     if (wasStoryOpen && !this.storyOpen && this.ghost && !this.dead) {
       this.scheduleGhostRespawn();
     }
