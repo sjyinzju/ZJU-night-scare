@@ -232,9 +232,18 @@ export function getStoryBuildingForHotspot(hotspotId: HotspotId): StoryBuildingR
   return { id: building.id, name: building.name, zone: building.zone };
 }
 
-export function resolveStoryHotspotInteraction(hotspotId: HotspotId): StoryHotspotInteraction {
+export function resolveStoryHotspotInteraction(
+  hotspotId: HotspotId,
+  completedHotspots?: HotspotId[],
+): StoryHotspotInteraction {
   const hotspot = getHotspotById(hotspotId);
   if (!hotspot) return { kind: "none" };
+
+  // 已完成的 indoor-3d 热点不允许再次进入：室内剧情已全部结束，
+  // 重进只会面对一个空房间（没有激活的红点/引导线），玩家会困惑。
+  if (completedHotspots?.includes(hotspotId) && hotspot.mode === "indoor-3d") {
+    return { kind: "none" };
+  }
 
   if (hotspot.mode === "indoor-3d") {
     const building = getStoryBuildingForHotspot(hotspot.id);
@@ -261,9 +270,18 @@ function inferRoomKindForLocation(locationId: HotspotId): string {
   return "";
 }
 
-export function resolveStoryBuildingEntry(hotspotId: HotspotId): StoryHotspotInteraction {
+export function resolveStoryBuildingEntry(
+  hotspotId: HotspotId,
+  completedHotspots?: HotspotId[],
+): StoryHotspotInteraction {
   const hotspot = getHotspotById(hotspotId);
   if (!hotspot) return { kind: "none" };
+
+  // 已完成的 indoor-3d 热点不允许再次进入。
+  if (completedHotspots?.includes(hotspotId) && hotspot.mode === "indoor-3d") {
+    return { kind: "none" };
+  }
+
   const building = getStoryBuildingForHotspot(hotspot.id);
   if (building) {
     return { kind: "enter-building", hotspotId: hotspot.id, sceneId: hotspot.sceneId, building, storyMode: true };

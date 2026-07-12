@@ -17,7 +17,7 @@ import {
   stageProfiles,
   type StoryStage,
 } from "./horrorConfig";
-import { storyHotspots, storyScenes, type HorrorEffect, type HotspotId, type StoryHotspot, type StorySceneId } from "./storyData";
+import { storyHotspots, storyScenes, getSceneHotspot, type HorrorEffect, type HotspotId, type StoryHotspot, type StorySceneId } from "./storyData";
 import { audioManager } from "./audio/audioManager";
 import { useGameStore, getStore, type GhostFSM } from "./store";
 import { campusRoadGraph, type RoadProjection } from "./mapGraph";
@@ -28,6 +28,7 @@ import {
   resolveStoryHotspotInteraction,
   isHotspotAccessible,
   getStoryStageForState,
+  storyStageFromSceneId,
   type StoryHotspotInteraction,
 } from "./storyEngine";
 
@@ -237,6 +238,22 @@ export class CampusScene extends Phaser.Scene {
     // A rebuilt 2.5D scene must resume the session's authored location,
     // rather than its old hard-coded medical-college spawn.
     this.playerIso = { ...getStore().playerIso };
+
+    // Seed the scene with the authoritative story state from the store.
+    // React dispatches zju-horror-map-state in a useEffect, which may fire
+    // BEFORE Phaser's create() registers the event listener — causing the
+    // scene to boot with stale defaults (guideHotspotId="library", empty
+    // completedHotspots). That race condition was the root cause of the
+    // "auto-re-enter library after exit" bug.
+    const store = getStore();
+    const ss = store.storyState;
+    this.guideHotspotId = getSceneHotspot(ss.currentSceneId);
+    this.completedHotspots = new Set(ss.completedHotspots);
+    this.visitedHotspots = new Set(ss.visitedHotspots);
+    this.sanity = ss.stats.sanity;
+    this.activeSceneId = store.activeSceneId;
+    this.storyStage = storyStageFromSceneId(ss.currentSceneId) as StoryStage;
+
     this.cameras.main.setBackgroundColor("#0b1110");
     this.physics.world.setBounds(WORLD_BOUNDS.x, WORLD_BOUNDS.y, WORLD_BOUNDS.width, WORLD_BOUNDS.height);
     this.drawGround();
@@ -2765,7 +2782,7 @@ export class CampusScene extends Phaser.Scene {
       this.lastInteract = time;
       this.visitedHotspots.add(hotspot.id);
       this.updateHotspotMarkerStates();
-      this.dispatchStoryInteraction(resolveStoryHotspotInteraction(hotspot.id));
+      this.dispatchStoryInteraction(resolveStoryHotspotInteraction(hotspot.id, [...this.completedHotspots]));
     }
 
     // 同时检测可进入建筑（用于非剧情目标的探索 / E 键兜底）
@@ -2774,7 +2791,7 @@ export class CampusScene extends Phaser.Scene {
 
   /** 进入 3D 内景以推进故事。黑屏转场 → 进入建筑 → 内景红点引导剧情。 */
   private enter3DForStory(hotspot: StoryHotspot) {
-    this.dispatchStoryInteraction(resolveStoryBuildingEntry(hotspot.id));
+    this.dispatchStoryInteraction(resolveStoryBuildingEntry(hotspot.id, [...this.completedHotspots]));
   }
 
   private dispatchStoryInteraction(interaction: StoryHotspotInteraction) {
@@ -2785,6 +2802,11 @@ export class CampusScene extends Phaser.Scene {
           detail: { hotspotId: interaction.hotspotId, sceneId: interaction.sceneId },
         }),
       );
+      return;
+    }
+
+    // 二次保险：已完成的 indoor-3d 热点禁止重进。
+    if (interaction.kind === "enter-building" && this.completedHotspots.has(interaction.hotspotId)) {
       return;
     }
 
