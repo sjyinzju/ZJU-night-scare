@@ -47,6 +47,7 @@ jobs:
           mkdir -p publish/game
           cp -r site/* publish/
           cp -r dist/game/* publish/game/
+          cp -r dist/assets publish/game/
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
