@@ -60,8 +60,8 @@ const INTERIOR_STORY_ITEMS: Record<string, InteriorStoryItemDefinition[]> = {
     { itemId: "medicine", placement: "item-1", color: 0x8fd0ff },
   ],
   dorm: [
-    { itemId: "photograph", placement: "item-0", color: 0xffe08a },
-    { itemId: "energy", placement: "item-1", color: 0x8fd0ff },
+    { itemId: "photograph", placement: "item-0", activeSceneIds: ["dorm_photo"], color: 0xffe08a },
+    { itemId: "energy", placement: "item-1", activeSceneIds: ["dorm_escape"], color: 0x8fd0ff },
   ],
   hall: [{ itemId: "talisman", placement: "item-0", color: 0xffe08a }],
 };
@@ -336,6 +336,12 @@ export function resolvePostChoiceCommands(args: {
   const { activeScene, nextScene, nextHotspot, changesLocation, inInterior } = args;
   const commands: StoryPostChoiceCommand[] = [];
   const waitForInteriorExit = shouldWaitForInteriorExitTrigger(activeScene, nextScene, inInterior);
+
+  // The escape beat is gameplay-only: after acknowledging the photo, leave
+  // the modal closed and let the Baisha level FSM open the door and chase.
+  if (inInterior && nextScene.id === "dorm_escape") {
+    return [{ kind: "set-active-scene", sceneId: null }];
+  }
 
   if (activeScene.setting === "indoor" && nextScene.setting === "outdoor" && !waitForInteriorExit) {
     commands.push({ kind: "exit-interior" });

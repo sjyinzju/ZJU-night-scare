@@ -43,18 +43,25 @@ export interface InteriorAssetRequest {
   buildingId: string;
   roomKind: RoomKind;
   isMobile: boolean;
+  renderer?: THREE.WebGLRenderer;
 }
 
 const ASSET_ROOTS: Record<string, string> = {
   "medical-library:library": "models/interiors/medical-library",
+  "dorm-baisha:dorm": "models/interiors/dorm-baisha",
 };
 
 let loader: import("three/examples/jsm/loaders/GLTFLoader.js").GLTFLoader | undefined;
+let dracoLoader: import("three/examples/jsm/loaders/DRACOLoader.js").DRACOLoader | undefined;
 
 async function getLoader(): Promise<import("three/examples/jsm/loaders/GLTFLoader.js").GLTFLoader> {
   if (!loader) {
     const { GLTFLoader } = await import("three/examples/jsm/loaders/GLTFLoader.js");
+    const { DRACOLoader } = await import("three/examples/jsm/loaders/DRACOLoader.js");
     loader = new GLTFLoader();
+    dracoLoader = new DRACOLoader();
+    dracoLoader.setDecoderPath(assetUrl("draco/"));
+    loader.setDRACOLoader(dracoLoader);
   }
   return loader;
 }
@@ -74,7 +81,7 @@ async function loadMeta(rootPath: string): Promise<InteriorAssetMeta | undefined
 }
 
 function tuneLoadedScene(root: THREE.Group): void {
-  root.name = "medical-library-asset";
+  root.name = "interior-asset";
   root.traverse((obj) => {
     const mesh = obj as THREE.Mesh;
     if (!mesh.isMesh) return;
@@ -123,6 +130,15 @@ export async function loadInteriorAsset(req: InteriorAssetRequest): Promise<Inte
   const meta = await loadMeta(rootPath);
   const preferredModel = req.isMobile ? (meta?.lodModel ?? "scene.lod.glb") : (meta?.model ?? "scene.glb");
   const gltfLoader = await getLoader();
+  // KTX2 is optional per asset, but configured up front so future high-detail
+  // texture exports do not require another frontend pipeline change.
+  if (req.renderer) {
+    const { KTX2Loader } = await import("three/examples/jsm/loaders/KTX2Loader.js");
+    const ktx2Loader = new KTX2Loader();
+    ktx2Loader.setTranscoderPath(assetUrl("basis/"));
+    ktx2Loader.detectSupport(req.renderer);
+    gltfLoader.setKTX2Loader(ktx2Loader);
+  }
   const gltf = await gltfLoader.loadAsync(assetUrl(`${rootPath}/${preferredModel}`));
   const root = gltf.scene as THREE.Group;
   tuneLoadedScene(root);

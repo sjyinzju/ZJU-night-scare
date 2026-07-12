@@ -31,6 +31,38 @@ export type WorldState = "title" | "map" | "interior" | "ending" | "dead";
 export type TransitionState = "idle" | "entering" | "leaving";
 export type EnterableBuilding = { id: string; name: string; zone?: string };
 
+/**
+ * Authoritative state for the Baisha dorm escape level.  This is deliberately
+ * event-driven: Three.js may read it every frame, but only discrete gameplay
+ * events are allowed to advance it.
+ */
+export type BaishaRunPhase =
+  | "inactive"
+  | "searching"
+  | "photo-reveal"
+  | "door-opening"
+  | "look-left-trap"
+  | "chasing"
+  | "cut-off"
+  | "tail-chase"
+  | "exiting"
+  | "dead";
+
+export interface BaishaRunState {
+  runId: number;
+  seed: number;
+  phase: BaishaRunPhase;
+  photoAnchor: number;
+  photoCollected: boolean;
+  entryDoorOpen: boolean;
+  shortcutGateOpen: boolean;
+  firstScareTriggered: boolean;
+  secondScareTriggered: boolean;
+  energyCollected: boolean;
+  energyMissed: boolean;
+  exitReached: boolean;
+}
+
 export interface AtmosphereState {
   timeLabel: string;
   statusLabel: string;
@@ -57,6 +89,7 @@ export interface GameStore {
   gameStarted: boolean;
   interiorBuilding: EnterableBuilding | null;
   nearBuilding: EnterableBuilding | null;
+  baishaRun: BaishaRunState;
   // ── 玩家 ──
   playerIso: IsoPoint;
 
@@ -100,6 +133,8 @@ export interface GameStore {
   setNearBuilding: (building: EnterableBuilding | null) => void;
   setTransition: (transition: TransitionState) => void;
   setWorld: (world: WorldState) => void;
+  beginBaishaRun: () => void;
+  patchBaishaRun: (patch: Partial<Omit<BaishaRunState, "runId" | "seed" | "photoAnchor">>) => void;
   setGhost: (partial: Partial<GhostSnapshot>) => void;
   setGhostFSM: (fsm: GhostFSM) => void;
   setStoryState: (
@@ -148,12 +183,28 @@ const initialMiniMap: MiniMapSnapshot = {
   ghostVisible: false,
 };
 
+const inactiveBaishaRun: BaishaRunState = {
+  runId: 0,
+  seed: 0,
+  phase: "inactive",
+  photoAnchor: 0,
+  photoCollected: false,
+  entryDoorOpen: false,
+  shortcutGateOpen: false,
+  firstScareTriggered: false,
+  secondScareTriggered: false,
+  energyCollected: false,
+  energyMissed: false,
+  exitReached: false,
+};
+
 export const useGameStore = create<GameStore>((set) => ({
   world: "title",
   transition: "idle",
   gameStarted: false,
   interiorBuilding: null,
   nearBuilding: null,
+  baishaRun: { ...inactiveBaishaRun },
   playerIso: { x: 19.4, y: 30.2 },
   storyState: { ...initialStoryState, stats: { ...initialStoryState.stats }, log: [...initialStoryState.log] },
   activeSceneId: null,
@@ -195,6 +246,22 @@ export const useGameStore = create<GameStore>((set) => ({
   setNearBuilding: (nearBuilding) => set({ nearBuilding }),
   setTransition: (transition) => set({ transition }),
   setWorld: (world) => set({ world }),
+  beginBaishaRun: () =>
+    set((state) => {
+      const runId = state.baishaRun.runId + 1;
+      // Keep the level deterministic for its lifetime while varying each retry.
+      const seed = (Math.imul(runId, 1103515245) + 12345) >>> 0;
+      return {
+        baishaRun: {
+          ...inactiveBaishaRun,
+          runId,
+          seed,
+          photoAnchor: seed % 4,
+          phase: "searching",
+        },
+      };
+    }),
+  patchBaishaRun: (patch) => set((state) => ({ baishaRun: { ...state.baishaRun, ...patch } })),
 
   setGhost: (partial) =>
     set((s) => ({ ghost: { ...s.ghost, ...partial } })),
@@ -239,6 +306,7 @@ export const useGameStore = create<GameStore>((set) => ({
       gameStarted: false,
       interiorBuilding: null,
       nearBuilding: null,
+      baishaRun: { ...inactiveBaishaRun },
       playerIso: { x: 19.4, y: 30.2 },
       storyState: {
         ...initialStoryState,

@@ -10,6 +10,8 @@ export interface InteriorOverlayProps {
   /** A story interior can only leave through its active narrative exit. */
   canExit?: boolean;
   onExitTrigger?: () => void;
+  onLevelExit?: (levelId: "baisha-dorm") => void;
+  onLevelDeath?: (levelId: "baisha-dorm") => void;
   /** When true, shows a virtual joystick + drag-to-look controls. */
   isMobile?: boolean;
 }
@@ -27,6 +29,8 @@ export default function InteriorOverlay({
   onExit,
   canExit = true,
   onExitTrigger,
+  onLevelExit,
+  onLevelDeath,
   isMobile = false,
 }: InteriorOverlayProps): React.ReactElement {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -84,6 +88,14 @@ export default function InteriorOverlay({
         onExitTrigger: () => {
           engineRef.current?.exitPointerLock();
           (onExitTrigger ?? onExit)();
+        },
+        onLevelExit: (levelId) => {
+          engineRef.current?.exitPointerLock();
+          onLevelExit?.(levelId);
+        },
+        onLevelDeath: (levelId) => {
+          engineRef.current?.exitPointerLock();
+          onLevelDeath?.(levelId);
         },
         getStamina: () => useGameStore.getState().storyState.stats.stamina,
         setStamina: (v) => {

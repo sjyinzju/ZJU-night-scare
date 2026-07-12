@@ -17,6 +17,8 @@ import { CameraController } from "./CameraController";
 import { FlashlightSystem } from "./FlashlightSystem";
 import { getInteriorNpcRevealSceneIds } from "../storyEngine";
 import { loadInteriorAsset, type InteriorAssetHandle } from "./InteriorAssetLoader";
+import { BaishaChaseController } from "./BaishaChaseController";
+import { useGameStore } from "../store";
 
 export interface Interior3DOptions {
   /** Element the WebGL canvas is appended into. Sized to fill it. */
@@ -31,6 +33,10 @@ export interface Interior3DOptions {
   onStoryTrigger?: (sceneId: string) => void;
   /** Called when the player walks into an interior exit trigger. */
   onExitTrigger?: () => void;
+  /** Dedicated level completion callback. */
+  onLevelExit?: (levelId: "baisha-dorm") => void;
+  /** Dedicated level death callback. */
+  onLevelDeath?: (levelId: "baisha-dorm") => void;
   /** Current story scene id; drives which interior triggers/items are active. */
   getStorySceneId?: () => string;
   /** Current player inventory; drives persistent equipment such as the flashlight. */
@@ -91,6 +97,8 @@ export class Interior3D {
   private readonly onPickup?: (itemId: string, name: string) => void;
   private readonly onStoryTrigger?: (sceneId: string) => void;
   private readonly onExitTrigger?: () => void;
+  private readonly onLevelExit?: (levelId: "baisha-dorm") => void;
+  private readonly onLevelDeath?: (levelId: "baisha-dorm") => void;
   private readonly getStorySceneId?: () => string;
   private readonly getInventory?: () => string[];
   private readonly getStamina?: () => number;
@@ -111,6 +119,7 @@ export class Interior3D {
 
   private debugColliders?: THREE.Group;
   private guideLine?: THREE.Line;
+  private baishaChase?: BaishaChaseController;
 
   private rafId = 0;
   private disposed = false;
@@ -138,6 +147,8 @@ export class Interior3D {
     this.onPickup = options.onPickup;
     this.onStoryTrigger = options.onStoryTrigger;
     this.onExitTrigger = options.onExitTrigger;
+    this.onLevelExit = options.onLevelExit;
+    this.onLevelDeath = options.onLevelDeath;
     this.getStorySceneId = options.getStorySceneId;
     this.getInventory = options.getInventory;
     this.getStamina = options.getStamina;
@@ -175,13 +186,14 @@ export class Interior3D {
 
     // ---- Lights ----
     // 略微抬高环境光/半球光,让房间整体不再纯黑(仍保留昏暗恐怖基调)。
-    this.ambientLight = new THREE.AmbientLight(0x2a3038, 0.85);
+    const isBaisha = options.buildingId === "dorm-baisha";
+    this.ambientLight = new THREE.AmbientLight(isBaisha ? 0x3a2830 : 0x2a3038, isBaisha ? 1.6 : 0.85);
     this.scene.add(this.ambientLight);
-    this.fillLight = new THREE.HemisphereLight(0x28303c, 0x0a0c10, 0.55);
+    this.fillLight = new THREE.HemisphereLight(0x28303c, 0x0a0c10, isBaisha ? 1.0 : 0.55);
     this.scene.add(this.fillLight);
 
     // 近距离补光:跟随相机的一盏很弱、短射程点光,只照亮角色周围、脚下和近处墙壁。
-    this.nearFillLight = new THREE.PointLight(0xaeb6c6, 0.85, 5.0, 2.0);
+    this.nearFillLight = new THREE.PointLight(isBaisha ? 0xd4b8b0 : 0xaeb6c6, isBaisha ? 1.4 : 0.85, 5.0, 2.0);
     this.nearFillLight.position.set(0, -0.2, 0.1);
     this.camera.add(this.nearFillLight);
 
@@ -212,11 +224,20 @@ export class Interior3D {
     this.roomKind = classifyRoom(options.buildingId, options.zone);
     this.bloodLightEnabled = this.roomKind === "library";
     this.blueprint = getInteriorBlueprint(this.roomKind);
-    this.room = buildRoom(this.roomKind);
+    if (options.buildingId === "dorm-baisha") useGameStore.getState().beginBaishaRun();
+    this.room = buildRoom(this.roomKind, options.buildingId, useGameStore.getState().baishaRun.photoAnchor);
     this.scene.add(this.room.root);
     this.colliders = this.room.colliders;
     this.bounds = this.room.bounds;
     this.loadStaticInteriorAsset(options.buildingId);
+
+    if (options.buildingId === "dorm-baisha") {
+      this.baishaChase = new BaishaChaseController(this.scene, this.camera, {
+        onPhotoReveal: () => this.onStoryTrigger?.("dorm_photo"),
+        onLevelExit: () => this.onLevelExit?.("baisha-dorm"),
+        onDeath: () => this.onLevelDeath?.("baisha-dorm"),
+      });
+    }
 
     // Spawn at the room's entrance, looking down the corridor (-Z).
     this.camera.position.copy(this.findClearSpawn(this.room.spawn));
@@ -366,6 +387,8 @@ export class Interior3D {
     this.assetPhaseVisuals.length = 0;
     this.clearAssetFlickerLights();
     this.room.dispose();
+    this.baishaChase?.dispose();
+    this.baishaChase = undefined;
     this.scene.clear();
 
     this.renderer.dispose();
@@ -396,6 +419,7 @@ export class Interior3D {
         buildingId,
         roomKind: this.roomKind,
         isMobile: this.isMobile,
+        renderer: this.renderer,
       });
       if (!handle) return;
       if (this.disposed) {
@@ -404,8 +428,28 @@ export class Interior3D {
       }
 
       this.assetHandle = handle;
+
+      // 白沙宿舍模型原点偏移：Blender 中缩放后原点未归零，
+      // 需要将宿舍地板中心移动到 (x≈-4.5, y≈0, z≈4) 附近。
+      // 命名节点（GHOST_SLENDER 等）的 local position 需补偿根偏移。
+      if (buildingId === "dorm-baisha") {
+        const rx = -97, ry = -24.7, rz = -46;
+        handle.root.position.set(rx, ry, rz);
+
+        const reposition = (name: string, wx: number, wy: number, wz: number) => {
+          const node = handle.root.getObjectByName(name);
+          if (node) node.position.set(wx - rx, wy - ry, wz - rz);
+        };
+        // 世界坐标 → local position 补偿
+        reposition("GHOST_SLENDER",             -8.5,  1.6, 11.5);
+        reposition("GATE_SHORTCUT",             -6.0,  1.6, 16.0);
+        reposition("PICKUP_PHOTOGRAPH_VISUAL",  -4.5,  0.8,  4.5);
+        reposition("PICKUP_ENERGY_VISUAL",      10.0,  0.8, 22.0);
+      }
+
       this.scene.add(handle.root);
       this.bindInteriorAssetMetadata(handle);
+      this.baishaChase?.bindAsset(handle.root);
       this.setProceduralRoomVisualsVisible(false);
       window.dispatchEvent(new CustomEvent("zju-horror-interior-asset-state", {
         detail: {
@@ -482,7 +526,11 @@ export class Interior3D {
       if (!pickup || spots.length === 0) continue;
       const clearSpots = spots.filter((spot) => !this.collides(spot.x, spot.z));
       const choices = clearSpots.length > 0 ? clearSpots : spots;
-      const spot = choices[Math.floor(Math.random() * choices.length)];
+      const baishaPhoto = handle.meta?.buildingId === "dorm-baisha" && itemId === "photograph";
+      const index = baishaPhoto
+        ? useGameStore.getState().baishaRun.photoAnchor % choices.length
+        : Math.floor(Math.random() * choices.length);
+      const spot = choices[index];
       pickup.position.set(spot.x, pickup.position.y, spot.z);
       pickup.glow.position.set(spot.x, pickup.glow.position.y, spot.z);
     }
@@ -592,6 +640,7 @@ export class Interior3D {
   }
 
   private collides(x: number, z: number): boolean {
+    if (this.room.isWalkable && !this.room.isWalkable(x, z)) return true;
     for (const c of this.colliders) {
       if (!this.isColliderActive(c)) continue;
       if (
@@ -885,11 +934,18 @@ export class Interior3D {
     // 7. Camera post-update (FOV, head bob, sync yaw).
     this.cameraController.update(dt, ctx, this.stateMachine.currentName);
 
+    if (this.baishaChase) {
+      const multiplier = this.baishaChase.speedMultiplier();
+      ctx.velocity.x *= multiplier;
+      ctx.velocity.y *= multiplier;
+    }
+
     // 7b. Story-state machine: only the current narrative phase is interactive.
     this.syncStoryPhase();
 
     // 8. Collect pickups.
     this.collectPickups();
+    this.baishaChase?.update(dt, this.getStorySceneId?.() ?? "", this.room.pickups);
     // 9. Check story triggers.
     this.collectStoryTriggers();
     // 10. Door interaction (E key).
@@ -909,6 +965,7 @@ export class Interior3D {
         item.taken = true;
         item.glow.visible = false;
         this.setAssetPickupVisualVisible(item.itemId, false);
+        this.baishaChase?.onPickup(item.itemId);
         this.onPickup?.(item.itemId, item.name);
       }
     }
@@ -984,7 +1041,8 @@ export class Interior3D {
     }
 
     for (const item of this.room.pickups) {
-      const isActive = !item.taken && !this.hasInventoryItem(item.itemId) && this.isPickupAvailable(item, sceneId);
+      const phaseAllowsPickup = this.baishaChase ? this.baishaChase.isPickupEnabled(item.itemId) : true;
+      const isActive = !item.taken && !this.hasInventoryItem(item.itemId) && phaseAllowsPickup && this.isPickupAvailable(item, sceneId);
       item.glow.visible = isActive;
       this.setAssetPickupVisualVisible(item.itemId, isActive);
     }
@@ -1149,6 +1207,8 @@ export class Interior3D {
   }
 
   private isColliderActive(collider: AABB): boolean {
+    if (collider.gateId === "baisha-entry") return !useGameStore.getState().baishaRun.entryDoorOpen;
+    if (collider.gateId === "baisha-shortcut") return !useGameStore.getState().baishaRun.shortcutGateOpen;
     if (!collider.activeSceneIds?.length) return true;
     const sceneId = this.getStorySceneId?.();
     return Boolean(sceneId && collider.activeSceneIds.includes(sceneId));

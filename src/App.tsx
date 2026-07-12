@@ -567,6 +567,27 @@ function App() {
     setPhaserReady(true);
   }, [closeInterior, setPlayerIso, setActiveSceneId, storyState]);
 
+  const finishBaishaEscape = useCallback(() => {
+    const next = storyScenes.find_yicheng;
+    setStoryState((previous) => ({
+      ...previous,
+      currentSceneId: "find_yicheng",
+      visitedHotspots: previous.visitedHotspots.includes("dorm") ? previous.visitedHotspots : [...previous.visitedHotspots, "dorm"],
+      completedHotspots: previous.completedHotspots.includes("dorm") ? previous.completedHotspots : [...previous.completedHotspots, "dorm"],
+      log: [...previous.log, "逃离白沙宿舍后，你带着苏婉的照片前往临湖餐厅。"],
+    }));
+    setPlayerIso({ x: 6.0, y: 7.5 });
+    setNextObjectiveCue({ place: getHotspotById(next.locationId)?.place ?? "临湖餐厅", objective: "寻找张一诚，确认照片的来历" });
+    closeInterior();
+    setPhaserReady(true);
+  }, [closeInterior, setPlayerIso, setStoryState]);
+
+  const failBaishaEscape = useCallback(() => {
+    setWorld("dead");
+    setActiveSceneId("death_sanity");
+    triggerNarrativeEffect("jumpscare", "dorm");
+  }, [setActiveSceneId, setWorld, triggerNarrativeEffect]);
+
   // Story interiors cannot be abandoned through the top-right button.  The
   // active red exit performs the atomic "leave + show outdoor scene" step.
   const canExitInterior = Boolean(resolveInteriorExitTrigger(storyState));
@@ -929,6 +950,8 @@ function App() {
           onExit={leaveInteriorFromTrigger}
           onExitTrigger={leaveInteriorFromTrigger}
           canExit={canExitInterior}
+          onLevelExit={finishBaishaEscape}
+          onLevelDeath={failBaishaEscape}
         />
       )}
     </main>

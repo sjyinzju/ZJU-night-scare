@@ -17,6 +17,8 @@ export type StorySceneId =
   | "library_sound"
   | "library_police"
   | "dorm_baiqiu"
+  | "dorm_photo"
+  | "dorm_escape"
   | "dorm_forum"
   | "find_yicheng"
   | "yicheng_reveal"
@@ -326,14 +328,14 @@ export const storyScenes: Record<StorySceneId, StoryScene> = {
       {
         id: "promise",
         text: "认真答应她，但保留所有疑问",
-        next: "dorm_forum",
+        next: "dorm_photo",
         statChanges: { sanity: 3, trust: 15, clues: 3 },
         gainItem: "talisman",
       },
       {
         id: "press",
         text: "追问她为什么这么害怕医学院",
-        next: "dorm_forum",
+        next: "dorm_photo",
         statChanges: { sanity: -4, trust: 5, clues: 8 },
         gainItem: "talisman",
         effect: "whisper",
@@ -370,7 +372,7 @@ export const storyScenes: Record<StorySceneId, StoryScene> = {
       {
         id: "restraint",
         text: "把话咽回去，先回宿舍整理线索",
-        next: "dorm_forum",
+        next: "dorm_photo",
         statChanges: { sanity: 2, trust: 6, affection: 4, clues: 2 },
       },
     ],
@@ -392,11 +394,40 @@ export const storyScenes: Record<StorySceneId, StoryScene> = {
       {
         id: "vow",
         text: "在心里认下这个约定，回宿舍继续追查真相",
-        next: "dorm_forum",
+        next: "dorm_photo",
         statChanges: { sanity: 4, trust: 10, affection: 12 },
         setFlag: "baiqiuBond",
       },
     ],
+  },
+  dorm_photo: {
+    id: "dorm_photo",
+    title: "桌上的苏婉",
+    chapter: "第二章",
+    locationId: "dorm",
+    setting: "indoor",
+    body: [
+      "泛黄的照片背面写着：苏婉，1953。她站在旧教学楼前，身后临时搭起的舞台被雨水冲得只剩半边轮廓。照片正面没有你的指纹，边缘却是温的，像刚被谁从掌心递出来。",
+      "你抬头时，宿舍门锁自己弹开了。门外左侧的走廊亮起一盏窄长的红灯，灯下站着一个过分瘦长的影子。它没有靠近，只是在等你看过去。",
+    ],
+    choices: [
+      {
+        id: "open-door",
+        text: "握紧照片，推开门进入走廊",
+        next: "dorm_escape",
+        statChanges: { sanity: -3, clues: 8 },
+        effect: "whisper",
+      },
+    ],
+  },
+  dorm_escape: {
+    id: "dorm_escape",
+    title: "不要回头",
+    chapter: "第二章",
+    locationId: "dorm",
+    setting: "indoor",
+    body: [],
+    choices: [],
   },
   dorm_forum: {
     id: "dorm_forum",
@@ -668,7 +699,6 @@ export const storyScenes: Record<StorySceneId, StoryScene> = {
         text: "收起照片，去湖边拼合所有坐标",
         next: "report_findings",
         statChanges: { sanity: -3, clues: 12 },
-        gainItem: "photograph",
       },
     ],
   },
