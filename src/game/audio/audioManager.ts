@@ -11,9 +11,10 @@ import {
   resetProcedural,
   type FootSurface,
 } from "./proceduralAudio";
+import { assetUrl } from "../assetPath";
 
-// Vite 构建时自动替换为正确的基路径（如 /ZJU-night-scare/）
-const BASE = import.meta.env.BASE_URL;
+// 本地开发走 public/ 目录，生产构建走 Cloudflare R2 CDN
+const BASE = assetUrl("") + "/";
 
 type EndingKind = NonNullable<StoryScene["ending"]>;
 type AudibleHorrorEffect = Exclude<HorrorEffect, "whisper">;

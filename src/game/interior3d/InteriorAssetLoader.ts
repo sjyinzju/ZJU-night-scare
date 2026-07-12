@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { RoomKind } from "./buildRoom";
+import { assetUrl } from "../assetPath";
 
 export interface InteriorAssetMeta {
   assetVersion: number;
@@ -56,11 +57,6 @@ async function getLoader(): Promise<import("three/examples/jsm/loaders/GLTFLoade
     loader = new GLTFLoader();
   }
   return loader;
-}
-
-function assetUrl(path: string): string {
-  const base = (import.meta.env.BASE_URL || "/").replace(/\/$/, "");
-  return `${base}/${path.replace(/^\//, "")}`;
 }
 
 function assetKey(req: InteriorAssetRequest): string {

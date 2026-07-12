@@ -19,6 +19,11 @@ vite.config.d.ts
 !site/assets/characters/*.png
 !site/assets/characters/*.jpg
 
+# 3D 模型与音频 — 生产环境走 Cloudflare R2，不纳入 Git
+public/models/**/*.glb
+public/audio/**/*.wav
+public/audio/**/*.mp3
+
 .log
 
 /ppt
