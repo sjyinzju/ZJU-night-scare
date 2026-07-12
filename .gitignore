@@ -24,6 +24,9 @@ public/models/**/*.glb
 public/audio/**/*.wav
 public/audio/**/*.mp3
 
+# Blender 源文件与原始 PBR 贴图 — 仅本地使用，游戏运行时不需要
+3D_Assets/
+
 .log
 
 /ppt
