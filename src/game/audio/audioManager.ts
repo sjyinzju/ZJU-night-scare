@@ -14,7 +14,7 @@ import {
 import { assetUrl } from "../assetPath";
 
 // 本地开发走 public/ 目录，生产构建走 Cloudflare R2 CDN
-const BASE = assetUrl("") + "/";
+const BASE = assetUrl("");
 
 type EndingKind = NonNullable<StoryScene["ending"]>;
 type AudibleHorrorEffect = Exclude<HorrorEffect, "whisper">;
