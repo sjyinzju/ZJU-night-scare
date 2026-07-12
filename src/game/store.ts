@@ -3,7 +3,7 @@
  * Phaser 通过 getState()/setState() 读写，React 通过 hook 订阅。
  */
 import { create } from "zustand";
-import type { HorrorEffect, HotspotId, ItemId, StatKey, StorySceneId } from "./storyData";
+import { getSceneHotspot, type HorrorEffect, type HotspotId, type ItemId, type StatKey, type StorySceneId } from "./storyData";
 import type { IsoPoint } from "./mapData";
 
 // ── 鬼状态机 ──
@@ -26,6 +26,11 @@ export interface GhostSnapshot {
 // ── 氛围 ──
 export type StoryStage = number;
 
+/** The one authoritative lifecycle for the playable session. */
+export type WorldState = "title" | "map" | "interior" | "ending" | "dead";
+export type TransitionState = "idle" | "entering" | "leaving";
+export type EnterableBuilding = { id: string; name: string; zone?: string };
+
 export interface AtmosphereState {
   timeLabel: string;
   statusLabel: string;
@@ -43,6 +48,15 @@ export interface MiniMapSnapshot {
 
 // ── 完整 Store ──
 export interface GameStore {
+  /**
+   * Session state is deliberately separate from the story pointer.  A story
+   * scene can be waiting for a world trigger while no modal is visible.
+   */
+  world: WorldState;
+  transition: TransitionState;
+  gameStarted: boolean;
+  interiorBuilding: EnterableBuilding | null;
+  nearBuilding: EnterableBuilding | null;
   // ── 玩家 ──
   playerIso: IsoPoint;
 
@@ -80,6 +94,12 @@ export interface GameStore {
 
   // ── Actions ──
   setPlayerIso: (iso: IsoPoint) => void;
+  startSession: (building: EnterableBuilding) => void;
+  openInterior: (building: EnterableBuilding) => boolean;
+  closeInterior: () => void;
+  setNearBuilding: (building: EnterableBuilding | null) => void;
+  setTransition: (transition: TransitionState) => void;
+  setWorld: (world: WorldState) => void;
   setGhost: (partial: Partial<GhostSnapshot>) => void;
   setGhostFSM: (fsm: GhostFSM) => void;
   setStoryState: (
@@ -123,12 +143,18 @@ const initialAtmosphere: AtmosphereState = {
 };
 
 const initialMiniMap: MiniMapSnapshot = {
-  player: { x: 16.2, y: 30.6 },
+  // 医学分馆门外：开场 3D 内景结束后回到这里，而不是默认的医学院入口。
+  player: { x: 19.4, y: 30.2 },
   ghostVisible: false,
 };
 
 export const useGameStore = create<GameStore>((set) => ({
-  playerIso: { x: 16.2, y: 30.6 },
+  world: "title",
+  transition: "idle",
+  gameStarted: false,
+  interiorBuilding: null,
+  nearBuilding: null,
+  playerIso: { x: 19.4, y: 30.2 },
   storyState: { ...initialStoryState, stats: { ...initialStoryState.stats }, log: [...initialStoryState.log] },
   activeSceneId: null,
   guideHotspotId: "library" as HotspotId,
@@ -144,6 +170,32 @@ export const useGameStore = create<GameStore>((set) => ({
 
   setPlayerIso: (iso) => set({ playerIso: iso }),
 
+  startSession: (building) =>
+    set({
+      world: "interior",
+      transition: "idle",
+      gameStarted: true,
+      interiorBuilding: building,
+      nearBuilding: null,
+      playerIso: { x: 19.4, y: 30.2 },
+    }),
+
+  /** Idempotent by design: duplicate proximity/E-key events cannot remount an interior. */
+  openInterior: (building) => {
+    const state = useGameStore.getState();
+    if (state.world === "dead" || state.world === "ending" || state.transition !== "idle") return false;
+    if (state.interiorBuilding?.id === building.id || state.world === "interior") return false;
+    set({ world: "interior", transition: "idle", interiorBuilding: building, nearBuilding: null });
+    return true;
+  },
+
+  closeInterior: () =>
+    set({ world: "map", transition: "idle", interiorBuilding: null, nearBuilding: null }),
+
+  setNearBuilding: (nearBuilding) => set({ nearBuilding }),
+  setTransition: (transition) => set({ transition }),
+  setWorld: (world) => set({ world }),
+
   setGhost: (partial) =>
     set((s) => ({ ghost: { ...s.ghost, ...partial } })),
 
@@ -153,9 +205,16 @@ export const useGameStore = create<GameStore>((set) => ({
     })),
 
   setStoryState: (updater) =>
-    set((s) => ({ storyState: updater(s.storyState) })),
+    set((s) => {
+      const storyState = updater(s.storyState);
+      return { storyState, guideHotspotId: getSceneHotspot(storyState.currentSceneId) };
+    }),
 
-  setActiveSceneId: (id) => set({ activeSceneId: id }),
+  setActiveSceneId: (id) =>
+    set((s) => ({
+      activeSceneId: id,
+      world: id && s.storyState.currentSceneId.startsWith("ending") ? "ending" : s.world,
+    })),
 
   setGuideHotspotId: (id) => set({ guideHotspotId: id }),
 
@@ -175,7 +234,12 @@ export const useGameStore = create<GameStore>((set) => ({
 
   resetAll: () =>
     set({
-      playerIso: { x: 16.2, y: 30.6 },
+      world: "title",
+      transition: "idle",
+      gameStarted: false,
+      interiorBuilding: null,
+      nearBuilding: null,
+      playerIso: { x: 19.4, y: 30.2 },
       storyState: {
         ...initialStoryState,
         stats: { ...initialStoryState.stats },

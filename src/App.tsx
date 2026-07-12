@@ -29,16 +29,16 @@ import {
   type StatKey,
   type StoryChoice,
   type StorySceneId,
-  type StoryState,
 } from "./game/storyData";
 import { useGameAudio } from "./game/audio/useGameAudio";
 import { useGameStore } from "./game/store";
 import { pickJumpscareText, contextForHotspot, textVariantClass, type JumpscareContext } from "./game/jumpscareTexts";
+import { JumpscarePipeline } from "./game/JumpscarePipeline";
 import {
   advanceStory,
   applyGhostDamage,
   collectStoryItem,
-  createStoryState,
+  getStoryBuildingForHotspot,
   isChoiceLocked,
   resolveGameStartBuilding,
   resolveInteriorExitTrigger,
@@ -62,14 +62,6 @@ type MiniMapSnapshot = {
   ghost?: IsoPoint;
   ghostVisible: boolean;
 };
-
-type NextObjectiveCue = {
-  place: string;
-  objective: string;
-};
-
-/** 可进入建筑的最小数据契约，与 InteriorOverlay 的 props 对齐。 */
-type EnterableBuilding = { id: string; name: string; zone?: string };
 
 /** 同步判定是否为触摸/移动设备:窄屏 + 触摸能力任一满足即视为移动端。 */
 function detectMobile(): boolean {
@@ -252,23 +244,33 @@ function App() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const particleCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const miniMapCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const miniMapSnapshotRef = useRef<MiniMapSnapshot>({ player: { x: 16.2, y: 30.6 }, ghostVisible: false });
+  const miniMapSnapshotRef = useRef<MiniMapSnapshot>({ player: { x: 19.4, y: 30.2 }, ghostVisible: false });
   const miniMapFrameRef = useRef<number | null>(null);
   const [hud, setHud] = useState<GameHudEvent>(initialHud);
-  const [storyState, setStoryState] = useState<StoryState>(() => createStoryState());
-  const [activeSceneId, setActiveSceneId] = useState<StorySceneId | null>(null);
-  const [screenEffect, setScreenEffect] = useState<HorrorEffect | "low-sanity" | "">("");
-  const [nextObjectiveCue, setNextObjectiveCue] = useState<NextObjectiveCue | null>(null);
   const [gameSessionId, setGameSessionId] = useState(0);
-  const [gameStarted, setGameStarted] = useState(false);
   const [phaserReady, setPhaserReady] = useState(false);
-  // ── 移动端 / 内景 ──
   const isMobile = useIsMobile();
-  const [nearBuilding, setNearBuilding] = useState<EnterableBuilding | null>(null);
-  const [interiorBuilding, setInteriorBuilding] = useState<EnterableBuilding | null>(null);
-  const [buildingTransition, setBuildingTransition] = useState(false);
 
-  // ── Zustand hook 订阅 ──
+  // ── Zustand is the single source of truth for the playable session. ──
+  const storyState = useGameStore((s) => s.storyState);
+  const setStoryState = useGameStore((s) => s.setStoryState);
+  const activeSceneId = useGameStore((s) => s.activeSceneId);
+  const setActiveSceneId = useGameStore((s) => s.setActiveSceneId);
+  const screenEffect = useGameStore((s) => s.screenEffect);
+  const setScreenEffect = useGameStore((s) => s.setScreenEffect);
+  const nextObjectiveCue = useGameStore((s) => s.nextObjectiveCue);
+  const setNextObjectiveCue = useGameStore((s) => s.setNextObjectiveCue);
+  const gameStarted = useGameStore((s) => s.gameStarted);
+  const interiorBuilding = useGameStore((s) => s.interiorBuilding);
+  const nearBuilding = useGameStore((s) => s.nearBuilding);
+  const startSession = useGameStore((s) => s.startSession);
+  const openInterior = useGameStore((s) => s.openInterior);
+  const closeInterior = useGameStore((s) => s.closeInterior);
+  const setWorld = useGameStore((s) => s.setWorld);
+  const resetAll = useGameStore((s) => s.resetAll);
+  const setPlayerIso = useGameStore((s) => s.setPlayerIso);
+
+  // ── View-only Zustand subscriptions. ──
   const zHudPlace = useGameStore((s) => s.hudPlace);
   const zHudPrompt = useGameStore((s) => s.hudPrompt);
   const zHudHotspot = useGameStore((s) => s.hudActiveHotspotId);
@@ -321,6 +323,18 @@ function App() {
       window.setTimeout(() => setScreenEffect(""), effect === "jumpscare" ? 760 : 520);
     },
     [playEffect, storyState.stats.sanity, targetHotspotId],
+  );
+
+  /** Story beats use the central jumpscare pipeline so sanity is charged once. */
+  const triggerNarrativeEffect = useCallback(
+    (effect: HorrorEffect | undefined, context: JumpscareContext) => {
+      if (effect === "jumpscare") {
+        JumpscarePipeline.executeStoryEffect(context, 0.62);
+        return;
+      }
+      triggerEffect(effect, context);
+    },
+    [triggerEffect],
   );
 
   useEffect(() => {
@@ -401,14 +415,14 @@ function App() {
       setStoryState((previous) => visitStoryHotspot(previous, scene));
       setActiveSceneId(sceneId);
       // 统一走 triggerEffect：音频 + CSS 叠加层 + 惊吓文字 + 相机抖动全部到位
-      triggerEffect(scene.effect, contextForHotspot(scene.locationId));
+      triggerNarrativeEffect(scene.effect, contextForHotspot(scene.locationId));
     };
 
     window.addEventListener("zju-horror-open-story", handleOpenStory);
     return () => {
       window.removeEventListener("zju-horror-open-story", handleOpenStory);
     };
-  }, [currentScene.locationId, playEffect, storyState.currentSceneId, triggerEffect]);
+  }, [currentScene.locationId, playEffect, storyState.currentSceneId, triggerNarrativeEffect]);
 
   // 3D 内景中的故事触发区 → 弹出文字弹窗（覆盖在 3D 画面上）
   useEffect(() => {
@@ -420,11 +434,11 @@ function App() {
       setStoryState((previous) => visitStoryHotspot(previous, scene));
       setActiveSceneId(sid);
       // 统一走 triggerEffect：音频 + CSS 叠加层 + 惊吓文字 + 相机抖动全部到位
-      triggerEffect(scene.effect, contextForHotspot(scene.locationId));
+      triggerNarrativeEffect(scene.effect, contextForHotspot(scene.locationId));
     };
     window.addEventListener("zju-horror-interior-story", handleInteriorStory);
     return () => window.removeEventListener("zju-horror-interior-story", handleInteriorStory);
-  }, [playEffect, triggerEffect]);
+  }, [playEffect, triggerNarrativeEffect]);
 
   useEffect(() => {
     if (!phaserReady || !containerRef.current) return;
@@ -508,35 +522,6 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [nextObjectiveCue]);
 
-  // ── 进入建筑触发链：监听 CampusScene 派发的靠近 / 进入 / 转场事件 ──
-  useEffect(() => {
-    const onNear = (event: Event) => {
-      setNearBuilding((event as CustomEvent<{ building: EnterableBuilding | null }>).detail.building);
-    };
-    const onEnter = (event: Event) => {
-      setInteriorBuilding((event as CustomEvent<{ building: EnterableBuilding }>).detail.building);
-    };
-    const onTransition = () => {
-      setBuildingTransition(true);
-    };
-    window.addEventListener("zju-horror-near-building", onNear);
-    window.addEventListener("zju-horror-enter-building", onEnter);
-    window.addEventListener("zju-horror-building-transition", onTransition);
-    return () => {
-      window.removeEventListener("zju-horror-near-building", onNear);
-      window.removeEventListener("zju-horror-enter-building", onEnter);
-      window.removeEventListener("zju-horror-building-transition", onTransition);
-    };
-  }, []);
-
-  // 黑屏转场：进入建筑后淡出
-  useEffect(() => {
-    if (!buildingTransition) return;
-    // 内景挂载后自动解除转场
-    const timer = window.setTimeout(() => setBuildingTransition(false), 1200);
-    return () => window.clearTimeout(timer);
-  }, [buildingTransition]);
-
   // 内景开合时通知 CampusScene 冻结/恢复外层移动。
   useEffect(() => {
     window.dispatchEvent(
@@ -561,45 +546,50 @@ function App() {
   }, []);
 
   const enterNearBuilding = useCallback(() => {
-    setInteriorBuilding((current) => current ?? nearBuilding);
-  }, [nearBuilding]);
+    if (nearBuilding) openInterior(nearBuilding);
+  }, [nearBuilding, openInterior]);
 
   const leaveInterior = useCallback(() => {
-    setInteriorBuilding(null);
+    closeInterior();
     setPhaserReady(true);
-  }, []);
+  }, [closeInterior]);
 
   const leaveInteriorFromTrigger = useCallback(() => {
     const nextActiveSceneId = resolveInteriorExitTrigger(storyState);
-    setInteriorBuilding(null);
-    setPhaserReady(true);
+    // Make the pending outdoor scene visible before mounting Phaser.  This
+    // prevents a newly-created map from immediately retargeting the player
+    // back into the library to discover the same scene again.
     if (nextActiveSceneId) setActiveSceneId(nextActiveSceneId);
-  }, [storyState]);
+    if (storyState.currentSceneId === "library_police") {
+      setPlayerIso({ x: 19.4, y: 30.2 });
+    }
+    closeInterior();
+    setPhaserReady(true);
+  }, [closeInterior, setPlayerIso, setActiveSceneId, storyState]);
+
+  // Story interiors cannot be abandoned through the top-right button.  The
+  // active red exit performs the atomic "leave + show outdoor scene" step.
+  const canExitInterior = Boolean(resolveInteriorExitTrigger(storyState));
 
   const startGame = useCallback(() => {
-    setGameStarted(true);
     setPhaserReady(false); // 不加载 2.5D 地图，直接进入 3D 内景
     triggerEffect("reveal");
     // 使用 storyEngine 统一解析起始建筑（始终从第一个热点开始）
     const startBuilding = resolveGameStartBuilding();
-    setInteriorBuilding(startBuilding ?? { id: "medical-library", name: "医学分馆", zone: "story" });
-  }, [triggerEffect]);
+    startSession(startBuilding ?? { id: "medical-library", name: "医学分馆", zone: "story" });
+  }, [startSession, triggerEffect]);
 
   const restartGame = useCallback(() => {
-    setGameStarted(true);
     setPhaserReady(false);
-    setStoryState(createStoryState());
-    setActiveSceneId(null);
+    resetAll();
+    JumpscarePipeline.reset();
     setHud(initialHud);
-    setScreenEffect("");
-    setNextObjectiveCue(null);
-    setNearBuilding(null);
     const startBuilding = resolveGameStartBuilding();
-    setInteriorBuilding(startBuilding ?? { id: "medical-library", name: "医学分馆", zone: "story" });
-    miniMapSnapshotRef.current = { player: { x: 16.2, y: 30.6 }, ghostVisible: false };
+    startSession(startBuilding ?? { id: "medical-library", name: "医学分馆", zone: "story" });
+    miniMapSnapshotRef.current = { player: { x: 19.4, y: 30.2 }, ghostVisible: false };
     resetAudio();
     setGameSessionId((value) => value + 1);
-  }, [resetAudio]);
+  }, [resetAll, resetAudio, startSession]);
 
   useEffect(() => {
     const handleGhostHit = (event: Event) => {
@@ -610,6 +600,7 @@ function App() {
         const result = applyGhostDamage(previous, detail.type === "death" ? -100 : (detail.amount ?? -6));
 
         if (result.dead) {
+          setWorld("dead");
           setNextObjectiveCue(null);
           setActiveSceneId("death_sanity");
           playGhostHit();
@@ -625,7 +616,7 @@ function App() {
 
     window.addEventListener("zju-horror-ghost-hit", handleGhostHit);
     return () => window.removeEventListener("zju-horror-ghost-hit", handleGhostHit);
-  }, [playGhostHit, triggerEffect]);
+  }, [playGhostHit, setWorld, triggerEffect]);
 
   // ── Jumpscare pipeline listener ──
   useEffect(() => {
@@ -646,6 +637,7 @@ function App() {
         setStoryState((previous) => {
           const result = applyGhostDamage(previous, detail.amount);
           if (result.dead) {
+            setWorld("dead");
             setNextObjectiveCue(null);
             setActiveSceneId("death_sanity");
           }
@@ -660,7 +652,7 @@ function App() {
       window.removeEventListener("zju-horror-jumpscare", handleJumpscare);
       window.removeEventListener("zju-horror-sanity-hit", handleSanityHit);
     };
-  }, [storyState.stats.sanity, triggerEffect]);
+  }, [setWorld, storyState.stats.sanity, triggerEffect]);
 
   const useInventoryItem = useCallback(
     (itemId: ItemId) => {
@@ -688,16 +680,23 @@ function App() {
       const { nextState, nextScene, nextHotspot, changesLocation, effect } = transition;
       const inInterior = Boolean(interiorBuilding);
 
-      setStoryState(nextState);
-      triggerEffect(effect);
+      setStoryState(() => nextState);
+      triggerNarrativeEffect(effect, contextForHotspot(nextScene.locationId));
 
       const commands = resolvePostChoiceCommands({ activeScene, nextScene, nextHotspot, changesLocation, inInterior });
       for (const command of commands) {
         if (command.kind === "exit-interior") {
-          setInteriorBuilding(null);
+          // Clear the in-room modal before mounting Phaser.  A stale modal
+          // used to leave the newly-created map frozen at the library door.
+          setActiveSceneId(null);
+          if (activeScene.locationId === "library") {
+            setPlayerIso({ x: 19.4, y: 30.2 });
+          }
+          closeInterior();
           setPhaserReady(true);
         } else if (command.kind === "enter-building") {
-          window.dispatchEvent(new CustomEvent("zju-horror-story-enter-building", { detail: { hotspotId: command.hotspotId } }));
+          const building = getStoryBuildingForHotspot(command.hotspotId);
+          if (building) openInterior(building);
         } else if (command.kind === "show-objective") {
           setNextObjectiveCue({ place: command.place, objective: command.objective });
         } else if (command.kind === "set-active-scene") {
@@ -706,7 +705,7 @@ function App() {
         }
       }
     },
-    [activeScene, interiorBuilding, playChoice, storyState, triggerEffect],
+    [activeScene, closeInterior, interiorBuilding, openInterior, playChoice, setActiveSceneId, setPlayerIso, storyState, triggerNarrativeEffect],
   );
 
   const usableItems = useMemo<Set<ItemId>>(
@@ -920,7 +919,6 @@ function App() {
         </section>
       )}
 
-      {buildingTransition && <div className="buildingTransition" aria-hidden="true" />}
 
       {interiorBuilding && (
         <InteriorOverlay
@@ -928,8 +926,9 @@ function App() {
           currentSceneId={storyState.currentSceneId}
           inventory={storyState.inventory}
           isMobile={isMobile}
-          onExit={leaveInterior}
+          onExit={leaveInteriorFromTrigger}
           onExitTrigger={leaveInteriorFromTrigger}
+          canExit={canExitInterior}
         />
       )}
     </main>

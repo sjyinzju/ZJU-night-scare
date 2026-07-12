@@ -852,12 +852,12 @@ button {
   pointer-events: none;
   position: absolute;
   inset: 0;
-  z-index: 45;
+  z-index: 3000;
   opacity: 0;
 }
 
 .jumpscareFace {
-  z-index: 46;
+  z-index: 3001;
   display: grid;
   place-items: center;
   background:
@@ -961,7 +961,7 @@ button {
 
 /* ── 惊吓文字脉冲 ── */
 .jumpscareText {
-  z-index: 47;
+  z-index: 3002;
   display: grid;
   place-items: center;
   color: #ff0000;

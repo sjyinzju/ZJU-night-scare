@@ -7,6 +7,8 @@ export interface InteriorOverlayProps {
   currentSceneId: string;
   inventory: string[];
   onExit: () => void;
+  /** A story interior can only leave through its active narrative exit. */
+  canExit?: boolean;
   onExitTrigger?: () => void;
   /** When true, shows a virtual joystick + drag-to-look controls. */
   isMobile?: boolean;
@@ -23,6 +25,7 @@ export default function InteriorOverlay({
   currentSceneId,
   inventory,
   onExit,
+  canExit = true,
   onExitTrigger,
   isMobile = false,
 }: InteriorOverlayProps): React.ReactElement {
@@ -117,9 +120,10 @@ export default function InteriorOverlay({
   }, []);
 
   const handleExit = useCallback(() => {
+    if (!canExit) return;
     engineRef.current?.exitPointerLock();
     onExit();
-  }, [onExit]);
+  }, [canExit, onExit]);
 
   // ---- Joystick pointer handlers ----
   const onJoyDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
@@ -187,7 +191,7 @@ export default function InteriorOverlay({
         <div style={styles.fallback}>
           <p style={styles.fallbackTitle}>门后一片漆黑</p>
           <p style={styles.fallbackText}>这台设备暂时无法渲染建筑内部（WebGL 不可用）。</p>
-          <button style={styles.fallbackBtn} onClick={onExit}>
+          <button style={styles.fallbackBtn} onClick={handleExit} disabled={!canExit}>
             退回校园
           </button>
         </div>
@@ -215,8 +219,12 @@ export default function InteriorOverlay({
       )}
 
       {/* Top-right: leave the building. */}
-      <button style={styles.exitBtn} onClick={handleExit}>
-        离开建筑
+      <button
+        style={{ ...styles.exitBtn, ...(canExit ? undefined : styles.exitBtnDisabled) }}
+        onClick={handleExit}
+        disabled={!canExit}
+      >
+        {canExit ? "离开建筑" : "跟随红色指引"}
       </button>
 
       {/* Building label. */}
@@ -323,6 +331,10 @@ const styles: Record<string, CSSProperties> = {
     cursor: "pointer",
     backdropFilter: "blur(6px)",
     boxShadow: "0 10px 26px rgba(0,0,0,0.42), 0 0 20px rgba(179,50,46,0.18)",
+  },
+  exitBtnDisabled: {
+    cursor: "not-allowed",
+    opacity: 0.52,
   },
   title: {
     position: "absolute",

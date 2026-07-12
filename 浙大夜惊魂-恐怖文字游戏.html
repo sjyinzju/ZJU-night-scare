@@ -1,0 +1,1822 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>浙大夜惊魂 - 恐怖文字冒险</title>
+<style>
+:root{--bg:#0a0a0a;--panel-bg:#111112;--text:#c8c0b0;--text-dim:#6b6358;--accent:#8b1a1a;--accent-bright:#c0392b;--gold:#8a7a5a;--border:#1f1f1f;--choice-bg:#1a1a1c;--choice-hover:#252528;--danger:#7b1f1f;--stamina:#4a7a3a;--item-bg:#141416;--char-bg:#0f0f11;}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:'SimSun','STSong','Microsoft YaHei','PingFang SC',serif;min-height:100vh;display:flex;justify-content:center;align-items:center;overflow-x:hidden;cursor:default;user-select:none}
+.bg-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:radial-gradient(ellipse at center,rgba(20,15,10,0.4) 0%,rgba(0,0,0,0.95) 70%);pointer-events:none;z-index:0}
+.bg-fog{position:fixed;top:0;left:0;width:100%;height:100%;background:radial-gradient(ellipse at 20% 50%,rgba(60,40,30,0.08) 0%,transparent 50%),radial-gradient(ellipse at 80% 30%,rgba(50,30,40,0.06) 0%,transparent 50%);animation:fogDrift 20s ease-in-out infinite;pointer-events:none;z-index:0}
+@keyframes fogDrift{0%,100%{opacity:0.6;transform:translateX(0)}33%{opacity:0.8;transform:translateX(1%)}66%{opacity:0.5;transform:translateX(-1%)}}
+.particles{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1}
+.particle{position:absolute;background:rgba(180,160,140,0.3);border-radius:50%;animation:floatUp linear infinite}
+@keyframes floatUp{0%{transform:translateY(100vh) scale(0);opacity:0}10%{opacity:0.6}90%{opacity:0.3}100%{transform:translateY(-10vh) scale(1.5);opacity:0}}
+.game-container{position:relative;z-index:2;width:100%;max-width:800px;margin:20px;min-height:85vh;display:flex;flex-direction:column}
+.hidden{display:none!important}
+
+/* Title */
+.title-screen{flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:40px 20px}
+.title-main{font-size:3.2em;font-weight:700;color:var(--accent-bright);letter-spacing:0.15em;text-shadow:0 0 60px rgba(180,30,30,0.5),0 0 120px rgba(120,20,20,0.3);margin-bottom:10px;animation:titleGlow 3s ease-in-out infinite}
+@keyframes titleGlow{0%,100%{text-shadow:0 0 60px rgba(180,30,30,0.5),0 0 120px rgba(120,20,20,0.3)}50%{text-shadow:0 0 90px rgba(200,40,40,0.7),0 0 180px rgba(160,30,30,0.5)}}
+.title-sub{font-size:1.1em;color:var(--text-dim);letter-spacing:0.3em;margin-bottom:40px}
+.title-warning{color:var(--accent-bright);font-size:0.85em;letter-spacing:0.15em;margin-bottom:50px;animation:blink 2s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:0.5}50%{opacity:1}}
+.btn-start{padding:16px 60px;font-size:1.2em;font-family:inherit;background:transparent;color:var(--text);border:1px solid var(--accent);letter-spacing:0.2em;cursor:pointer;transition:all 0.4s}
+.btn-start:hover{background:var(--accent);color:#fff;box-shadow:0 0 40px rgba(180,30,30,0.4)}
+
+/* Character Select */
+.char-select{flex:1;display:flex;flex-direction:column;align-items:center;padding:30px 20px;text-align:center}
+.char-select-title{font-size:1.6em;color:var(--gold);letter-spacing:0.2em;margin-bottom:5px}
+.char-select-sub{font-size:0.8em;color:var(--text-dim);margin-bottom:25px}
+.char-draw-area{position:relative;width:300px;height:300px;margin:20px auto;display:flex;align-items:center;justify-content:center}
+.char-card{position:absolute;width:240px;padding:25px 20px;background:var(--char-bg);border:2px solid var(--border);border-radius:8px;text-align:center;transition:all 0.6s;opacity:0;transform:scale(0.8) rotateY(180deg)}
+.char-card.revealed{opacity:1;transform:scale(1) rotateY(0);border-color:var(--accent-bright);box-shadow:0 0 40px rgba(180,30,30,0.3)}
+.char-card .char-icon{font-size:3em;margin-bottom:10px}
+.char-card .char-name{font-size:1.4em;font-weight:700;color:var(--accent-bright);letter-spacing:0.1em;margin-bottom:8px}
+.char-card .char-desc{font-size:0.8em;color:var(--text-dim);line-height:1.8;margin-bottom:10px}
+.char-card .char-goal{font-size:0.75em;color:var(--gold);padding:8px 12px;border:1px solid var(--border);border-radius:4px;margin:8px 0}
+.char-card .char-stats{display:flex;justify-content:center;gap:15px;font-size:0.7em;color:var(--text-dim);margin-top:10px}
+.char-card .char-stat span{color:var(--gold);font-weight:bold}
+.char-spin-text{color:var(--text-dim);font-size:0.8em;animation:blink 0.8s infinite}
+.btn-draw{padding:14px 50px;font-size:1.1em;font-family:inherit;background:transparent;color:var(--gold);border:1px solid var(--gold);letter-spacing:0.2em;cursor:pointer;transition:all 0.4s;margin:10px}
+.btn-draw:hover{background:rgba(138,122,90,0.15);box-shadow:0 0 30px rgba(138,122,90,0.3)}
+.btn-draw:disabled{opacity:0.4;cursor:not-allowed}
+.btn-confirm{padding:14px 50px;font-size:1.1em;font-family:inherit;background:var(--accent);color:#fff;border:1px solid var(--accent-bright);letter-spacing:0.2em;cursor:pointer;transition:all 0.4s;margin:10px}
+.btn-confirm:hover{box-shadow:0 0 30px rgba(200,40,40,0.5)}
+
+/* Game panel */
+.game-panel{flex:1;display:flex;flex-direction:column;background:var(--panel-bg);border:1px solid var(--border);border-radius:4px;padding:25px 30px;position:relative;box-shadow:0 0 60px rgba(0,0,0,0.5),inset 0 0 100px rgba(0,0,0,0.3)}
+.game-header{display:flex;justify-content:space-between;align-items:center;padding-bottom:15px;margin-bottom:15px;border-bottom:1px solid var(--border);font-size:0.8em;color:var(--text-dim);letter-spacing:0.1em;flex-wrap:wrap;gap:8px}
+.header-chapter{color:var(--accent-bright)}
+.header-char{color:var(--gold);font-size:0.85em}
+.header-stats{display:flex;gap:16px;flex-wrap:wrap}
+.stat{display:flex;align-items:center;gap:4px}
+.stat-icon{font-size:1.1em}
+.stat-label{color:var(--text-dim);font-size:0.7em}
+.stat-value{font-weight:bold}
+.stat-value.sanity{color:#c08060}
+.stat-value.stamina{color:#7aaa5a}
+.stat-value.clues{color:var(--gold)}
+.stat-value.trust{color:#7a9ab0}
+.stat-bar-wrap{width:45px;height:4px;background:var(--border);border-radius:2px;overflow:hidden;margin-top:1px}
+.stat-bar{height:100%;border-radius:2px;transition:width 0.5s}
+.stat-bar.sanity{background:linear-gradient(90deg,#c0392b,#e08050)}
+.stat-bar.stamina{background:linear-gradient(90deg,#3a6a2a,#6aaa4a)}
+
+/* Inventory */
+.inventory-toggle{position:fixed;bottom:20px;right:20px;z-index:50;width:44px;height:44px;background:var(--panel-bg);border:1px solid var(--border);border-radius:50%;cursor:pointer;font-size:1.4em;display:flex;align-items:center;justify-content:center;transition:all 0.3s}
+.inventory-toggle:hover{border-color:var(--gold);box-shadow:0 0 15px rgba(138,122,90,0.3)}
+.inventory-toggle.has-items{border-color:var(--gold);animation:glowPulse 2s infinite}
+@keyframes glowPulse{0%,100%{box-shadow:0 0 5px rgba(138,122,90,0.2)}50%{box-shadow:0 0 20px rgba(138,122,90,0.5)}}
+.inventory-badge{position:absolute;top:-4px;right:-4px;width:18px;height:18px;background:var(--accent-bright);border-radius:50%;font-size:0.6em;color:#fff;display:flex;align-items:center;justify-content:center}
+.inventory-panel{position:fixed;bottom:75px;right:20px;z-index:50;width:240px;background:var(--panel-bg);border:1px solid var(--border);border-radius:6px;padding:15px;box-shadow:0 5px 30px rgba(0,0,0,0.7);transition:all 0.3s;transform-origin:bottom right}
+.inventory-panel.hidden{display:none!important}
+.inventory-title{color:var(--gold);font-size:0.8em;letter-spacing:0.15em;margin-bottom:10px;text-align:center}
+.inventory-slot{width:100%;padding:8px 10px;margin:4px 0;background:var(--item-bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:0.8em;cursor:pointer;transition:all 0.2s;text-align:left;font-family:inherit;display:flex;align-items:center;gap:8px}
+.inventory-slot:hover{border-color:var(--gold);background:#1e1e22}
+.inventory-slot .item-icon{font-size:1.3em;flex-shrink:0}
+.inventory-slot .item-name{flex:1}
+.inventory-slot .item-use{color:var(--text-dim);font-size:0.7em;display:none}
+.inventory-slot:hover .item-use{display:inline}
+.inventory-empty{color:var(--text-dim);font-size:0.75em;text-align:center;padding:15px 0}
+
+/* Story area */
+.story-area{flex:1;overflow-y:auto;padding-right:10px;line-height:2;font-size:1.02em;scroll-behavior:smooth;max-height:50vh;min-height:250px}
+.story-area::-webkit-scrollbar{width:4px}
+.story-area::-webkit-scrollbar-track{background:transparent}
+.story-area::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.story-text{margin-bottom:10px;animation:fadeIn 0.5s ease-out}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.story-text.tense{color:#d4c8b8;font-style:italic;border-left:2px solid var(--accent);padding-left:15px;margin:16px 0}
+.story-text.thought{color:#8a7e70;font-style:italic}
+.story-text.shock{color:var(--accent-bright);font-weight:bold;font-size:1.08em;text-align:center;margin:18px 0;animation:shockPulse 1.5s ease-in-out infinite}
+@keyframes shockPulse{0%,100%{opacity:0.7}50%{opacity:1}}
+.story-text.item-get{color:#c8a860;text-align:center;border:1px solid var(--gold);padding:10px;margin:16px 0;animation:itemGlow 1s ease-out}
+@keyframes itemGlow{from{border-color:var(--gold);box-shadow:0 0 20px rgba(200,168,96,0.5)}to{border-color:var(--border);box-shadow:none}}
+.story-text.death{color:#ff2020;font-weight:bold;font-size:1.2em;text-align:center;margin:20px 0;animation:deathShake 0.2s ease-in-out infinite}
+@keyframes deathShake{0%,100%{transform:translateX(0)}25%{transform:translateX(-3px)}75%{transform:translateX(3px)}}
+.story-text.char-unique{color:#c8a860;border-left:2px solid var(--gold);padding-left:15px;margin:14px 0;font-style:italic}
+.divider{text-align:center;color:var(--text-dim);margin:22px 0;letter-spacing:0.3em;font-size:0.8em}
+
+/* Choices */
+.choices-area{padding-top:15px;border-top:1px solid var(--border);margin-top:12px;display:flex;flex-direction:column;gap:8px}
+.choice-btn{display:block;width:100%;padding:12px 20px;font-size:0.92em;font-family:inherit;background:var(--choice-bg);color:var(--text);border:1px solid var(--border);text-align:left;cursor:pointer;transition:all 0.3s;letter-spacing:0.04em;position:relative}
+.choice-btn:hover{background:var(--choice-hover);border-color:var(--accent);color:#e8dcd0;padding-left:28px}
+.choice-btn:hover::before{content:'\25B6';position:absolute;left:10px;color:var(--accent-bright);font-size:0.65em;animation:arrowPulse 0.8s infinite}
+@keyframes arrowPulse{0%,100%{opacity:0.5}50%{opacity:1}}
+.choice-btn.danger{border-color:var(--danger);color:#c08080}
+.choice-btn.danger:hover{background:rgba(139,26,26,0.2);border-color:var(--accent-bright);box-shadow:0 0 25px rgba(200,30,30,0.2)}
+.choice-btn.critical{border-color:var(--accent-bright);background:rgba(139,26,26,0.1);animation:criticalPulse 2s infinite}
+@keyframes criticalPulse{0%,100%{border-color:var(--accent-bright)}50%{border-color:#e74c3c;box-shadow:0 0 20px rgba(231,76,60,0.3)}}
+.choice-btn.item-choice{border-color:var(--gold);color:#c8a860}
+.choice-btn.item-choice:hover{background:rgba(138,122,90,0.15);border-color:#c8a860;box-shadow:0 0 15px rgba(138,122,90,0.2)}
+.choice-btn.char-choice{border-color:#6a4a8a;color:#b0a0c0}
+.choice-btn.char-choice:hover{background:rgba(106,74,138,0.15);border-color:#8a6aaa;box-shadow:0 0 15px rgba(106,74,138,0.2)}
+.choice-btn.locked{opacity:0.4;cursor:not-allowed}
+.choice-btn.locked:hover{background:var(--choice-bg);border-color:var(--border);padding-left:20px}
+.choice-btn.locked:hover::before{display:none}
+
+/* Jumpscare */
+.jumpscare-overlay{position:fixed;top:0;left:0;width:100%;height:100%;z-index:100;pointer-events:none;opacity:0;transition:opacity 0.1s}
+.jumpscare-overlay.active{opacity:1;animation:jsFlash 0.3s ease-out}
+@keyframes jsFlash{0%{background:rgba(180,20,20,0.7);opacity:0}15%{background:rgba(200,0,0,0.9);opacity:1}40%{background:rgba(80,0,0,0.6);opacity:0.8}100%{background:rgba(0,0,0,0);opacity:0}}
+.jumpscare-text{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:101;font-size:3em;color:#ff0000;font-weight:bold;text-shadow:0 0 40px red;pointer-events:none;opacity:0;transition:opacity 0.05s;letter-spacing:0.2em}
+.jumpscare-text.active{opacity:1;animation:jsTextPop 0.6s ease-out forwards}
+@keyframes jsTextPop{0%{opacity:0;transform:translate(-50%,-50%) scale(0.3)}20%{opacity:1;transform:translate(-50%,-50%) scale(1.5)}100%{opacity:0;transform:translate(-50%,-50%) scale(1.8)}}
+.screen-shake{animation:screenShake 0.6s ease-out}
+@keyframes screenShake{0%,100%{transform:translateX(0)}10%{transform:translateX(-6px) rotate(-0.5deg)}20%{transform:translateX(6px) rotate(0.5deg)}30%{transform:translateX(-6px)}40%{transform:translateX(6px)}50%{transform:translateX(-4px)}60%{transform:translateX(4px)}70%{transform:translateX(-2px)}80%{transform:translateX(2px)}90%{transform:translateX(-1px)}}
+.sanity-warning{position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:99;color:#ff4444;font-size:0.85em;letter-spacing:0.2em;pointer-events:none;opacity:0;transition:opacity 0.5s}
+.sanity-warning.show{opacity:1;animation:sanityWarnBlink 0.8s infinite}
+@keyframes sanityWarnBlink{0%,100%{opacity:0.4}50%{opacity:1}}
+
+/* Ending */
+.ending-screen{flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:40px 20px}
+.ending-title{font-size:2.2em;font-weight:700;letter-spacing:0.15em;margin-bottom:15px}
+.ending-title.good{color:#c8a860;text-shadow:0 0 40px rgba(200,168,96,0.4)}
+.ending-title.bad{color:var(--accent-bright);text-shadow:0 0 40px rgba(180,30,30,0.5)}
+.ending-title.true{color:#a0c0d0;text-shadow:0 0 40px rgba(120,160,180,0.4)}
+.ending-title.death{color:#ff0000;text-shadow:0 0 60px rgba(255,0,0,0.6);animation:deathGlow 0.5s infinite}
+@keyframes deathGlow{0%,100%{text-shadow:0 0 60px rgba(255,0,0,0.6)}50%{text-shadow:0 0 100px rgba(255,0,0,1)}}
+.ending-desc{color:var(--text-dim);max-width:500px;line-height:2;margin:20px 0 40px;font-size:1.02em}
+.ending-stats{display:flex;gap:25px;margin-bottom:40px;font-size:0.82em;color:var(--text-dim);flex-wrap:wrap;justify-content:center}
+.ending-stat-val{color:var(--gold);font-size:1.2em}
+.btn-restart{padding:12px 40px;font-family:inherit;font-size:1em;background:transparent;color:var(--text);border:1px solid var(--border);cursor:pointer;letter-spacing:0.15em;transition:all 0.4s}
+.btn-restart:hover{border-color:var(--accent);color:#fff}
+.save-indicator{position:fixed;top:20px;right:20px;font-size:0.65em;color:var(--text-dim);letter-spacing:0.1em;z-index:10;opacity:0;transition:opacity 0.5s}
+.save-indicator.show{opacity:1}
+@media(max-width:600px){.game-panel{padding:15px}.title-main{font-size:2em}.story-area{max-height:40vh;font-size:0.92em}.header-stats{gap:6px}.inventory-panel{width:200px;right:10px;bottom:65px}.char-card{width:200px;padding:20px 15px}}
+</style>
+</head>
+<body>
+
+<div class="bg-overlay"></div>
+<div class="bg-fog"></div>
+<div class="particles" id="particles"></div>
+<div class="jumpscare-overlay" id="jsOverlay"></div>
+<div class="jumpscare-text" id="jsText"></div>
+<div class="sanity-warning" id="sanityWarn">⚠ 理智濒临崩溃</div>
+<div class="save-indicator" id="saveIndicator">● 进度已保存</div>
+
+<div class="inventory-toggle" id="invToggle" onclick="toggleInventory()" title="道具栏">🎒<span class="inventory-badge hidden" id="invBadge">0</span></div>
+<div class="inventory-panel hidden" id="invPanel">
+  <div class="inventory-title">道 具 栏</div>
+  <div id="invSlots"></div>
+</div>
+
+<div class="game-container" id="gameContainer">
+  <!-- Title Screen -->
+  <div class="title-screen" id="titleScreen">
+    <div class="title-main">浙大夜惊魂</div>
+    <div class="title-sub">学长学姐代代相传的校园恐怖传说</div>
+    <div class="title-warning">⚠ 游戏包含恐怖元素，请谨慎游玩 ⚠</div>
+    <button class="btn-start" id="btnStart" onclick="showCharSelect()">开 始 游 戏</button>
+    <div style="margin-top:30px;color:var(--text-dim);font-size:0.7em">基于同名校园恐怖小说改编<br>随机角色 · 多分支剧情 · 多结局 · 道具系统</div>
+  </div>
+
+  <!-- Character Select Screen -->
+  <div class="char-select hidden" id="charSelect">
+    <div class="char-select-title">🎭 命运抽取</div>
+    <div class="char-select-sub">命运将随机决定你扮演的角色，每个角色都有独特的视角和目标</div>
+    <div class="char-draw-area">
+      <div class="char-spin-text" id="spinText">点击下方按钮抽取角色</div>
+      <div class="char-card" id="charCard">
+        <div class="char-icon" id="charIcon"></div>
+        <div class="char-name" id="charName"></div>
+        <div class="char-desc" id="charDesc"></div>
+        <div class="char-goal" id="charGoal"></div>
+        <div class="char-stats" id="charStats"></div>
+      </div>
+    </div>
+    <button class="btn-draw" id="btnDraw" onclick="drawCharacter()">随 机 抽 取</button>
+    <button class="btn-confirm hidden" id="btnConfirm" onclick="confirmCharacter()">以 此 身 份 开 始</button>
+  </div>
+
+  <!-- Game Panel -->
+  <div class="game-panel hidden" id="gamePanel">
+    <div class="game-header">
+      <span class="header-chapter" id="chapterLabel">序章</span>
+      <span class="header-char" id="charLabel"></span>
+      <div class="header-stats">
+        <div class="stat"><span class="stat-icon">🧠</span><span class="stat-label">理智</span><span class="stat-value sanity" id="sanityVal">100</span><div class="stat-bar-wrap"><div class="stat-bar sanity" id="sanityBar" style="width:100%"></div></div></div>
+        <div class="stat"><span class="stat-icon">💪</span><span class="stat-label">体力</span><span class="stat-value stamina" id="staminaVal">100</span><div class="stat-bar-wrap"><div class="stat-bar stamina" id="staminaBar" style="width:100%"></div></div></div>
+        <div class="stat"><span class="stat-icon">🔍</span><span class="stat-label">线索</span><span class="stat-value clues" id="clueVal">0</span></div>
+        <div class="stat"><span class="stat-icon">❤️</span><span class="stat-label">信任</span><span class="stat-value trust" id="trustVal">50</span></div>
+      </div>
+    </div>
+    <div class="story-area" id="storyArea"></div>
+    <div class="choices-area" id="choicesArea"></div>
+  </div>
+</div>
+
+<script>
+// ==================== GAME ENGINE ====================
+var $ = function(id) { return document.getElementById(id); };
+
+var ITEMS = {
+  talisman:{name:'护身符',icon:'🔖',desc:'一枚黄色的符纸，上面写着看不懂的符文。能在关键时刻抵御一次理智伤害。'},
+  flashlight:{name:'手电筒',icon:'🔦',desc:'小型强光手电。在黑暗区域探索时提供照明。'},
+  diary:{name:'日记残页',icon:'📜',desc:'一张泛黄的纸，上面记录着关于医学院的零碎信息。'},
+  medicine:{name:'镇定药',icon:'💊',desc:'白色小药瓶。服用后恢复20点理智。'},
+  energy:{name:'能量饮料',icon:'🥤',desc:'罐装咖啡。饮用后恢复30点体力。'},
+  cat_hair:{name:'黑猫毛发',icon:'🐾',desc:'一小撮黑色的猫毛。据说黑猫能感知超自然的存在。'},
+  key_card:{name:'门禁卡',icon:'🪪',desc:'一张旧门禁卡，似乎能打开医学院地下仓库的门。'},
+  photograph:{name:'老照片',icon:'📷',desc:'一张泛黄的老照片，上面有一个穿古装的女人站在教学楼前。'}
+};
+
+// Character definitions
+var CHARACTERS = {
+  zhangchao: {
+    id:'zhangchao', name:'张超', icon:'👨‍🎓',
+    desc:'Z大计算机系大二学生。林伟的室友，白秋的男朋友。性格冷静但好奇心重。',
+    goal:'揭开医学院的秘密，保护白秋的安全',
+    startScene:'intro',
+    stats:{sanity:100,stamina:100,clues:0,trust:50},
+    color:'#c08060'
+  },
+  linwei: {
+    id:'linwei', name:'林伟', icon:'👁️',
+    desc:'Z大医学院学生，张超的室友。天生阴气重，能看到常人看不到的东西，听到常人听不到的声音。',
+    goal:'在被超自然力量吞噬之前，找到自救的方法',
+    startScene:'linwei_intro',
+    stats:{sanity:70,stamina:90,clues:12,trust:30},
+    color:'#8090c0',
+    uniqueDesc:'【天赋：阴阳眼】你能感知到超自然的存在，但这也让你的理智更加脆弱。'
+  },
+  baiqiu: {
+    id:'baiqiu', name:'白秋', icon:'👩‍🦰',
+    desc:'Z大金融系学生，张超的女友。患有人格分裂症，另一人格能感知甚至预知超自然事件。',
+    goal:'掌控自己的双重人格，摆脱成为「活尸」的命运',
+    startScene:'baiqiu_intro',
+    stats:{sanity:60,stamina:80,clues:15,trust:60},
+    color:'#c0a0c0',
+    uniqueDesc:'【天赋：双魂感知】你可以主动切换人格来获取信息，但每次切换都会消耗理智。'
+  },
+  yicheng: {
+    id:'yicheng', name:'张一诚', icon:'🛡️',
+    desc:'Z大学生，张超的好兄弟。为人仗义，体力充沛，人脉广泛。',
+    goal:'不惜一切代价保护张超和白秋，哪怕牺牲自己',
+    startScene:'yicheng_intro',
+    stats:{sanity:90,stamina:100,clues:5,trust:70},
+    color:'#80c080',
+    uniqueDesc:'【天赋：守护之心】你可以替他人承受伤害，也能发动人脉获取帮助。'
+  }
+};
+
+var gameState = {
+  currentScene:'intro',
+  playerChar:'zhangchao',
+  sanity:100, stamina:100, clues:0, trust:50,
+  inventory:[], visitedScenes:{}, chapterNum:0, keyFlags:{}
+};
+var sanityDead = false;
+var charDrawn = false;
+
+// ==================== STATS ====================
+function updateStats() {
+  $('sanityVal').textContent = gameState.sanity;
+  $('staminaVal').textContent = gameState.stamina;
+  $('clueVal').textContent = gameState.clues;
+  $('trustVal').textContent = gameState.trust;
+  $('sanityBar').style.width = gameState.sanity + '%';
+  $('staminaBar').style.width = gameState.stamina + '%';
+  if (gameState.sanity <= 25) { $('sanityVal').style.color = '#ff4444'; $('sanityWarn').classList.add('show'); }
+  else { $('sanityVal').style.color = '#c08060'; $('sanityWarn').classList.remove('show'); }
+  if (gameState.stamina <= 25) $('staminaVal').style.color = '#ffaa44'; else $('staminaVal').style.color = '#7aaa5a';
+}
+
+function modStat(stat, amount) {
+  if (stat === 'sanity' && amount < -5 && hasItem('talisman')) {
+    removeItem('talisman');
+    addStory('🔖 护身符突然发烫，化作一道金光，挡下了那股侵蚀你理智的力量！', 'item-get');
+    amount = Math.min(0, amount + 15);
+  }
+  gameState[stat] = Math.max(0, Math.min(100, gameState[stat] + amount));
+  if (stat === 'stamina' && gameState.stamina <= 0) gameState.stamina = 0;
+  updateStats();
+  if (stat === 'sanity' && gameState.sanity <= 0 && !sanityDead) {
+    sanityDead = true; setTimeout(function(){ triggerSanityDeath(); }, 300);
+  }
+}
+
+function setChapter(name) {
+  gameState.chapterNum++;
+  var titles = ['','一','二','三','四','五','六','七','八','九'];
+  $('chapterLabel').textContent = '第' + (titles[gameState.chapterNum]||gameState.chapterNum) + '章 · ' + name;
+}
+
+// ==================== ITEMS ====================
+function hasItem(id) { return gameState.inventory.indexOf(id) !== -1; }
+function addItem(id) {
+  if (hasItem(id)) return false;
+  gameState.inventory.push(id); updateInventoryUI(); return true;
+}
+function removeItem(id) {
+  var idx = gameState.inventory.indexOf(id);
+  if (idx !== -1) { gameState.inventory.splice(idx, 1); updateInventoryUI(); return true; }
+  return false;
+}
+function updateInventoryUI() {
+  var slots = $('invSlots'), badge = $('invBadge'), toggle = $('invToggle');
+  var count = gameState.inventory.length;
+  if (count > 0) { badge.textContent = count; badge.classList.remove('hidden'); toggle.classList.add('has-items'); }
+  else { badge.classList.add('hidden'); toggle.classList.remove('has-items'); }
+  slots.innerHTML = '';
+  if (count === 0) { slots.innerHTML = '<div class="inventory-empty">空空如也</div>'; return; }
+  gameState.inventory.forEach(function(id) {
+    var item = ITEMS[id]; if (!item) return;
+    var slot = document.createElement('div');
+    slot.className = 'inventory-slot'; slot.title = item.desc;
+    slot.innerHTML = '<span class="item-icon">'+item.icon+'</span><span class="item-name">'+item.name+'</span><span class="item-use">查看</span>';
+    slot.onclick = function(e) { e.stopPropagation(); alert(item.icon+' '+item.name+'\n\n'+item.desc); };
+    slots.appendChild(slot);
+  });
+}
+function toggleInventory() { $('invPanel').classList.toggle('hidden'); }
+
+function randomDrop(sceneId) {
+  var drops = {
+    'back_to_dorm':['talisman'], 'read_forum_post':['diary'],
+    'enter_back':['cat_hair','flashlight'], 'find_du':['medicine'],
+    'stand_ground':['photograph'], 'run_from_ghost':['energy'],
+    'fight_together':['key_card'],
+    'linwei_intro':['talisman','cat_hair'],
+    'baiqiu_intro':['diary','medicine'],
+    'yicheng_intro':['energy','flashlight']
+  };
+  var possible = (drops[sceneId]||[]).filter(function(id){ return !hasItem(id); });
+  if (possible.length === 0) return;
+  if (Math.random() < 0.35) {
+    var dropId = possible[Math.floor(Math.random()*possible.length)];
+    addItem(dropId);
+    addStory('✨ 你发现了「'+ITEMS[dropId].name+'」！'+ITEMS[dropId].desc, 'item-get');
+  }
+}
+
+// ==================== JUMP SCARES ====================
+function triggerJumpScare(text, intensity) {
+  intensity = intensity || 'medium';
+  var overlay = $('jsOverlay'), jsText = $('jsText'), panel = $('gamePanel');
+  if (text) { jsText.textContent = text; jsText.classList.add('active'); setTimeout(function(){ jsText.classList.remove('active'); }, 600); }
+  overlay.classList.add('active'); setTimeout(function(){ overlay.classList.remove('active'); }, 300);
+  if (intensity === 'high') { panel.classList.add('screen-shake'); setTimeout(function(){ panel.classList.remove('screen-shake'); }, 600); var area=$('storyArea'); area.style.filter='brightness(2)'; setTimeout(function(){ area.style.filter=''; }, 200); }
+  modStat('sanity', intensity==='high'?-15:intensity==='medium'?-8:-4);
+}
+function triggerSanityDeath() {
+  clearStory(); triggerJumpScare('疯 狂', 'high');
+  setTimeout(function(){
+    addStory('你的理智彻底崩溃了。','death');
+    addStory('眼前的世界开始扭曲变形。墙壁上浮现出无数张扭曲的面孔。','death');
+    addStory('你听到无数个声音在你的脑海中尖叫、哭泣、低语——','death');
+    addDivider('终');
+    showEnding('death','理智崩溃','你的精神无法承受这一切。现实与幻觉的边界在你眼前彻底模糊。');
+  }, 800);
+}
+
+// ==================== EFFECTS ====================
+function shakeScreen() { var p=$('gamePanel'); p.classList.add('screen-shake'); setTimeout(function(){ p.classList.remove('screen-shake'); }, 600); }
+function flashScreen() { var a=$('storyArea'); a.style.filter='brightness(1.8)'; setTimeout(function(){ a.style.filter=''; }, 150); }
+
+// ==================== RENDERING ====================
+function clearStory() { $('storyArea').innerHTML = ''; }
+function addStory(text, className) {
+  var area = $('storyArea'), p = document.createElement('p');
+  p.className = 'story-text' + (className ? ' ' + className : '');
+  p.textContent = text; area.appendChild(p);
+  area.scrollTop = area.scrollHeight; return p;
+}
+function addDivider(text) {
+  var area = $('storyArea'), d = document.createElement('div');
+  d.className = 'divider'; d.textContent = text || '· · ·';
+  area.appendChild(d); area.scrollTop = area.scrollHeight;
+}
+
+function setChoices(choices) {
+  var area = $('choicesArea'); area.innerHTML = '';
+
+  // Add item-use choices conditionally
+  if (hasItem('medicine') && gameState.sanity < 80) {
+    choices.push({text:'💊 服用镇定药（恢复20理智）', next:'__use_medicine', style:'item-choice', sanity:0, stamina:0});
+  }
+  if (hasItem('energy') && gameState.stamina < 80) {
+    choices.push({text:'🥤 饮用能量饮料（恢复30体力）', next:'__use_energy', style:'item-choice', sanity:0, stamina:0});
+  }
+
+  choices.forEach(function(ch) {
+    var classes = ['choice-btn'];
+    if (ch.style) classes.push(ch.style);
+    if (ch.reqStamina && gameState.stamina < ch.reqStamina) classes.push('locked');
+    if (ch.reqItem && !hasItem(ch.reqItem)) classes.push('locked');
+    if (ch.charOnly && ch.charOnly !== gameState.playerChar) return; // Skip choices for other characters
+    var btn = document.createElement('button');
+    btn.className = classes.join(' ');
+    var label = ch.text;
+    if (ch.reqStamina && gameState.stamina < ch.reqStamina) label += ' [体力不足]';
+    if (ch.reqItem && !hasItem(ch.reqItem)) label += ' [需要'+(ITEMS[ch.reqItem]?ITEMS[ch.reqItem].name:ch.reqItem)+']';
+    btn.textContent = label;
+    btn.onclick = function() {
+      if (ch.reqStamina && gameState.stamina < ch.reqStamina) return;
+      if (ch.reqItem && !hasItem(ch.reqItem)) return;
+      if (ch.sanity) modStat('sanity', ch.sanity);
+      if (ch.stamina) modStat('stamina', ch.stamina);
+      if (ch.clues) modStat('clues', ch.clues);
+      if (ch.trust) modStat('trust', ch.trust);
+      if (ch.flag) gameState.keyFlags[ch.flag] = true;
+      if (ch.effect === 'shake') shakeScreen();
+      if (ch.effect === 'flash') flashScreen();
+      if (ch.effect === 'jumpscare') triggerJumpScare(ch.jsText||'', ch.jsIntensity||'medium');
+      if (sanityDead) return;
+      if (ch.next === '__use_medicine') { removeItem('medicine'); modStat('sanity',20); addStory('你吞下两片镇定药。一股清凉的感觉从喉咙蔓延到全身。','thought'); renderScene(gameState.currentScene); return; }
+      if (ch.next === '__use_energy') { removeItem('energy'); modStat('stamina',30); addStory('你一口气喝光了罐装咖啡。疲惫的身体重新燃起力量。','thought'); renderScene(gameState.currentScene); return; }
+      if (ch.next) { gameState.currentScene = ch.next; autoSave(); renderScene(ch.next); }
+    };
+    area.appendChild(btn);
+  });
+}
+
+// ==================== CHARACTER SYSTEM ====================
+var charKeys = ['zhangchao','linwei','baiqiu','yicheng'];
+
+function showCharSelect() {
+  $('titleScreen').classList.add('hidden');
+  $('charSelect').classList.remove('hidden');
+  charDrawn = false;
+  $('btnDraw').disabled = false;
+  $('btnConfirm').classList.add('hidden');
+  $('charCard').classList.remove('revealed');
+  $('spinText').classList.remove('hidden');
+  $('spinText').textContent = '点击下方按钮抽取角色';
+}
+
+function drawCharacter() {
+  if (charDrawn) return;
+  charDrawn = true;
+  $('btnDraw').disabled = true;
+  $('spinText').textContent = '命运之轮转动中……';
+
+  // Animate through characters
+  var count = 0, maxCount = 12;
+  var interval = setInterval(function() {
+    var tempKey = charKeys[count % 4];
+    var tempChar = CHARACTERS[tempKey];
+    updateCharCard(tempChar, false);
+    count++;
+    if (count >= maxCount) {
+      clearInterval(interval);
+      // Final random pick
+      var finalKey = charKeys[Math.floor(Math.random() * 4)];
+      gameState.playerChar = finalKey;
+      var finalChar = CHARACTERS[finalKey];
+      updateCharCard(finalChar, true);
+      $('spinText').classList.add('hidden');
+      $('btnConfirm').classList.remove('hidden');
+    }
+  }, 120);
+}
+
+function updateCharCard(charData, revealed) {
+  var card = $('charCard');
+  $('charIcon').textContent = charData.icon;
+  $('charName').textContent = charData.name;
+  $('charDesc').textContent = charData.desc;
+  $('charGoal').textContent = '🎯 目标：' + charData.goal;
+  $('charStats').innerHTML = '初始 | 理智:<span>'+charData.stats.sanity+'</span> 体力:<span>'+charData.stats.stamina+'</span> 线索:<span>'+charData.stats.clues+'</span> 信任:<span>'+charData.stats.trust+'</span>';
+  if (revealed) {
+    card.classList.add('revealed');
+    card.style.borderColor = charData.color;
+  }
+}
+
+function confirmCharacter() {
+  var charData = CHARACTERS[gameState.playerChar];
+  // Apply character stats
+  gameState.sanity = charData.stats.sanity;
+  gameState.stamina = charData.stats.stamina;
+  gameState.clues = charData.stats.clues;
+  gameState.trust = charData.stats.trust;
+  gameState.visitedScenes = {};
+  gameState.inventory = [];
+  gameState.chapterNum = 0;
+  gameState.keyFlags = {};
+  gameState.currentScene = charData.startScene;
+  sanityDead = false;
+
+  $('charSelect').classList.add('hidden');
+  $('gamePanel').classList.remove('hidden');
+  $('invToggle').classList.remove('hidden');
+  $('charLabel').textContent = '扮演：' + charData.name;
+
+  updateStats();
+  updateInventoryUI();
+  renderScene(charData.startScene);
+}
+
+// ==================== SCENE ENTRY (dedup) ====================
+function sceneEntry(sceneId) {
+  if (gameState.visitedScenes[sceneId]) {
+    // Return new text based on how many times visited
+    var visits = gameState.visitedScenes[sceneId];
+    if (visits === 1) addStory('【你之前已经经历过这段情节。时间线继续推进……】', 'thought');
+    else addStory('【这段记忆似曾相识，仿佛在一个遥远的梦里经历过。】', 'thought');
+    gameState.visitedScenes[sceneId]++;
+    return visits + 1;
+  }
+  gameState.visitedScenes[sceneId] = 1;
+  return 0; // First visit
+}
+
+// Small helper
+function isChar(c) { return gameState.playerChar === c; }
+
+// ==================== SCENES ====================
+var scenes = {};
+
+// ==================== LIN WEI INTRO ====================
+scenes['linwei_intro'] = function() {
+  clearStory(); setChapter('预兆'); sceneEntry('linwei_intro');
+  addStory('三天前。深夜。');
+  addStory('你——林伟——独自一人坐在医学院图书馆里。');
+  addStory('最近几天你总是睡不好。闭上眼就会梦到一个穿白色衣服的女人，站在教学楼的天台上，向你招手。', 'tense');
+  addStory('同学们都说你脸色很差。张超还开玩笑说你是不是考试压力太大了。但你自己清楚——你看到的东西，别人看不到。', 'thought');
+  addStory('从小你就知道自己和别人不太一样。有时候你会看到一些「不干净」的东西——老人们说这叫「阴阳眼」。');
+  if (CHARACTERS[gameState.playerChar].uniqueDesc) {
+    addStory(CHARACTERS[gameState.playerChar].uniqueDesc, 'char-unique');
+  }
+  addStory('今晚在图书馆里，你又一次听到了那个声音——一个女人在哼唱戏曲。就在窗外。', 'tense');
+  addStory('但窗外什么都没有。只有漆黑的夜色和远处教学楼的轮廓。');
+  addStory('「它」在叫你。你知道的。', 'tense');
+  modStat('sanity', -3);
+  randomDrop('linwei_intro');
+
+  setChoices([
+    {text:'相信自己的直觉，出去查看', next:'linwei_goside', sanity:-8, stamina:-5, clues:8},
+    {text:'压制恐惧，继续看书', next:'linwei_stay', sanity:5, stamina:0},
+    {text:'回宿舍叫上张超一起', next:'intro', sanity:0, stamina:-5, clues:3}
+  ]);
+};
+
+scenes['linwei_goside'] = function() {
+  clearStory(); sceneEntry('linwei_goside');
+  addStory('你推开图书馆的门，冷风扑面而来。');
+  addStory('教学楼在月光下沉默地矗立着。窗口黑洞洞的，但三楼最右边的窗户——那里有一个人影。', 'tense');
+  addStory('白色的衣服，披散的长发。她正看着你。', 'shock');
+  triggerJumpScare('她在看你', 'high');
+  addStory('你听到了她的声音——不是从耳朵听到的，而是直接在你脑海中响起：', 'tense');
+  addStory('「还来得及……离开这里……告诉他……」', 'tense');
+  addStory('你浑身颤抖。但奇怪的是，你并不觉得她要害你。她的话语中带着一种……悲伤。', 'thought');
+  modStat('sanity', -10);
+  modStat('clues', 10);
+
+  setChoices([
+    {text:'试图和她对话', next:'linwei_talk_ghost', sanity:-15, clues:15, style:'danger'},
+    {text:'记下这个警告，回去找张超', next:'intro', sanity:0, clues:8}
+  ]);
+};
+
+scenes['linwei_talk_ghost'] = function() {
+  clearStory(); sceneEntry('linwei_talk_ghost');
+  addStory('「你是谁？你要我告诉他什么？」你鼓起勇气问道。');
+  addStory('那个白衣女人的身影似乎近了一些。你能看到她的脸上带着泪痕。', 'tense');
+  addStory('「我是……守护这里的。但他们……在破坏……」', 'tense');
+  addStory('「他们？」');
+  addStory('「千绳会……他们在找我守护的东西……你的朋友……极阳之体……他们想要他……」', 'shock');
+  addStory('她的话断断续续，像是在被什么力量干扰。');
+  addStory('「三天后……图书馆……带他来……」', 'tense');
+  addStory('说完最后一句话，她的身影消失了。教学楼的灯突然全部熄灭。', 'shock');
+  modStat('sanity', -12);
+  modStat('clues', 15);
+  gameState.keyFlags.linwei_knows_truth = true;
+
+  setChoices([
+    {text:'回去找张超，把一切告诉他', next:'intro', sanity:3, clues:5, trust:10}
+  ]);
+};
+
+scenes['linwei_stay'] = function() {
+  clearStory(); sceneEntry('linwei_stay');
+  addStory('你强迫自己把注意力集中在书本上。');
+  addStory('但那些字在纸上跳动着，扭曲着，变成了一行行你无法理解的符号。', 'tense');
+  addStory('窗外的哼唱声越来越大。你捂住耳朵，但声音依然清晰——就像在你的脑子里。', 'shock');
+  addStory('你决定不能再一个人扛着了。明天就叫上张超一起来图书馆自习。', 'thought');
+  modStat('sanity', -5);
+
+  setChoices([
+    {text:'回宿舍，决定找张超帮忙', next:'intro', sanity:0, clues:3}
+  ]);
+};
+
+// ==================== BAI QIU INTRO ====================
+scenes['baiqiu_intro'] = function() {
+  clearStory(); setChapter('双魂'); sceneEntry('baiqiu_intro');
+  addStory('你——白秋——从一片混沌中醒来。');
+  addStory('你不记得自己是怎么回到宿舍的。最后清晰的记忆停留在昨天晚上，你在医学院附近散步，然后……一片空白。', 'tense');
+  addStory('这种情况越来越频繁了。每次「断片」之后，你都会发现自己身处莫名其妙的地方——有时候是医学院教学楼，有时候是图书馆后面的小树林。');
+  if (CHARACTERS[gameState.playerChar].uniqueDesc) {
+    addStory(CHARACTERS[gameState.playerChar].uniqueDesc, 'char-unique');
+  }
+  addStory('室友说昨晚你又出去了，凌晨两点才回来。但你对这一切完全没有印象。', 'tense');
+  addStory('你翻开枕头下面的日记本。上面是自己的笔迹，却写着你不记得写过的话：', 'tense');
+  addStory('「那个男人在监视我。他不是真正的医生。他要利用我——利用我的身体——来转移什么东西。我必须警告张超。医学院下面埋着的东西快醒了。」', 'shock');
+  modStat('sanity', -5);
+  modStat('clues', 5);
+  randomDrop('baiqiu_intro');
+
+  setChoices([
+    {text:'相信另一个人格的警告，去找张超', next:'baiqiu_warn_zhangchao', sanity:0, trust:10, clues:5, stamina:-5},
+    {text:'试图主动切换人格获取更多信息', next:'baiqiu_switch', sanity:-12, clues:15, style:'danger'},
+    {text:'先观察一下，不急于行动', next:'baiqiu_observe', sanity:5, clues:3}
+  ]);
+};
+
+scenes['baiqiu_warn_zhangchao'] = function() {
+  clearStory(); sceneEntry('baiqiu_warn_zhangchao');
+  addStory('你给张超发了条消息：「今晚见个面，有重要的事跟你说。」');
+  addStory('你决定把你所知道的一切都告诉他——关于医学院、关于那个穿古装的女人、关于那个自称是杜学民的心理医生。', 'thought');
+  addStory('虽然你知道这听起来很疯狂。但你的另一半人格——你叫她「守护者」——一直在试图保护张超。你必须相信她。', 'tense');
+  modStat('trust', 10);
+
+  setChoices([
+    {text:'与张超见面', next:'meet_baiqiu', sanity:0, clues:3, trust:5}
+  ]);
+};
+
+scenes['baiqiu_switch'] = function() {
+  clearStory(); sceneEntry('baiqiu_switch');
+  addStory('你闭上眼睛，尝试与内在的「守护者」沟通。', 'char-unique');
+  addStory('这是你最近才学会的能力——在保持意识的情况下，让你的另一个人格「浮上来」。', 'tense');
+  addStory('一阵剧烈的头痛袭来。你的身体开始发抖。然后——', 'shock');
+  addStory('你的意识变得模糊。当「你」再次「睁眼」时，你感到自己像是透过一层水雾在看世界。', 'tense');
+  addStory('「守护者」掌控了身体。她拿起笔，在你的日记本上飞快地写下：', 'thought');
+  addStory('「张超是极阳之体。假杜学民叫陈九，千绳会的人。5月9日地下车库举行灵魂转移仪式。必须在他完成之前阻止。守护灵是友非敌。告诉杜学民的师弟——他才是真杜学民。」', 'shock');
+  addStory('一阵眩晕后，你重新掌控了身体。头痛欲裂，但你知道了很多之前不知道的事。', 'thought');
+  modStat('sanity', -18);
+  modStat('clues', 20);
+  gameState.keyFlags.baiqiu_knows_truth = true;
+
+  setChoices([
+    {text:'带着这些信息去找张超', next:'meet_baiqiu', sanity:3, clues:5, trust:15}
+  ]);
+};
+
+scenes['baiqiu_observe'] = function() {
+  clearStory(); sceneEntry('baiqiu_observe');
+  addStory('你决定先不声张。那个自称杜学民的心理医生——下周还有一次诊疗。你打算在那个时候试探他。', 'thought');
+  addStory('但你的另一个人格似乎不太高兴。你能感觉到她一直在你意识深处躁动不安。', 'tense');
+  modStat('sanity', 3);
+  modStat('clues', 3);
+
+  setChoices([
+    {text:'等待时机，先去找张超', next:'meet_baiqiu', sanity:0, stamina:-3}
+  ]);
+};
+
+// ==================== ZHANG YICHENG INTRO ====================
+scenes['yicheng_intro'] = function() {
+  clearStory(); setChapter('噩耗'); sceneEntry('yicheng_intro');
+  addStory('第二天清晨。你——张一诚——被手机铃声吵醒。');
+  addStory('是班长打来的：「一诚，出大事了！林伟昨晚从医学院教学楼跳下来了！」');
+  addStory('你猛地坐起来。林伟？张超的室友？那个老实巴交的农村孩子？', 'shock');
+  addStory('你立刻想到了张超。昨晚他和林伟一起去医学院图书馆自习的。他现在怎么样了？', 'tense');
+  if (CHARACTERS[gameState.playerChar].uniqueDesc) {
+    addStory(CHARACTERS[gameState.playerChar].uniqueDesc, 'char-unique');
+  }
+  addStory('你从小就是个讲义气的人。张超是你最好的兄弟，这种时候你必须站在他身边。', 'thought');
+  randomDrop('yicheng_intro');
+
+  setChoices([
+    {text:'立刻去找张超', next:'yicheng_find_zhangchao', sanity:0, stamina:-8, trust:10},
+    {text:'先去打听情况，收集信息', next:'yicheng_gather_info', sanity:0, clues:8, stamina:-5},
+    {text:'发动人脉，联系学校里的关系', next:'yicheng_rally', sanity:0, clues:5, trust:10, charOnly:'yicheng'}
+  ]);
+};
+
+scenes['yicheng_find_zhangchao'] = function() {
+  clearStory(); sceneEntry('yicheng_find_zhangchao');
+  addStory('你骑上车直奔白沙2栋。张超刚从派出所做完笔录回来，脸色苍白。', 'tense');
+  addStory('「兄弟，你没事吧？」你一把抓住他的肩膀。');
+  addStory('张超摇了摇头，把昨晚的事情说了一遍。讲到监控里的绣花鞋时，他的声音都在发抖。', '');
+  addStory('你心里一沉。这件事情比你想的要复杂。', 'thought');
+
+  setChoices([
+    {text:'安慰张超，承诺陪他调查到底', next:'meet_baiqiu', sanity:0, trust:15, clues:3}
+  ]);
+};
+
+scenes['yicheng_gather_info'] = function() {
+  clearStory(); sceneEntry('yicheng_gather_info');
+  addStory('你给在学生会和保卫处的几个朋友打了电话。');
+  addStory('从他们那里你得知了几件事：');
+  addStory('1. 医学院那块地建校前确实是坟场。');
+  addStory('2. 七年前也有人在医学院教学楼跳楼——一个女生，死因至今不明。');
+  addStory('3. 学校最近在考虑拆除医学院旧教学楼，但被一个「顾问」阻止了。', 'tense');
+  addStory('你把那个顾问的名字记了下来：杜学民。', 'thought');
+  modStat('clues', 10);
+
+  setChoices([
+    {text:'带着情报去找张超', next:'meet_baiqiu', sanity:0, clues:5, trust:5}
+  ]);
+};
+
+scenes['yicheng_rally'] = function() {
+  clearStory(); sceneEntry('yicheng_rally');
+  addStory('你发动了你在学生会和社团里的关系——作为体育部长，你的人脉不是盖的。', 'char-unique');
+  addStory('几个信得过的哥们答应帮你留意医学院那边的动静。还有人帮你查到了杜学民的资料——他三个月前有一段很长的出国记录，但出入境信息似乎被修改过。', 'tense');
+  addStory('你把这份资料收好。这可能是个关键线索。', 'thought');
+  modStat('clues', 8);
+  modStat('trust', 5);
+
+  setChoices([
+    {text:'去和张超汇合', next:'meet_baiqiu', sanity:0, clues:5, trust:5, stamina:-3}
+  ]);
+};
+
+// ==================== ZHANG CHAO INTRO (Original) ====================
+scenes['intro'] = function() {
+  clearStory(); sceneEntry('intro');
+  setChapter('序章');
+  if (isChar('linwei')) {
+    addStory('（场景切换到张超的视角）');
+    addStory('三天后。你按照那个白衣女人的指示，把室友张超拉来了医学院图书馆自习。', 'thought');
+    addStory('你不知道该怎么开口说那些事。所以你先假装在看书，等待合适的时机。', 'tense');
+  } else if (isChar('baiqiu')) {
+    addStory('（场景切换到张超的视角）');
+    addStory('你和张超约在宿舍楼下见面。但在那之前，你需要先确认一下他今晚的行踪。', 'thought');
+    addStory('你给他发了消息，得知他今晚陪室友林伟去了医学院图书馆自习。', '');
+  } else if (isChar('yicheng')) {
+    addStory('（场景切换到张超的视角）');
+    addStory('你决定先跟在张超身边，确保他的安全。今晚他陪林伟去医学院图书馆自习——你总觉得医学院那地方不太对劲。', 'thought');
+  } else {
+    addStory('2008年3月初，深夜。');
+    addStory('Z大紫金港校区，图书馆的灯光在夜色中显得格外明亮。');
+    addStory('我叫张超，Z大计算机系大二学生。平时喜欢打游戏，只有考试前才会抱佛脚。刚开学不久，离考试还远，但迫于室友林伟的劝说，今晚陪他一起来医学院图书馆自习。');
+  }
+  addStory('医学院图书馆位于学校最偏僻的西南角，离宿舍区很远，来这里的人也不多。今晚馆内只有稀稀拉拉二十几个学生。');
+  if (isChar('linwei') && gameState.keyFlags.linwei_knows_truth) {
+    addStory('你知道「她」就在外面。三天前的警告言犹在耳。今晚，你必须把一切告诉张超。', 'char-unique');
+  }
+  addStory('一直埋头看书到10点，林伟突然转过头，低声问：', 'tense');
+  addStory('「你有没有听到什么声音？」', 'tense');
+  addStory('仔细听了一下。除了翻书和写字的沙沙声，一片安静。3月初的杭州还是挺冷的，图书馆里开着暖气，窗户紧闭，外面连虫鸣都没有。');
+  addStory('摇了摇头。');
+  addStory('林伟向四周看了一圈，又低下头写起字来。沉默了片刻，他又问：「你有没有听到有人在唱歌？」', 'tense');
+
+  var choices = [];
+  if (isChar('linwei')) {
+    choices = [
+      {text:'「张超，其实我有件事一直想告诉你……」', next:'listen_music', sanity:-3, stamina:-2, clues:3, charOnly:'linwei'},
+      {text:'假装什么都没发生，继续看书', next:'dismiss_sound', sanity:0, stamina:0}
+    ];
+  } else {
+    choices = [
+      {text:'仔细听听周围有没有歌声', next:'listen_music', sanity:-3, stamina:-2},
+      {text:'告诉林伟别胡思乱想，继续看书', next:'dismiss_sound', sanity:0, stamina:0},
+      {text:'提议现在就离开图书馆', next:'leave_library_early', sanity:-5, stamina:-5}
+    ];
+  }
+  setChoices(choices);
+};
+
+// ==================== SHARED SCENES (with character variants) ====================
+scenes['listen_music'] = function() {
+  clearStory(); sceneEntry('listen_music');
+  if (isChar('linwei')) {
+    addStory('「张超，那个声音……我已经听到三天了。」你决定把真相说出来。', 'char-unique');
+    addStory('张超放下笔，疑惑地看着你。「什么声音？」');
+    addStory('「一个女的在唱戏。就在教学楼那边。我三天前就看到了她——穿白色古装，站在三楼的窗户边。她告诉我——她说有人要害你。」', 'tense');
+    addStory('张超的表情从疑惑变成了担忧。「林伟，你最近是不是压力太大了？」');
+    addStory('他不相信你。你知道的。他们从来都不信。', 'thought');
+    modStat('trust', -5);
+    modStat('sanity', -5);
+  } else {
+    addStory('放下笔，屏住呼吸，仔细聆听周围的动静。');
+    addStory('图书馆里依然只有翻书声和偶尔的咳嗽声。但你注意到一个细节——林伟的脸色很不对劲，额头上渗出了细密的汗珠。');
+    addStory('「你确定你听到了？」你问。');
+    addStory('林伟用力点头。「是个女的在唱，从……教学楼那边传来的。」');
+    addStory('心沉了一下。图书馆离医学院的教学楼有三百米远，隔着停车场和绿化带。就算真有人唱歌，在这里也几乎不可能听到。');
+    addStory('但你没听到任何歌声。', 'thought');
+  }
+
+  setChoices([
+    {text:'陪林伟出去看看', next:'go_check_sound', sanity:-8, stamina:-10, clues:5},
+    {text:'觉得他在开玩笑，不理他', next:'ignore_linwei', sanity:0, stamina:0}
+  ]);
+};
+
+scenes['dismiss_sound'] = function() {
+  clearStory(); sceneEntry('dismiss_sound');
+  if (isChar('linwei')) {
+    addStory('你咽下了到嘴边的话。算了，说出来只会让张超觉得你疯了。', 'thought');
+  } else {
+    addStory('「别自己吓自己了，」拍了拍林伟的肩膀，「可能是外面有人路过哼了两句。」');
+  }
+  addStory('林伟似乎被说服了，低下头继续看书。但你注意到，他的笔一直没有动。');
+  addStory('11点，图书馆要闭馆了。自习的学生已经走得差不多，你们收拾好东西往外走。');
+  addStory('路过教学楼前的停车场时，林伟突然停住了脚步。', 'tense');
+  addStory('「你有没有听到……她又在唱了！」', 'tense');
+  if (isChar('linwei')) { addStory('这次你看得更清楚了——三楼的窗户里，那个白色的人影正看着你们。', 'shock'); triggerJumpScare('她在那', 'medium'); }
+
+  setChoices([
+    {text:'追上去拦住他', next:'chase_linwei', sanity:-5, stamina:-8, clues:3},
+    {text:'站在原地等他回来', next:'wait_for_linwei', sanity:-12, stamina:0}
+  ]);
+};
+
+scenes['leave_library_early'] = function() {
+  clearStory(); sceneEntry('leave_library_early');
+  addStory('「要不咱们先回去吧，」你合上书，「这都快11点了，也学不了多久。」');
+  addStory('林伟犹豫了一下，点了点头。你们收拾好东西，走出了图书馆。');
+  addStory('夜风很凉。你们沿着医学院后面的小路往宿舍走，路灯昏暗，树影婆娑。');
+  addStory('走到教学楼前时，林伟突然停下脚步，一动不动。', 'tense');
+  addStory('「你听到了吗？」他的声音有些颤抖。「她……她在里面唱……」', 'tense');
+  if (isChar('baiqiu')) {
+    addStory('你的另一半人格突然在意识深处尖叫起来。你感到一阵剧烈的头痛——「守护者」在警告你：这里有危险！', 'char-unique');
+    modStat('sanity', -5);
+  }
+
+  setChoices([
+    {text:'拉着他赶紧离开', next:'drag_linwei_away', sanity:2, stamina:-5},
+    {text:'陪他进去看个究竟', next:'go_check_sound', sanity:-10, stamina:-10, clues:5}
+  ]);
+};
+
+// ==================== THE FALL (shared) ====================
+scenes['go_check_sound'] = function() {
+  clearStory(); setChapter('坠楼'); sceneEntry('go_check_sound');
+  gameState.keyFlags.investigatedLin = true;
+  if (isChar('linwei')) {
+    addStory('你有一种不祥的预感。那个白衣女人的警告在你脑海中回响。但张超不相信你——你必须证明给他看。', 'char-unique');
+    addStory('你们走进教学楼。走廊很暗，你的「眼睛」却看得一清二楚——三楼的楼梯口，那个女人正站在那里。', 'tense');
+  } else {
+    addStory('你们走进了教学楼。楼里的走廊灯都已经熄灭了，只有远处路灯的微光勉强能照进来。');
+  }
+  if (hasItem('flashlight')) { addStory('你打开手电筒，光束在走廊里扫过。', 'item-get'); modStat('sanity', 3); }
+  addStory('林伟往左边走廊走去，你往右边。走到拐角的时候，林伟的脚步声似乎已经到了二楼。');
+  addStory('「林伟！你在哪？」你喊了一声。');
+  addStory('空旷的教学楼里，只有回声。林伟什么也没说。');
+  addStory('「林伟！你在哪啊？大晚上的别开这种玩笑！」又喊了一遍。');
+  addStory('还是没有回应。', 'tense');
+  addStory('心突然提到了嗓子眼。跑到走廊尽头的窗户边，往外一看——');
+  addStory('「砰！」', 'shock');
+  triggerJumpScare('砰！', 'medium');
+  if (isChar('linwei')) {
+    addStory('你看到了。你全都看到了。那个白衣女人伸出手，试图抓住掉落的身体——但她抓不住。', 'shock');
+    addStory('那不是你跳的。是你的身体，但不是你的意志。有什么东西推了你一把。', 'death');
+    addStory('你的意识开始变得模糊。在彻底失去意识之前，你听到了她的声音：', 'tense');
+    addStory('「对不起……我救不了你……」', 'tense');
+    addDivider();
+    addStory('【林伟的身体坠落在雨檐上。但他的意识——他的「灵魂」——被那个白衣女人接住了。】', 'char-unique');
+    addStory('【你将以另一种方式继续这场冒险。】', 'tense');
+    modStat('sanity', -20);
+  } else {
+    addStory('一楼外的雨檐上，趴着一个人。一滩血，旁边还有一副摔碎了的眼镜。', 'shock');
+    addStory('是林伟。', 'shock');
+  }
+  modStat('stamina', -10);
+
+  setChoices([
+    {text:'冲下楼去查看林伟的情况', next:'aftermath_police', sanity:-15, stamina:-10, clues:5, effect:'shake'}
+  ]);
+};
+
+scenes['ignore_linwei'] = function() {
+  clearStory(); setChapter('坠楼'); sceneEntry('ignore_linwei');
+  addStory('你觉得林伟是在故意吓唬你。他在外面等了五分钟。教学楼的窗户黑洞洞的。');
+  addStory('「林伟！别闹了，我要回去睡觉了！」');
+  addStory('还是没有回应。', 'tense');
+  addStory('一种不祥的预感涌上心头。跑到教学楼门口，推开门——');
+  addStory('「砰！」', 'shock');
+  triggerJumpScare('砰！', 'medium');
+  addStory('透过走廊尽头的窗户，看到外面有什么东西坠落了。', 'shock');
+  addStory('跑到外面，一楼的雨檐上，林伟趴在那里，鲜血从他的身下蔓延开来。', 'shock');
+  if (isChar('yicheng')) {
+    addStory('你握紧拳头。如果你当时在里面——如果你坚持陪他进去——也许他不用死。', 'char-unique');
+  }
+  modStat('stamina', -8);
+  setChoices([{text:'拨打120并冲过去查看', next:'aftermath_police', sanity:-18, stamina:-8, clues:5, effect:'shake'}]);
+};
+
+scenes['chase_linwei'] = function() {
+  clearStory(); setChapter('坠楼'); sceneEntry('chase_linwei');
+  gameState.keyFlags.investigatedLin = true;
+  addStory('追着林伟跑进教学楼。他跑得很快，在一楼大厅喊了好几声，他都没回应。');
+  addStory('等跑到二楼走廊的尽头，透过窗户往外看——');
+  addStory('雨檐上趴着一个人。', 'shock');
+  triggerJumpScare('啊！', 'medium');
+  addStory('林伟从三楼跳了下去。没能拦住他。', 'shock');
+  modStat('stamina', -12);
+  setChoices([{text:'报警', next:'aftermath_police', sanity:-20, stamina:-5, clues:5, effect:'shake'}]);
+};
+
+scenes['wait_for_linwei'] = function() {
+  clearStory(); setChapter('坠楼'); sceneEntry('wait_for_linwei');
+  addStory('站在停车场上，心想他一会儿就会自己出来的。');
+  addStory('三分钟过去了。五分钟过去了。', 'tense');
+  addStory('「砰——」', 'shock');
+  triggerJumpScare('砰！', 'high');
+  addStory('教学楼方向传来一声闷响。冲过去，看到林伟已经坠落在一楼雨檐上。', 'shock');
+  addStory('他就这样死了。在等待的五分钟里。', 'tense');
+  if (isChar('yicheng')) { addStory('你永远不会原谅自己这一刻的袖手旁观。','char-unique'); modStat('sanity',-10); }
+  modStat('stamina', -3);
+  setChoices([{text:'报警', next:'aftermath_police', sanity:-25, stamina:-5, effect:'shake'}]);
+};
+
+scenes['drag_linwei_away'] = function() {
+  clearStory(); setChapter('坠楼'); sceneEntry('drag_linwei_away');
+  addStory('拉住林伟的胳膊，想把他拖走。「走了走了，别自己吓自己。」');
+  addStory('但林伟甩开你的手，眼神变得异常坚定。「她就在里面，我要去看看。」');
+  addStory('他转身跑进了教学楼。追上去，但等跑到二楼——');
+  addStory('他已经从三楼跳下去了。', 'shock');
+  triggerJumpScare('砰！', 'high');
+  modStat('stamina', -12);
+  setChoices([{text:'报警', next:'aftermath_police', sanity:-22, stamina:-5, clues:3, effect:'shake'}]);
+};
+
+// ==================== AFTERMATH ====================
+scenes['aftermath_police'] = function() {
+  clearStory(); setChapter('调查'); sceneEntry('aftermath_police');
+  if (gameState.keyFlags.investigatedLin) modStat('clues', 3);
+  addStory('20分钟后，救护车和警车呼啸而至。医学院教学楼下拉起了警戒线。');
+  addStory('警察、校领导、辅导员、医生，还有一些围观的学生，聚集在了一起。');
+  addStory('林老师急匆匆地走过来：「怎么回事？」');
+  if (isChar('linwei')) {
+    addStory('（你以灵体的状态漂浮在人群上方。没有人能看到你。但你发现——那个叫张超的男生似乎感觉到了什么，他不时地抬头看向你的方向。）', 'char-unique');
+    modStat('sanity', -5);
+  }
+  addStory('把事情的经过说了一遍。讲到林伟说听到歌声的时候，林老师的脸色明显变了一下。', 'tense');
+  addStory('一位姓张的警官带你去派出所做笔录。做完笔录后，他放了一段监控录像。', 'tense');
+  addStory('画面中，林伟走到三楼中间的窗户前，站了大约半分钟，然后突然翻身跳了下去。');
+  addStory('但让人脊背发凉的是——', 'tense');
+  addStory('远处的监控画面角落里，模模糊糊出现了一双脚。穿着一双绣花鞋，裙摆遮住了脚踝。那个身影站了几秒钟，又转身消失了。', 'shock');
+  gameState.keyFlags.sawFootage = true;
+  modStat('clues', 3);
+  modStat('sanity', -5);
+
+  setChoices([
+    {text:'问警察那双脚是怎么回事', next:'ask_police_feet', sanity:-3, clues:2},
+    {text:'保持沉默，不做评论', next:'silence_police', sanity:0}
+  ]);
+};
+
+scenes['ask_police_feet'] = function() {
+  clearStory(); sceneEntry('ask_police_feet');
+  addStory('「警官，那个……监控最后出现的脚是怎么回事？」');
+  addStory('张警官的目光微微闪烁了一下，摆了摆手。「光线反射的问题，我们有经验。」');
+  addStory('「可那明明是一双绣花鞋啊！」');
+  addStory('「同学，案件结论是林伟因学业压力过大自杀身亡。这件事就到此为止。」', 'tense');
+  addStory('他话里有话。知道再说下去也没用了。', 'thought');
+  setChoices([{text:'回学校找白秋聊聊', next:'meet_baiqiu', sanity:0, stamina:-3}]);
+};
+
+scenes['silence_police'] = function() {
+  clearStory(); sceneEntry('silence_police');
+  addStory('没说什么。但那双脚——绣花鞋、裙摆——深深烙印在了脑海里。');
+  addStory('回到学校已经凌晨1点多了。宿舍楼下一片寂静。');
+  modStat('stamina', -5);
+  setChoices([{text:'回宿舍', next:'back_to_dorm', sanity:0, stamina:-2}]);
+};
+
+// ==================== BAI QIU MEETING ====================
+scenes['meet_baiqiu'] = function() {
+  clearStory(); setChapter('白秋');
+  var visits = sceneEntry('meet_baiqiu');
+  if (isChar('baiqiu')) {
+    if (visits === 0) {
+      addStory('你在宿舍楼下等到了张超。他刚从派出所回来，脸色很差。', 'char-unique');
+      addStory('「张超！」你叫住他。他回过头来，看到是你，紧绷的表情稍微放松了一些。');
+      addStory('「白秋……你怎么在这里？」');
+      addStory('「听说林伟出事了。」你走到他面前，看着他的眼睛。「我有话要跟你说。很重要的事。」');
+      addStory('张超点了点头。你知道，他相信你。一直都是。', 'thought');
+    } else {
+      addStory('你再次找到张超。这一次，你必须让他相信你说的话。', 'tense');
+    }
+  } else if (isChar('yicheng')) {
+    addStory('你找到了张超。他正要回宿舍，一个穿白色羽绒服的女孩叫住了他——那是白秋，张超的女朋友。', '');
+    addStory('你站在不远处，给他们留出空间。但你的眼睛一直没离开过他们。', 'tense');
+  } else {
+    if (visits === 0) {
+      addStory('回到宿舍楼下，正要刷卡进门，一个熟悉的声音叫住了你。');
+      addStory('「张超！」');
+      addStory('回头一看，是女朋友白秋。她穿着一件白色羽绒服，站在寒风中，脸色白得有些过分。');
+      addStory('白秋是金融系的，性格偏冷淡，平时不太喜欢热闹，也很少主动找你。');
+      addStory('「你怎么这么晚了还在这里？」');
+      addStory('白秋微微咬了咬嘴唇。「听说……林伟出事了？」');
+      addStory('点点头。「他从教学楼跳下去了。」');
+    } else {
+      addStory('再次遇到了白秋。她的脸色比上次更加苍白，眼眶似乎有些红肿。');
+      addStory('「张超，你答应过我不要去医学院的。你做到了吗？」', 'tense');
+    }
+  }
+  if (gameState.keyFlags.baiqiu_knows_truth) {
+    addStory('你把从「守护者」那里获得的信息一五一十地告诉了张超。包括陈九的真实身份、5月9日的仪式、以及医学院守护灵的存在。', 'char-unique');
+    addStory('张超听完，沉默了很长时间。然后他说：「我相信你。」', 'tense');
+    modStat('trust', 15);
+  } else {
+    addStory('白秋沉默了很久，然后说了一句让人意外的话：', 'tense');
+    addStory('「张超，你以后……不要再去医学院了。」', 'tense');
+  }
+
+  var choices = [];
+  if (gameState.keyFlags.baiqiu_knows_truth) {
+    choices = [
+      {text:'决定联手调查真相', next:'decide_investigate', sanity:-5, trust:15, clues:5, stamina:-5},
+      {text:'去找杜学民（真正的那个）', next:'find_du', sanity:3, clues:5, stamina:-8}
+    ];
+  } else {
+    choices = [
+      {text:'追问她为什么这么说', next:'question_baiqiu', sanity:-3, clues:5, trust:10},
+      {text:'答应她，不再多问', next:'agree_baiqiu', sanity:3, trust:15},
+      {text:'觉得她只是担心过度，不以为意', next:'dismiss_baiqiu', sanity:0, trust:-10}
+    ];
+  }
+  setChoices(choices);
+};
+
+scenes['back_to_dorm'] = function() {
+  clearStory(); sceneEntry('back_to_dorm');
+  addStory('回到宿舍，已经快凌晨2点了。打开门，林伟的床铺空荡荡的。');
+  addStory('想到几个小时前他还坐在对面自习，现在却……', 'tense');
+  addStory('简单洗漱了一下，躺在床上。监控里的绣花鞋，林伟跳楼前说的「有人在唱歌」——挥之不去。');
+  addStory('迷迷糊糊中，好像听到有人在你耳边说：', 'tense');
+  addStory('「你在找我吗？」', 'shock');
+  triggerJumpScare('你在找我吗？', 'high');
+  if (isChar('linwei')) {
+    addStory('那是你自己的声音——或者说，是你生前的声音。', 'char-unique');
+    addStory('你意识到，你已经不再属于生者的世界了。但你还在这里，一定有什么未竟之事。', 'tense');
+  }
+  addStory('猛地睁开眼睛。宿舍里只有你一个人。是梦？还是……', 'thought');
+  if (!hasItem('talisman') && Math.random()<0.5) {
+    addItem('talisman');
+    addStory('✨ 你在枕头下面发现了一枚黄色的护身符。你不记得它是怎么来的，但握在手里时，那股寒意似乎退散了一些。', 'item-get');
+  }
+  setChoices([{text:'第二天找白秋聊聊', next:'meet_baiqiu', sanity:-8, stamina:-3}]);
+};
+
+scenes['question_baiqiu'] = function() {
+  clearStory(); sceneEntry('question_baiqiu');
+  addStory('「为什么不能去医学院？」盯着白秋的眼睛问。');
+  addStory('白秋低下头，似乎在做激烈的思想斗争。过了很久，她才开口：');
+  addStory('「那里……不干净。」', 'tense');
+  addStory('「不干净？什么意思？」');
+  addStory('白秋摇了摇头，没有再解释。「你答应我，别去。就当是为了我。」');
+  addStory('她的眼神里有从未见过的认真和……恐惧。', 'tense');
+  setChoices([
+    {text:'认真答应她', next:'agree_baiqiu', sanity:3, trust:15, clues:3},
+    {text:'追问更多细节', next:'press_baiqiu', sanity:-8, trust:5, clues:8}
+  ]);
+};
+
+scenes['agree_baiqiu'] = function() {
+  clearStory(); sceneEntry('agree_baiqiu');
+  addStory('点了点头。「好，我答应你。」');
+  addStory('白秋似乎松了口气。送她回了宿舍，看着她消失在楼道里。');
+  addStory('但心里充满了疑问。第二天一早，打开电脑，登录学校论坛。');
+  addStory('在翻阅旧帖的时候，发现了一个标题让人浑身一激灵：', 'tense');
+  addStory('《谁在医学院看到了那个古装女人？》', 'shock');
+  gameState.keyFlags.readForum = true;
+  modStat('clues', 5);
+  setChoices([
+    {text:'点开帖子查看详情', next:'read_forum_post', sanity:-5, clues:3},
+    {text:'关掉电脑，去找张一诚聊聊', next:'find_yicheng', sanity:3}
+  ]);
+};
+
+scenes['dismiss_baiqiu'] = function() {
+  clearStory(); sceneEntry('dismiss_baiqiu');
+  addStory('「你就是想太多了，」拍了拍白秋的肩膀，「林伟是因为学业压力自杀的。」');
+  addStory('白秋看着你，欲言又止。最终她叹了口气，转身走了。', 'thought');
+  setChoices([{text:'回宿舍睡觉', next:'back_to_dorm', sanity:0, trust:-5, stamina:-2}]);
+};
+
+scenes['press_baiqiu'] = function() {
+  clearStory(); sceneEntry('press_baiqiu');
+  addStory('「白秋，你告诉我实话。你到底知道什么？」握住她的肩膀。');
+  addStory('白秋的身体微微发抖。「我说了你也不会信的。」');
+  addStory('「我信。你说。」');
+  addStory('「医学院……有一个穿着古装的女人。穿绣花鞋的。她……不是人。」', 'shock');
+  modStat('sanity', -12); modStat('clues', 8);
+  setChoices([
+    {text:'送她回去休息', next:'agree_baiqiu', sanity:3, trust:10},
+    {text:'决定自己去医学院调查真相', next:'decide_investigate', sanity:-10, trust:-5, clues:3, stamina:-5}
+  ]);
+};
+
+// ==================== INVESTIGATION ====================
+scenes['read_forum_post'] = function() {
+  clearStory(); setChapter('论坛'); sceneEntry('read_forum_post');
+  addStory('帖子是几天前发的：「昨晚10点多，骑车经过医学院后面那条小路，看到大约30米外有个女人，穿着白色的——像是古代的衣服，披头散发。那女人看到我，竟然飘了过来……我吓得拼命骑车……」', 'tense');
+  addStory('帖子下面有很多回复。不少人声称自己也见过。');
+  addStory('还有一条回复让人全身发凉：', 'tense');
+  addStory('「那个女人，是不是穿着绣花鞋？我远远见过一次，吓得魂都没了……」', 'shock');
+  randomDrop('read_forum_post');
+  setChoices([
+    {text:'继续翻看更多相关帖子', next:'read_more_posts', sanity:-8, clues:5},
+    {text:'找张一诚商量', next:'find_yicheng', sanity:3}
+  ]);
+};
+
+scenes['read_more_posts'] = function() {
+  clearStory(); sceneEntry('read_more_posts');
+  addStory('继续往下翻。关于「古装女人」的讨论，零零散散跨越了好几年。');
+  addStory('最让人在意的是一条被很快删除的回复：', 'tense');
+  addStory('「医学院那块地，建校之前是坟场。学校请了风水先生做了布局，才压住了。」', 'shock');
+  modStat('sanity', -8); modStat('clues', 5);
+  setChoices([
+    {text:'去找张一诚', next:'find_yicheng', sanity:0},
+    {text:'独自前往医学院调查', next:'decide_investigate', sanity:-10, clues:3, stamina:-8}
+  ]);
+};
+
+scenes['find_yicheng'] = function() {
+  clearStory(); setChapter('兄弟');
+  var visits = sceneEntry('find_yicheng');
+  if (isChar('yicheng')) {
+    if (visits===0) {
+      addStory('你知道现在最重要的是陪在张超身边。但你也清楚，光靠你们两个不够——你需要更多的信息和帮手。', 'char-unique');
+      addStory('你翻开手机通讯录，开始给所有能帮上忙的人发消息。', 'thought');
+    } else {
+      addStory('你再次翻看收集到的情报。每一条线索都指向同一个方向——医学院。', 'tense');
+    }
+    setChoices([
+      {text:'把情报分享给张超，一起行动', next:'yicheng_reveal', sanity:0, trust:10, clues:5},
+      {text:'独自去医学院探路', next:'decide_investigate', sanity:-5, stamina:-8, clues:8}
+    ]);
+    return;
+  }
+  if (visits===0) {
+    addStory('张一诚是班里最好的哥们。成绩好，性格开朗，是个仗义的人。');
+    addStory('找到他的时候，他已经知道了林伟的事。');
+    addStory('把所有事情都告诉了他——监控里的绣花鞋、白秋的警告、论坛上的帖子。');
+    addStory('张一诚听完，脸色变得很难看。他沉默了很久，然后说：');
+    addStory('「有件事……我一直没敢跟你说。」', 'tense');
+    addStory('「什么事？」');
+    addStory('「你知道白秋她……有精神病吗？」', 'shock');
+  } else {
+    addStory('再次找到张一诚。他看起来比上次更加忧心忡忡。', 'tense');
+  }
+  setChoices([
+    {text:'「你说什么？！」震惊地质问', next:'yicheng_reveal', sanity:-12, trust:-20, clues:5},
+    {text:'「不可能，你在开玩笑吧」', next:'yicheng_reveal', sanity:-8, trust:-10, clues:5},
+    {text:'沉默，让他继续说', next:'yicheng_reveal', sanity:-3, trust:0, clues:5}
+  ]);
+};
+
+scenes['yicheng_reveal'] = function() {
+  clearStory(); sceneEntry('yicheng_reveal');
+  if (isChar('yicheng')) {
+    addStory('你把所有信息摊开在张超面前——你收集到的关于医学院七年前坠楼案的资料、杜学民的出入境记录异常、以及风水先生当年给学校做的布局图。', 'char-unique');
+    addStory('张超看得目瞪口呆。「这些……你从哪里弄到的？」');
+    addStory('「别管我从哪弄的。重要的是——林伟不是第一个。如果我们不阻止他们，也不会是最后一个。」', 'tense');
+    modStat('trust', 10);
+  } else {
+    addStory('张一诚叹了口气：「白秋有很严重的人格分裂症。她有时候会完全变成另一个人——说话方式、思维角度、甚至记忆都不一样。」');
+    addStory('「她大一刚开学不久突然晕倒住院，就是在那个时候确诊的。她家里花了很多钱，请了一个很有名的精神科专家——叫杜学民——在帮她治疗。」');
+    addStory('「但你知道吗？她另一个人格一直在警告你不要去医学院。」', 'tense');
+    addStory('脑子里一片混乱。', 'thought');
+  }
+  setChoices([
+    {text:'去找白秋当面问清楚', next:'confront_baiqiu', sanity:-8, trust:-10, clues:3, stamina:-5},
+    {text:'先去找杜学民了解情况', next:'find_du', sanity:3, clues:10, stamina:-8},
+    {text:'决定去医学院一探究竟', next:'decide_investigate', sanity:-12, clues:3, trust:5, stamina:-8}
+  ]);
+};
+
+scenes['confront_baiqiu'] = function() {
+  clearStory(); setChapter('真相碎片'); sceneEntry('confront_baiqiu');
+  addStory('在白沙3栋楼下等到白秋出来。她一看到你的表情，似乎就明白了什么。');
+  addStory('「你知道了？」她平静地问。');
+  addStory('「你为什么不告诉我？」');
+  addStory('白秋低下头。「我怕你害怕我。怕你觉得我是个疯子。」');
+  addStory('「医学院那个古装女人——是真的。」白秋猛地抬起头。「我的另一个人格能感知到一些东西。她一直在试图保护你。张超，医学院教学楼下面，埋着东西。很可怕的东西。」', 'shock');
+  modStat('sanity', -12); modStat('clues', 10); modStat('trust', 20);
+  gameState.keyFlags.trustedBaiQiu = true;
+  setChoices([
+    {text:'决定调查医学院下面的秘密', next:'decide_investigate', sanity:-8, clues:3, trust:5, stamina:-8},
+    {text:'带白秋离开，不再涉足此事', next:'flee_with_baiqiu', sanity:8, trust:15, stamina:-5}
+  ]);
+};
+
+scenes['find_du'] = function() {
+  clearStory(); setChapter('杜学民'); sceneEntry('find_du');
+  if (gameState.keyFlags.baiqiu_knows_truth) {
+    addStory('你直接找到了真正的杜学民——那位自称的「杜学民」的师弟。他把真相都告诉了你。', 'char-unique');
+    addStory('「陈九假冒了我师兄的身份。我一直在暗中调查他——直到你的朋友白秋的另一个人格联系了我。」', 'tense');
+    modStat('clues', 10);
+  } else {
+    addStory('通过张一诚找到了杜学民。一个五十多岁的中年男人，戴着金丝眼镜。');
+    addStory('「你就是张超？」杜学民打量着你。「白秋经常提到你。」');
+    addStory('杜学民沉默了很久，摘下了眼镜。「白秋的病情确实比较特殊。她的第二人格——我们称之为「感知人格」——拥有一些常人无法解释的能力。」');
+    addStory('「医学院那边，我曾经做过一些调查。」他压低了声音。「那块地在建校之前确实是坟场。学校的建筑群全都是按风水格局布置的。为的是压住下面的东西。」', 'tense');
+    addStory('「但最近几年，有一个人——或者说一个组织——在试图破坏这个格局。他们想要「唤醒」下面的东西。」', 'shock');
+  }
+  modStat('clues', 12); modStat('sanity', -8);
+  if (!hasItem('medicine')) randomDrop('find_du');
+  setChoices([
+    {text:'追问那个组织是什么', next:'ask_about_org', sanity:-5, clues:5},
+    {text:'问他该怎么保护白秋', next:'ask_protect_baiqiu', sanity:0, trust:10}
+  ]);
+};
+
+scenes['ask_about_org'] = function() {
+  clearStory(); sceneEntry('ask_about_org');
+  addStory('「一个叫「千绳会」的组织。」杜学民的声音低得几乎听不见。「他们相信可以通过某种仪式实现「灵魂转移」——借助活尸作为媒介，把一个人的魂魄转移到另一个人身上。」');
+  addStory('「活尸？」');
+  addStory('「就是介于生与死之间的人。白秋的情况……非常接近活尸的状态。」', 'shock');
+  if (isChar('baiqiu')) {
+    addStory('听到这个词，你感到一阵彻骨的寒意。你终于明白了——为什么你总觉得自己的身体不完全是自己的。', 'char-unique');
+  }
+  addStory('杜学民点了点头。「而且，那个人可能就在你们身边。」', 'tense');
+  modStat('clues', 10); modStat('sanity', -8);
+  setChoices([
+    {text:'立即回去保护白秋', next:'decide_investigate', sanity:-5, trust:20, clues:3, stamina:-8},
+    {text:'询问千绳会更多细节', next:'ask_protect_baiqiu', sanity:0, trust:5, clues:5}
+  ]);
+};
+
+scenes['ask_protect_baiqiu'] = function() {
+  clearStory(); sceneEntry('ask_protect_baiqiu');
+  addStory('「保护她最好的方法，就是远离医学院。此外——注意她身边的人。特别是那些突然对她特别「关心」的人。」');
+  if (isChar('yicheng')) {
+    addStory('你暗暗记下了每一个可疑的名字。你在心里发誓——谁敢动张超和白秋，你就跟谁拼命。', 'char-unique');
+  }
+  setChoices([
+    {text:'回去找白秋，决定调查真相', next:'decide_investigate', sanity:0, trust:15, clues:5, stamina:-8},
+    {text:'劝白秋离开学校一段时间', next:'flee_with_baiqiu', sanity:8, trust:10, stamina:-5}
+  ]);
+};
+
+// ==================== INTO THE MED SCHOOL ====================
+scenes['decide_investigate'] = function() {
+  clearStory(); setChapter('深入医学院'); sceneEntry('decide_investigate');
+  gameState.keyFlags.wentToMedSchool = true;
+  if (isChar('linwei')) {
+    addStory('你以灵体的形态飘向医学院。这一次，你不会再被那个力量推下楼了。', 'char-unique');
+  } else if (isChar('yicheng')) {
+    addStory('「这次，我跟你一起去。」你拍着张超的肩膀。「两个人总比一个人强。」', 'char-unique');
+  }
+  addStory('下定决心要查清楚医学院的秘密。骑车趁着夜色再次前往医学院。');
+  addStory('教学楼依然一片漆黑。上次林伟坠楼的地方已经清理干净，但地上隐约还能看到一些痕迹。');
+  modStat('stamina', -5);
+
+  var choices = [
+    {text:'从正门进入教学楼', next:'enter_front_door', sanity:-8, stamina:-8, clues:5}
+  ];
+  if (hasItem('flashlight')) {
+    choices.unshift({text:'🔦 用手电筒照路，从正门进入', next:'enter_front_door', sanity:-3, stamina:-6, clues:6});
+  }
+  if (isChar('linwei')) {
+    choices.push({text:'以灵体形态直接穿墙进入', next:'enter_front_door', sanity:-5, stamina:0, clues:8, style:'char-choice', charOnly:'linwei'});
+  }
+  if (isChar('baiqiu')) {
+    choices.push({text:'切换人格，让「守护者」来感知危险', next:'enter_front_door', sanity:-10, stamina:-3, clues:10, style:'char-choice', charOnly:'baiqiu'});
+  }
+  choices.push({text:'绕到教学楼后面查看', next:'enter_back', sanity:-5, stamina:-8, clues:8});
+  setChoices(choices);
+};
+
+scenes['flee_with_baiqiu'] = function() {
+  clearStory(); setChapter('逃避'); sceneEntry('flee_with_baiqiu');
+  addStory('决定带着白秋离开这个是非之地。请了假，坐车去了她江西老家。');
+  addStory('白秋的精神状态确实好了很多。但心里清楚——有些事情，不是离开就能解决的。', 'thought');
+  addStory('一周后的一个晚上，白秋突然发起了高烧，嘴里不停地说着胡话：', 'tense');
+  addStory('「它……它跟过来了……它不会放过我的……」', 'shock');
+  modStat('sanity', -8); modStat('stamina', -5);
+  setChoices([
+    {text:'连夜带她回学校找杜学民', next:'return_school', sanity:-8, trust:5, stamina:-15},
+    {text:'守在她身边，尝试自己安抚', next:'stay_with_baiqiu', sanity:0, trust:15, stamina:-3}
+  ]);
+};
+
+scenes['return_school'] = function() {
+  clearStory(); sceneEntry('return_school');
+  addStory('连夜带着白秋赶回了学校。找到杜学民的时候，已经是凌晨3点。');
+  addStory('杜学民检查了白秋的状况，脸色很凝重。「她的另一个人格正在失控。有人在远程施加影响。」');
+  modStat('sanity', -8); modStat('clues', 10); modStat('stamina', -10);
+  setChoices([{text:'去医学院直面幕后黑手', next:'decide_investigate', sanity:-12, clues:5, trust:10, stamina:-8}]);
+};
+
+scenes['stay_with_baiqiu'] = function() {
+  clearStory(); sceneEntry('stay_with_baiqiu');
+  addStory('守了白秋一整夜。天亮的时候，她的烧退了，但整个人变得异常虚弱。');
+  addStory('「张超……」她拉着你的手，「它越来越近了……我撑不了多久了……」');
+  modStat('stamina', -5);
+  setChoices([{text:'返回学校独自面对一切', next:'decide_investigate', sanity:-12, clues:5, trust:10, stamina:-8}]);
+};
+
+scenes['enter_front_door'] = function() {
+  clearStory(); setChapter('古装女人'); sceneEntry('enter_front_door');
+  addStory('推开教学楼沉重的铁门，一股寒气扑面而来。走廊里很暗，只有应急灯发出幽幽的绿光。');
+  if (hasItem('flashlight')) { addStory('打开手电筒。光束在走廊里扫过，照出一排排紧闭的教室门。', 'item-get'); modStat('sanity', 3); }
+  else { addStory('只能用手机屏幕微弱的光照着脚下。每一步都踩在黑暗中。', 'tense'); }
+  addStory('走到二楼的时候，听到了一个声音——', 'tense');
+  addStory('有人在哼唱。是个女声，调子很老，像是什么戏曲选段。', 'shock');
+  if (isChar('linwei')) {
+    addStory('这次你看得很清楚——她就在那里。你走上前去，终于能和她对话了。', 'char-unique');
+    addStory('「谢谢你……接住了我。」你说。', 'thought');
+    addStory('她转过身来。她的脸上有泪痕——一个鬼魂在哭泣。', 'tense');
+  } else {
+    addStory('循着声音走过去。走廊尽头的窗户边，站着一个穿白色古装的女人。她背对着你，长发披散。', 'tense');
+  }
+  setChoices([
+    {text:'出声问她是谁', next:'speak_to_ghost', sanity:-12, stamina:-3, clues:5, effect:'jumpscare', jsText:'谁？', jsIntensity:'medium'},
+    {text:'悄悄后退，不要惊动她', next:'retreat_ghost', sanity:-3, stamina:0, clues:3},
+    {text:'冲上去抓住她', next:'grab_ghost', sanity:-18, stamina:-10, clues:8, effect:'jumpscare', jsText:'啊！！', jsIntensity:'high'}
+  ]);
+};
+
+scenes['enter_back'] = function() {
+  clearStory(); setChapter('后院发现'); sceneEntry('enter_back');
+  addStory('绕到教学楼后面。这里更偏僻，连路灯都没有。');
+  addStory('地上有烧过纸钱的痕迹，还有一些奇怪的符号——像是用粉笔画的某种阵法。');
+  addStory('角落里有一个被压扁的纸箱。掀开一看，里面是一只黑猫的尸体。', 'shock');
+  triggerJumpScare('喵！', 'medium');
+  addStory('猫的脖子被扭断了，眼睛还睁着。周围散落着一些黄纸符咒。', 'tense');
+  gameState.keyFlags.foundCatKiller = true;
+  modStat('clues', 10); modStat('sanity', -12);
+  randomDrop('enter_back');
+  setChoices([
+    {text:'继续深入调查', next:'enter_front_door', sanity:-5, stamina:-5, clues:3},
+    {text:'拍照留证后离开', next:'report_findings', sanity:3, stamina:-3, clues:5}
+  ]);
+};
+
+scenes['speak_to_ghost'] = function() {
+  clearStory(); sceneEntry('speak_to_ghost');
+  addStory('「你……是谁？」声音在走廊里回荡。');
+  addStory('那个女人缓缓转过身来。', 'tense');
+  addStory('看到了她的脸——惨白的皮肤，漆黑的眼瞳，嘴角微微上扬，露出一个诡异的笑容。', 'shock');
+  triggerJumpScare('找到你了', 'high');
+  addStory('她开口了，声音像是从很远的地方传来：', 'tense');
+  addStory('「你不该来这里……快走……」', 'tense');
+  addStory('话音刚落，走廊的灯突然全部熄灭。在黑暗中听到脚步声，正朝你逼近。', 'shock');
+  modStat('sanity', -8);
+  setChoices([
+    {text:'转身就跑', next:'run_from_ghost', sanity:-8, stamina:-15, clues:3, effect:'shake'},
+    {text:'站在原地大声质问', next:'stand_ground', sanity:-15, stamina:-3, clues:8, effect:'jumpscare', jsText:'出来！', jsIntensity:'high'}
+  ]);
+};
+
+scenes['retreat_ghost'] = function() {
+  clearStory(); sceneEntry('retreat_ghost');
+  addStory('屏住呼吸，一步一步往后退。那个女人似乎没有注意到你。');
+  addStory('退到楼梯口的时候，松了一口气。正要转身下楼——', 'tense');
+  addStory('那个女人突然出现在了你面前。', 'shock');
+  triggerJumpScare('啊！！', 'high');
+  addStory('她的脸离你只有几厘米。冰冷的气息扑面而来。', 'tense');
+  addStory('「我说了……快走。」', 'shock');
+  modStat('sanity', -18);
+  setChoices([{text:'拼命逃跑', next:'run_from_ghost', sanity:-8, stamina:-15, clues:3, effect:'shake'}]);
+};
+
+scenes['grab_ghost'] = function() {
+  clearStory(); sceneEntry('grab_ghost');
+  addStory('一咬牙，冲上去伸手去抓她的肩膀。');
+  addStory('但手穿过了她的身体——像是穿过了冰冷的雾气。', 'shock');
+  triggerJumpScare('啊啊啊！！', 'high');
+  addStory('那个女人回过头来，脸上的表情从平静变成了愤怒。她张开嘴，发出一声尖锐的嚎叫——');
+  addStory('整栋楼的窗户同时炸裂！', 'shock');
+  modStat('sanity', -22); modStat('stamina', -12);
+  setChoices([{text:'拼命逃跑', next:'run_from_ghost', sanity:-8, stamina:-12, clues:8, effect:'shake'}]);
+};
+
+scenes['run_from_ghost'] = function() {
+  clearStory(); sceneEntry('run_from_ghost');
+  addStory('头也不回地冲出教学楼。张一诚在门外焦急地等着。');
+  addStory('「怎么样？你看到什么了？」');
+  addStory('「先走！快走！」喘着粗气，拉着他骑车离开了医学院。');
+  addStory('回到宿舍，手还在发抖。但心里很清楚——那个古装女人，真的存在。', 'tense');
+  gameState.keyFlags.wentToMedSchool = true;
+  modStat('clues', 8); modStat('stamina', -8);
+  randomDrop('run_from_ghost');
+  setChoices([{text:'把经历告诉张一诚，商讨对策', next:'report_findings', sanity:0, stamina:-2, clues:3}]);
+};
+
+scenes['stand_ground'] = function() {
+  clearStory(); sceneEntry('stand_ground');
+  addStory('「你到底是谁！为什么要害林伟！」大声喊道。');
+  addStory('那个女人的笑容消失了。她的表情变得悲伤。');
+  addStory('「害他？」她的声音变得很轻。「我是想救他……但他不听话……他不肯走……」', 'tense');
+  addStory('「什么意思？」');
+  addStory('「下面……埋着的东西……它需要人……每过一段时间……」', 'shock');
+  addStory('她的话没有说完。走廊尽头的窗户突然打开，一阵狂风卷了进来，她的身影在风中消散了。');
+  modStat('clues', 12); modStat('sanity', -12);
+  randomDrop('stand_ground');
+  setChoices([{text:'离开教学楼找杜学民汇报', next:'report_findings', sanity:-3, stamina:-5, clues:3}]);
+};
+
+scenes['report_findings'] = function() {
+  clearStory(); setChapter('逼近真相'); sceneEntry('report_findings');
+  if (gameState.keyFlags.foundCatKiller) modStat('clues', 5);
+  addStory('把在教学楼的遭遇告诉了张一诚和杜学民。');
+  addStory('杜学民听完，面色变得更加凝重。「你说的那个女人……她不是要害人。她是在守护。她用戏曲的声音吸引阳气弱的人，试图警告他们离开。」');
+  addStory('「但林伟死了！」');
+  addStory('「那是因为，真正害死林伟的，不是她。是那个想要唤醒地下东西的人——他需要一条人命来完成仪式的一部分。」', 'shock');
+  addStory('「那个幕后的人到底是谁？」');
+  addStory('杜学民缓缓说出了一个让人毛骨悚然的名字。', 'tense');
+  setChoices([{text:'听他说出那个名字', next:'reveal_villain', sanity:-8, trust:-10, effect:'shake'}]);
+};
+
+scenes['reveal_villain'] = function() {
+  clearStory(); setChapter('幕后之人'); sceneEntry('reveal_villain');
+  addStory('「那个人——」杜学民摘下眼镜，「就是白秋的心理医生——不，应该说，是假冒的心理医生。真正的杜学民，三个月前已经死了。」', 'shock');
+  triggerJumpScare('什么？！', 'medium');
+  addStory('猛地站起来。「你说什么？！」');
+  addStory('「坐在你面前的我才是真正的杜学民的师弟。那个人——他叫陈九——假冒了我师兄的身份。他的目的，是把白秋变成一个完美的「活尸」——作为灵魂转移的媒介。」');
+  addStory('「他选中的目标……是你，张超。」', 'shock');
+  if (isChar('baiqiu')) {
+    addStory('你终于确定了——那些「断片」的时间，那些你无法控制的行动，都是陈九在操控你。', 'char-unique');
+  }
+  if (isChar('linwei')) {
+    addStory('你终于明白了。推你下楼的不是那个白衣女人——是陈九。他需要一条人命来完成仪式。', 'char-unique');
+  }
+  modStat('sanity', -18); modStat('clues', 15);
+  setChoices([
+    {text:'「他为什么要选我？！」', next:'why_me', sanity:-5, clues:3},
+    {text:'「我们得马上报警！」', next:'call_police_final', sanity:3}
+  ]);
+};
+
+scenes['why_me'] = function() {
+  clearStory(); sceneEntry('why_me');
+  addStory('杜学民解释道：「你的八字极阳——这在风水中是万中无一的命格。那个人的灵魂已经快要消散了，他需要一具阳气充足的年轻身体来承载。」');
+  addStory('「而林伟的死，以及医学院下面的东西，都是他布下的局——为的就是一步步削弱你的精神防线。」', 'tense');
+  addStory('回想起这段时间发生的一切——林伟的死、监控里的脚、白秋的警告、论坛上的帖子……一切都是设计好的。', 'thought');
+  setChoices([
+    {text:'制定计划反击幕后黑手', next:'plan_counterattack', sanity:-5, clues:5, stamina:-5},
+    {text:'带着白秋远走高飞', next:'final_flee', sanity:3, trust:10, stamina:-5}
+  ]);
+};
+
+scenes['call_police_final'] = function() {
+  clearStory(); sceneEntry('call_police_final');
+  addStory('拿出手机要报警，杜学民按住了手。');
+  addStory('「没用的。我们没有证据。而且千绳会的势力比你想象的要大——报警只会打草惊蛇。」');
+  setChoices([
+    {text:'设局引蛇出洞', next:'plan_counterattack', sanity:-5, clues:5, stamina:-5},
+    {text:'带着白秋离开', next:'final_flee', sanity:3, trust:10, stamina:-5}
+  ]);
+};
+
+// ==================== FINAL CONFRONTATION ====================
+scenes['plan_counterattack'] = function() {
+  clearStory(); setChapter('绝地反击'); sceneEntry('plan_counterattack');
+  gameState.keyFlags.confrontedAntag = true;
+  if (isChar('yicheng')) {
+    addStory('「这次我来打头阵。」你按住张超的肩膀。「你留在后面，等我的信号。」', 'char-unique');
+    addStory('张超想反驳，但看到你坚决的眼神，他没再说什么。', 'tense');
+  }
+  addStory('杜学民制定了一个计划。5月9日——阴阳之气最盛的日子——陈九必定会在医学院的地下车库进行最后的仪式。');
+  addStory('「我们必须在他完成仪式之前阻止他。」', 'tense');
+  addStory('5月9日晚上。独自走向医学院。夜风很冷，路灯把影子拉得很长。');
+  addStory('地下车库里，陈九已经在等着了。他的身边摆着黄纸、红烛、香炉。白秋被绑在一旁的椅子上，昏迷不醒。', 'shock');
+  modStat('stamina', -10);
+  var choices = [
+    {text:'冲进去救白秋', next:'final_confrontation', sanity:-8, trust:10, stamina:-15, effect:'shake'},
+    {text:'先和他对话拖延时间', next:'talk_to_villain', sanity:0, clues:5}
+  ];
+  if (isChar('yicheng')) {
+    choices.unshift({text:'🛡️ 让张超在后面等着，你先进去', next:'final_confrontation', sanity:0, trust:15, stamina:-20, style:'char-choice', charOnly:'yicheng'});
+  }
+  if (isChar('linwei')) {
+    choices.unshift({text:'👁️ 以灵体形态进入，观察阵法的弱点', next:'talk_to_villain', sanity:-5, clues:10, stamina:0, style:'char-choice', charOnly:'linwei'});
+  }
+  if (hasItem('key_card')) {
+    choices.push({text:'🪪 用门禁卡从侧门潜入', next:'final_confrontation', sanity:3, trust:15, stamina:-5, clues:5});
+  }
+  setChoices(choices);
+};
+
+scenes['final_flee'] = function() {
+  clearStory(); setChapter('逃离'); sceneEntry('final_flee');
+  addStory('决定带着白秋离开。连夜坐上了去南方的火车。');
+  addStory('火车上，白秋靠在肩膀上睡着了。窗外的夜色深邃而漫长。');
+  addStory('但你知道——那个人不会放过你们。只要白秋还是「活尸」，就永远没有真正的安全。', 'thought');
+  modStat('stamina', -8);
+  setChoices([{text:'继续前行', next:'ending_escape'}]);
+};
+
+scenes['talk_to_villain'] = function() {
+  clearStory(); sceneEntry('talk_to_villain');
+  if (isChar('linwei')) {
+    addStory('你飘进地下车库，绕到阵法后面。陈九看不到你——但他似乎感应到了什么，不安地四处张望。', 'char-unique');
+    addStory('阵法的核心是一块黑色的石头——上面刻着密密麻麻的符文。你认出那是用来「锚定」灵魂的。', 'tense');
+  }
+  addStory('「你终于来了。」陈九转过身来。');
+  addStory('「为什么选我？」');
+  addStory('他笑了。「因为你的八字。极阳之体，万里挑一。我从三年前就开始物色。」');
+  addStory('「林伟是你杀的？」');
+  addStory('「是他自己跳下去的。」他耸了耸肩。「我只是利用了一些暗示。那个古装女人——她的歌声会吸引阳气弱的人。林伟听到了，你不受影响。」', 'tense');
+  addStory('「黑猫能看到不干净的东西。杀了几只，那些东西就更敢靠近你们了。」', 'shock');
+  modStat('sanity', -8);
+  setChoices([
+    {text:'发出信号让埋伏的人行动', next:'final_confrontation', sanity:-8, clues:5, stamina:-10, effect:'shake'},
+    {text:'试图和他谈判', next:'negotiate', sanity:-5, trust:5}
+  ]);
+};
+
+scenes['negotiate'] = function() {
+  clearStory(); sceneEntry('negotiate');
+  addStory('「放了她。你要的是我，对吧？我自愿配合你。只要你放了她。」');
+  addStory('陈九眯起眼睛。「你很爱她。」');
+  addStory('「是。」');
+  addStory('他沉默了一会儿，然后笑了。「好啊。仪式本来也需要你自愿才能完成。你走上台来。」', 'tense');
+  modStat('trust', 20);
+  setChoices([
+    {text:'走上祭台', next:'final_confrontation', sanity:-12, trust:15, stamina:-5, effect:'shake'},
+    {text:'趁他不备扑向白秋', next:'final_confrontation', sanity:-8, trust:10, stamina:-12, effect:'shake'}
+  ]);
+};
+
+scenes['final_confrontation'] = function() {
+  clearStory(); setChapter('终局'); sceneEntry('final_confrontation');
+  addStory('就在陈九举起法器、念动咒语的那一刻——');
+  if (isChar('yicheng')) {
+    addStory('你第一个冲了出去！直接撞向陈九，把他连人带法器撞翻在地。', 'char-unique');
+    addStory('「想动我兄弟？先过我这关！」', 'tense');
+  } else if (isChar('linwei')) {
+    addStory('你凝聚了所有的灵力，向阵法核心冲去。那块黑色石头在你的冲击下裂开了一道缝隙。', 'char-unique');
+    addStory('陈九惊恐地发现——阵法正在崩溃。', 'shock');
+  } else {
+    addStory('张一诚突然从暗处冲了出来！他一把推开陈九，挡在了你和白秋的前面。', 'tense');
+  }
+  addStory('「兄弟，快带白秋走！」', 'tense');
+  if (!isChar('yicheng') && !isChar('linwei')) {
+    addStory('陈九从怀里掏出了一把刀。', 'shock');
+    triggerJumpScare('小心！', 'high');
+  }
+  modStat('sanity', -5);
+
+  var choices = [
+    {text:'扑上去一起对付他', next:'fight_together', sanity:-8, trust:10, clues:5, stamina:-20},
+    {text:'先解开白秋的绳子', next:'free_baiqiu_first', sanity:0, trust:15, stamina:-10},
+    {text:'试图说服他放下刀', next:'talk_down', sanity:-5, trust:5}
+  ];
+  if (isChar('yicheng')) {
+    choices.unshift({text:'🛡️ 挡在张超前面，让陈九冲你来', next:'fight_together', sanity:-5, trust:20, stamina:-15, style:'char-choice', charOnly:'yicheng'});
+  }
+  setChoices(choices);
+};
+
+scenes['fight_together'] = function() {
+  clearStory(); sceneEntry('fight_together');
+  if (isChar('yicheng')) {
+    addStory('你和陈九扭打在一起。他的力气出奇的大——但论打架，你从没怕过谁。', 'char-unique');
+    addStory('一拳揍在他脸上。陈九踉跄着后退，撞翻了香炉。', 'tense');
+  } else if (isChar('linwei')) {
+    addStory('你集中所有的灵力，向陈九发出最后的一击。他看不到你，但他感受到了——一阵彻骨的寒意贯穿了他的全身。', 'char-unique');
+    addStory('他的动作慢了。就在这个间隙——', 'tense');
+  }
+  addStory('杜学民带着警察冲了进来。', 'tense');
+  addStory('「不许动！」');
+  addStory('陈九被制服在地上，嘴里还在喊：「你们破坏了我的仪式！下面的东西……它迟早会出来的！」', 'shock');
+  gameState.keyFlags.savedZhangYicheng = true;
+  modStat('sanity', -5); modStat('clues', 10); modStat('stamina', -12);
+  randomDrop('fight_together');
+  setChoices([{text:'去看白秋的情况', next:'ending_good', sanity:8, trust:20}]);
+};
+
+scenes['free_baiqiu_first'] = function() {
+  clearStory(); sceneEntry('free_baiqiu_first');
+  addStory('趁张一诚和陈九缠斗的时候，冲过去解开了白秋的绳子。');
+  addStory('白秋睁开眼睛，看到是你，眼泪一下子涌了出来。');
+  addStory('「张超……小心！」');
+  addStory('回过头，看到陈九已经把刀刺向了张一诚——', 'shock');
+  triggerJumpScare('一诚！！', 'high');
+  if (isChar('yicheng')) {
+    addStory('刀刺进了你的身体。但你没有倒下——你挡在了张超和白秋的前面。', 'char-unique');
+    addStory('「兄弟……你们走吧……我不欠你们了……」', 'tense');
+  }
+  addStory('鲜血染红了张一诚的衣服。他倒在地上，冲你笑了笑。', 'tense');
+  addStory('「兄弟……我不欠你的了……」', 'tense');
+  modStat('sanity', -22); modStat('trust', 15); modStat('stamina', -8);
+  setChoices([{text:'冲向陈九', next:'ending_sacrifice', sanity:-8}]);
+};
+
+scenes['talk_down'] = function() {
+  clearStory(); sceneEntry('talk_down');
+  addStory('「等等！」举起双手。「你想过没有——就算你成功了，占据了这具身体——这真的是你想要的人生吗？」');
+  addStory('陈九愣住了。', 'tense');
+  addStory('「你已经活了很久了，对吗？累了。你的灵魂撑了这么多年，早就该休息了。放下吧。」');
+  addStory('陈九的手在颤抖。他看着自己的手——布满皱纹和老年斑。', 'tense');
+  addStory('良久，他松开了刀。刀掉在地上，发出清脆的响声。');
+  addStory('「我……确实累了。」', 'tense');
+  if (isChar('baiqiu')) {
+    addStory('你感觉到——「守护者」在微笑。这是她一直期待的结局。不是杀戮，而是救赎。', 'char-unique');
+  }
+  modStat('sanity', 5); modStat('clues', 10); modStat('stamina', -3);
+  setChoices([{text:'扶起他，等待警察到来', next:'ending_mercy', sanity:8, trust:10}]);
+};
+
+// ==================== ENDINGS ====================
+scenes['ending_good'] = function() {
+  clearStory(); setChapter('结局');
+  addStory('——— 结局一：拨云见日 ———'); addDivider();
+  addStory('陈九被警方带走。千绳会在Z大的势力被连根拔起。');
+  addStory('白秋在真正的专家治疗下，人格分裂的症状逐渐好转。');
+  addStory('医学院下面的东西——只要风水格局不被破坏，它就会继续沉睡。');
+  if (isChar('linwei')) { addStory('你——林伟的灵魂——终于可以安息了。那个白衣女人在月光下向你伸出手。「谢谢你。」她说。你微笑着，牵住了她的手。', 'char-unique'); }
+  if (isChar('yicheng')) { addStory('你身上的伤疤成了勋章。每次看到它们，你都会想起那个夜晚——以及你为朋友所做的一切。你不后悔。', 'char-unique'); }
+  addStory('那个穿古装的女人——医学院的守护灵——后来再也没人见过她。但据说，在月光特别好的夜晚，有人还能听到她在轻轻哼着那首戏曲。', 'tense');
+  addDivider('终');
+  showEnding('good','拨云见日','你成功阻止了陈九的阴谋，保护了白秋，揭开了医学院的秘密。');
+};
+
+scenes['ending_sacrifice'] = function() {
+  clearStory(); setChapter('结局');
+  addStory('——— 结局二：血色兄弟 ———'); addDivider();
+  addStory('杜学民和警察冲进来制服了陈九。但张一诚——');
+  addStory('他被刺中了要害。送到医院的时候，已经来不及了。');
+  addStory('他最后的遗言是：「替我照顾好白秋。她是个好女孩。」', 'tense');
+  if (isChar('yicheng')) { addStory('你闭上眼睛。你不后悔。这就是你想要守护的——你最好的兄弟，和他心爱的女孩。', 'char-unique'); }
+  addStory('葬礼那天，天上下着小雨。站在张一诚的墓前，久久不愿离去。');
+  addStory('从那以后，每年清明都会去看他。带着两瓶酒，坐在墓前，说一说话。');
+  addStory('就像他从没离开过。', 'tense');
+  addDivider('终');
+  showEnding('bad','血色兄弟','张一诚为了救你和白秋，牺牲了自己的生命。');
+};
+
+scenes['ending_mercy'] = function() {
+  clearStory(); setChapter('结局');
+  addStory('——— 结局三：一念慈悲 ———'); addDivider();
+  addStory('陈九被带走的时候，回头看了你一眼。他的眼神里有解脱，也有一丝感激。');
+  addStory('后来才知道，陈九出生在一个世代研究「灵魂转移」的家族。他从小就被教育，自己的使命是延续家族的生命。');
+  addStory('在监狱里，他托杜学民带给你一句话：', 'tense');
+  addStory('「谢谢。」', 'tense');
+  addStory('白秋的病情慢慢好转。毕业后离开了Z大，去了另一座城市生活。');
+  addStory('有些战斗，不是在刀光剑影中赢的，而是在一念之间。', 'thought');
+  addDivider('终');
+  showEnding('true','一念慈悲','你用善意化解了一场血腥冲突。');
+};
+
+scenes['ending_escape'] = function() {
+  clearStory(); setChapter('结局');
+  addStory('——— 结局四：远走高飞 ———'); addDivider();
+  addStory('你们去了南方的一个小镇。远离了Z大，远离了医学院，远离了那些纷争。');
+  addStory('白秋的病情虽然没有痊愈，但在平静的生活中，她的状态越来越稳定。');
+  addStory('只是偶尔——在深夜醒来的时候——会想起那些未解之谜。', 'tense');
+  addStory('这些问题，也许永远不会有答案。但至少，你们还活着，还在彼此身边。', 'thought');
+  addDivider('终');
+  showEnding('true','远走高飞','你选择了一条远离危险的道路，和所爱之人活了下来。');
+};
+
+scenes['ending_nightmare'] = function() {
+  clearStory(); setChapter('结局');
+  addStory('——— 结局五：无尽噩梦 ———'); addDivider();
+  addStory('醒来的时候，发现自己躺在一张白色的床上。');
+  addStory('白色的房间。白色的天花板。白色的束缚带绑住了手脚。', 'tense');
+  addStory('杜学民走了进来。他看着你，目光中带着怜悯。');
+  addStory('「我儿子的病情……又发作了。」他对门外的人说。', 'shock');
+  addStory('想喊——不是的！那些事情都是真的！');
+  addStory('但杜学民只是摇了摇头，轻轻关上了门。', 'tense');
+  addStory('「2008年5月9日晚上，是白秋服药自杀了。我儿子因为打击太大，精神病复发……」', 'shock');
+  addStory('在彻底失去意识之前，听到杜学民在门外轻轻地说：', 'tense');
+  addStory('「对不起，张超。但只有这样，才能保住你的命。」', 'shock');
+  addDivider('终');
+  showEnding('bad','无尽噩梦','你被困在了精神病院里。真相被永远封存。');
+};
+
+// Character-specific bonus ending
+scenes['ending_linwei_special'] = function() {
+  clearStory(); setChapter('结局');
+  addStory('——— 隐藏结局：阴阳两界 ———'); addDivider();
+  addStory('你——林伟——没有死。或者说，你没有完全死去。');
+  addStory('那个白衣女人——她叫苏婉，民国时期的戏曲演员——用她的力量保留了你的意识。', 'char-unique');
+  addStory('「你可以选择。」她对你说，「回到那个世界去，以灵体的身份——做我的助手，守护这片土地。或者，去你应该去的地方。」');
+  addStory('你选择了留下。', 'tense');
+  addStory('从那以后，Z大医学院多了一对守护者。学生们偶尔会在夜里听到两个声音在轻轻哼唱戏曲——一男一女。', 'tense');
+  addStory('当有人问起时，学长学姐们会笑着说：「那是医学院的守护神。代代相传的。」', 'thought');
+  addDivider('终');
+  showEnding('true','阴阳两界','林伟的灵魂与守护灵苏婉一起，永远守护着医学院。两个孤独的灵魂终于找到了彼此。');
+};
+
+// ==================== ENDING DISPLAY ====================
+function showEnding(type, title, description) {
+  var area = $('storyArea'); $('choicesArea').innerHTML = ''; autoSave();
+  var endingDiv = document.createElement('div'); endingDiv.className = 'ending-screen';
+  var titleEl = document.createElement('div'); titleEl.className = 'ending-title ' + type;
+  titleEl.textContent = title; endingDiv.appendChild(titleEl);
+  var descEl = document.createElement('div'); descEl.className = 'ending-desc';
+  descEl.textContent = description; endingDiv.appendChild(descEl);
+  var charData = CHARACTERS[gameState.playerChar];
+  var statsDiv = document.createElement('div'); statsDiv.className = 'ending-stats';
+  statsDiv.innerHTML = '扮演：<span class="ending-stat-val">'+charData.name+'</span> | 剩余理智 <span class="ending-stat-val">'+gameState.sanity+'</span> | 体力 <span class="ending-stat-val">'+gameState.stamina+'</span> | 线索 <span class="ending-stat-val">'+gameState.clues+'</span>';
+  endingDiv.appendChild(statsDiv);
+  var endingsFound = [];
+  try { endingsFound = JSON.parse(localStorage.getItem('zheda_endings')||'[]'); } catch(e) {}
+  if (endingsFound.indexOf(title)===-1) { endingsFound.push(title); localStorage.setItem('zheda_endings',JSON.stringify(endingsFound)); }
+  if (endingsFound.length>0) {
+    var endDiv = document.createElement('div'); endDiv.style.cssText = 'color:var(--text-dim);font-size:0.7em;margin-bottom:20px;letter-spacing:0.1em;';
+    endDiv.textContent = '已解锁结局: '+endingsFound.join(' / '); endingDiv.appendChild(endDiv);
+  }
+  var restartBtn = document.createElement('button'); restartBtn.className = 'btn-restart';
+  restartBtn.textContent = '重 新 开 始'; restartBtn.onclick = function(){ resetGame(); showCharSelect(); };
+  endingDiv.appendChild(restartBtn);
+  area.appendChild(endingDiv); area.scrollTop = area.scrollHeight;
+  $('chapterLabel').textContent = '结局';
+};
+
+// ==================== GAME FLOW ====================
+function renderScene(sceneId) {
+  try {
+    if (sanityDead) return;
+    if (scenes[sceneId]) { scenes[sceneId](); }
+    else {
+      // Check for character-specific special ending
+      if (sceneId === 'ending_linwei_special' && isChar('linwei')) { scenes['ending_linwei_special'](); return; }
+      var endId = 'ending_escape';
+      if (gameState.sanity <= 20 && gameState.clues >= 15) endId = 'ending_nightmare';
+      else if (gameState.trust >= 70 && gameState.sanity >= 30) endId = 'ending_good';
+      if (scenes[endId]) scenes[endId](); else scenes['ending_escape']();
+    }
+    updateStats();
+    if (gameState.stamina <= 20 && gameState.stamina > 0) addStory('⚠ 你感到极度疲惫，脚步越来越沉重。', 'tense');
+  } catch(e) {
+    console.error('Scene error:', e);
+    clearStory(); addStory('游戏出现了错误，请重新开始。', 'shock');
+    setChoices([{text:'重新开始', next:'intro', sanity:0, stamina:0}]);
+    resetGameState();
+  }
+}
+
+function startGame() {
+  $('titleScreen').classList.add('hidden');
+  $('gamePanel').classList.remove('hidden');
+  $('invToggle').classList.remove('hidden');
+  resetGameState();
+  updateStats(); updateInventoryUI();
+  renderScene(gameState.currentScene);
+}
+
+function resetGameState() {
+  gameState.sanity = 100; gameState.stamina = 100; gameState.clues = 0; gameState.trust = 50;
+  gameState.inventory = []; gameState.visitedScenes = {}; gameState.chapterNum = 0;
+  gameState.keyFlags = {}; gameState.currentScene = 'intro'; sanityDead = false;
+}
+
+function resetGame() {
+  $('gamePanel').classList.add('hidden'); $('charSelect').classList.add('hidden');
+  $('titleScreen').classList.remove('hidden'); $('invToggle').classList.add('hidden');
+  $('invPanel').classList.add('hidden'); $('storyArea').innerHTML = '';
+  $('choicesArea').innerHTML = ''; $('sanityWarn').classList.remove('show');
+  resetGameState(); updateStats(); updateInventoryUI(); charDrawn = false;
+}
+
+function autoSave() {
+  try {
+    localStorage.setItem('zheda_horror_save', JSON.stringify(gameState));
+    var i = $('saveIndicator'); i.classList.add('show');
+    setTimeout(function(){ i.classList.remove('show'); }, 2000);
+  } catch(e) {}
+}
+
+// ==================== INIT ====================
+(function init() {
+  var pContainer = $('particles');
+  for (var i = 0; i < 25; i++) {
+    var p = document.createElement('div'); p.className = 'particle';
+    var size = Math.random()*3+1;
+    p.style.cssText = 'width:'+size+'px;height:'+size+'px;left:'+Math.random()*100+'%;animation-duration:'+(Math.random()*15+10)+'s;animation-delay:'+(Math.random()*15)+'s;';
+    pContainer.appendChild(p);
+  }
+  try {
+    var saved = localStorage.getItem('zheda_horror_save');
+    if (saved) {
+      var data = JSON.parse(saved);
+      if (data.currentScene && data.currentScene!=='intro' && data.chapterNum>0 && scenes[data.currentScene]) {
+        var startBtn = $('btnStart');
+        if (startBtn && startBtn.parentNode) {
+          var continueBtn = document.createElement('button');
+          continueBtn.className = 'btn-start';
+          continueBtn.style.cssText = 'margin-top:12px;border-color:var(--gold);color:var(--gold);';
+          continueBtn.textContent = '继 续 游 戏';
+          continueBtn.onclick = function() {
+            Object.assign(gameState, data);
+            gameState.visitedScenes = gameState.visitedScenes || {};
+            gameState.inventory = gameState.inventory || [];
+            gameState.keyFlags = gameState.keyFlags || {};
+            $('titleScreen').classList.add('hidden');
+            $('gamePanel').classList.remove('hidden');
+            $('invToggle').classList.remove('hidden');
+            var cd = CHARACTERS[gameState.playerChar] || CHARACTERS['zhangchao'];
+            $('charLabel').textContent = '扮演：' + cd.name;
+            updateStats(); updateInventoryUI();
+            renderScene(gameState.currentScene);
+          };
+          startBtn.parentNode.insertBefore(continueBtn, startBtn.nextSibling);
+        }
+      }
+    }
+  } catch(e) { localStorage.removeItem('zheda_horror_save'); }
+})();
+
+document.addEventListener('keydown', function(e) {
+  if (e.key==='i' && !e.ctrlKey && !e.metaKey) { e.preventDefault(); toggleInventory(); }
+  if (e.key==='r' && e.ctrlKey && !e.shiftKey) { e.preventDefault(); if (confirm('确定要重新开始吗？')) { resetGame(); showCharSelect(); } }
+});
+
+console.log('%c浙大夜惊魂 %c恐怖文字冒险 v3.0','font-size:20px;color:#c0392b;','font-size:14px;color:#8a7a5a;');
+console.log('%c4角色 | 道具系统 | 理智管理 | 角色专属剧情','font-size:11px;color:#6b6358;');
+</script>
+</body>
+</html>

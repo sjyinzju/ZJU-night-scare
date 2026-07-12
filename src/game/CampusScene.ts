@@ -234,6 +234,9 @@ export class CampusScene extends Phaser.Scene {
 
   create() {
     this.sceneReady = true;
+    // A rebuilt 2.5D scene must resume the session's authored location,
+    // rather than its old hard-coded medical-college spawn.
+    this.playerIso = { ...getStore().playerIso };
     this.cameras.main.setBackgroundColor("#0b1110");
     this.physics.world.setBounds(WORLD_BOUNDS.x, WORLD_BOUNDS.y, WORLD_BOUNDS.width, WORLD_BOUNDS.height);
     this.drawGround();
@@ -283,14 +286,12 @@ export class CampusScene extends Phaser.Scene {
     window.addEventListener("zju-horror-effect", this.handleHorrorEffect as EventListener);
     window.addEventListener("zju-horror-interior-state", this.handleInteriorState as EventListener);
     window.addEventListener("zju-horror-player-run-start", this.handlePlayerRunStart as EventListener);
-    window.addEventListener("zju-horror-story-enter-building", this.handleStoryEnterBuilding as EventListener);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.sceneReady = false;
       window.removeEventListener("zju-horror-map-state", this.handleMapState as EventListener);
       window.removeEventListener("zju-horror-effect", this.handleHorrorEffect as EventListener);
       window.removeEventListener("zju-horror-interior-state", this.handleInteriorState as EventListener);
       window.removeEventListener("zju-horror-player-run-start", this.handlePlayerRunStart as EventListener);
-      window.removeEventListener("zju-horror-story-enter-building", this.handleStoryEnterBuilding as EventListener);
     });
 
     this.emitHud("", "沿红色虚线路线前进，绕开红鬼。");
@@ -2735,7 +2736,7 @@ export class CampusScene extends Phaser.Scene {
       // 清除建筑靠近状态
       if (this.nearBuildingId !== null) {
         this.nearBuildingId = null;
-        window.dispatchEvent(new CustomEvent("zju-horror-near-building", { detail: { building: null } }));
+        useGameStore.getState().setNearBuilding(null);
       }
       return;
     }
@@ -2787,22 +2788,25 @@ export class CampusScene extends Phaser.Scene {
       return;
     }
 
-    window.dispatchEvent(
-      new CustomEvent("zju-horror-building-transition", {
-        detail: { building: interaction.building },
-      }),
-    );
-    this.time.delayedCall(320, () => {
-      window.dispatchEvent(
-        new CustomEvent("zju-horror-enter-building", {
-          detail: { building: interaction.building, storyMode: interaction.storyMode },
-        }),
-      );
-    });
+    // The store is authoritative.  This must be synchronous and idempotent:
+    // a delayed browser event could arrive while a story modal was still
+    // marked open, which was the source of the "enter twice" regression.
+    useGameStore.getState().openInterior(interaction.building);
   }
 
   /** 非剧情目标的建筑靠近检测：仅对当前剧情热点对应的建筑显示按钮/E键（严格按剧情顺序）。 */
   private updateEnterableProximityFallback() {
+    const targetHotspot = storyHotspots.find((hotspot) => hotspot.id === this.guideHotspotId);
+    // Dormitory and medical-college beats begin outdoors.  E/button entry
+    // here used to bypass that modal and mount an interior without an active
+    // trigger, forcing the player to leave and enter a second time.
+    if (targetHotspot?.mode === "outdoor-to-indoor") {
+      if (this.nearBuildingId !== null) {
+        this.nearBuildingId = null;
+        useGameStore.getState().setNearBuilding(null);
+      }
+      return;
+    }
     const targetBuildingIds = hotspotBuildingMap[this.guideHotspotId] ?? [];
 
     let near: CampusBuilding | null = null;
@@ -2822,20 +2826,12 @@ export class CampusScene extends Phaser.Scene {
     const nextId = near?.id ?? null;
     if (nextId !== this.nearBuildingId) {
       this.nearBuildingId = nextId;
-      window.dispatchEvent(
-        new CustomEvent("zju-horror-near-building", {
-          detail: { building: near ? { id: near.id, name: near.name, zone: near.zone } : null },
-        }),
-      );
+      useGameStore.getState().setNearBuilding(near ? { id: near.id, name: near.name, zone: near.zone } : null);
     }
 
     // E 键进入：仅对当前剧情热点对应的建筑生效（与按钮一致）
     if (near && this.keys && Phaser.Input.Keyboard.JustDown(this.keys.e)) {
-      window.dispatchEvent(
-        new CustomEvent("zju-horror-enter-building", {
-          detail: { building: { id: near.id, name: near.name, zone: near.zone } },
-        }),
-      );
+      useGameStore.getState().openInterior({ id: near.id, name: near.name, zone: near.zone });
     }
   }
 
@@ -2948,6 +2944,7 @@ export class CampusScene extends Phaser.Scene {
     if (time - this.lastMiniMapAt < 80) return;
     this.lastMiniMapAt = time;
     const active = Boolean(this.ghost && !this.dead && this.ghost.container.visible);
+    useGameStore.getState().setPlayerIso({ ...this.playerIso });
     useGameStore.getState().setMiniMap({
       player: { ...this.playerIso },
       ghost: active && this.ghost ? { ...this.ghost.iso } : undefined,
@@ -2978,13 +2975,6 @@ export class CampusScene extends Phaser.Scene {
     if (!this.sceneReady || this.dead) return;
     this.storyOpen = false;
     this.scheduleGhostRespawn();
-  };
-
-  private handleStoryEnterBuilding = (event: Event) => {
-    if (!this.sceneReady || this.dead || this.storyOpen) return;
-    const { hotspotId } = (event as CustomEvent<{ hotspotId: HotspotId }>).detail;
-    const hotspot = storyHotspots.find((h) => h.id === hotspotId);
-    if (hotspot) this.enter3DForStory(hotspot);
   };
 
   private handleInteriorState = (event: Event) => {

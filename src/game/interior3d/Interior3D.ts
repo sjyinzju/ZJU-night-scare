@@ -570,7 +570,19 @@ export class Interior3D {
     for (const pickup of this.room.pickups) preserveTree(pickup.glow);
     for (const trigger of this.room.storyTriggers) preserveTree(trigger.glow);
     for (const door of this.room.doors) preserveTree(door.group);
-    for (const phaseObject of this.room.phaseObjects) preserveTree(phaseObject.object);
+    // Small structural fallbacks intentionally survive real-asset loading.
+    // They cover authored openings that are absent from an imported GLB.
+    this.room.root.traverse((obj) => {
+      if (obj.userData.keepWithAsset) preserveTree(obj);
+    });
+    // A real GLB may provide named phase visuals (for example the library's
+    // iron gate).  Keeping the procedural equivalent visible at the same
+    // coordinates produces z-fighting / interpenetration.  The procedural
+    // object remains in the collision and trigger model, but its rendering is
+    // only retained when no real phase visual was matched.
+    if (this.assetPhaseVisuals.length === 0) {
+      for (const phaseObject of this.room.phaseObjects) preserveTree(phaseObject.object);
+    }
     for (const npcGroup of this.room.npcGroups) preserveTree(npcGroup);
 
     this.room.root.traverse((obj) => {

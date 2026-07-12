@@ -70,7 +70,9 @@ const INTERIOR_STORY_TRIGGERS: Record<string, InteriorStoryTriggerDefinition[]> 
   library: [
     { sceneId: "library_intro", position: "intro", action: "story", activeSceneIds: ["library_intro"], radius: 0.85 },
     { sceneId: "library_sound", position: "sound", action: "story", activeSceneIds: ["library_sound"] },
-    { sceneId: "library_exit", position: "exit", action: "exit", activeSceneIds: ["library_police"] },
+    // The police beat is the third in-library red point.  The actual world
+    // exit happens only after its final choice sends the player to Baisha.
+    { sceneId: "library_police", position: "exit", action: "story", activeSceneIds: ["library_police"] },
   ],
   dorm: [{ sceneId: "dorm_forum", position: "forum", action: "story", activeSceneIds: ["dorm_forum"] }],
   hall: [{ sceneId: "final_plan", position: "stage", action: "story", activeSceneIds: ["final_plan"] }],
@@ -92,9 +94,7 @@ export function getInteriorNpcRevealSceneIds(roomKind: string): StorySceneId[] {
   return INTERIOR_NPC_REVEAL_SCENE_IDS[roomKind] ?? [];
 }
 
-const INTERIOR_EXIT_TRIGGER_AFTER: Partial<Record<StorySceneId, StorySceneId[]>> = {
-  library_sound: ["library_police"],
-};
+const INTERIOR_EXIT_TRIGGER_AFTER: Partial<Record<StorySceneId, StorySceneId[]>> = {};
 
 // ── StoryStage ↔ StorySceneId 联动 ──
 
@@ -323,10 +323,13 @@ export function resolvePostChoiceCommands(args: {
     commands.push({ kind: "exit-interior" });
   }
 
-  const hotspot = getHotspotById(activeScene.locationId);
-  if (!inInterior && nextScene.setting === "indoor" && hotspot?.mode === "outdoor-to-indoor") {
+  // Enter according to the destination, never the scene that just closed.
+  // Looking at activeScene.locationId here used to send the player to an
+  // unrelated hotspot (or drop the request entirely) after a text choice.
+  const destinationHotspot = getHotspotById(nextScene.locationId);
+  if (!inInterior && nextScene.setting === "indoor" && (destinationHotspot?.mode === "outdoor-to-indoor" || destinationHotspot?.mode === "indoor-3d")) {
     commands.push({ kind: "set-active-scene", sceneId: null });
-    commands.push({ kind: "enter-building", hotspotId: hotspot.id });
+    commands.push({ kind: "enter-building", hotspotId: destinationHotspot.id });
   } else if (nextScene.ending) {
     commands.push({ kind: "set-active-scene", sceneId: nextScene.id });
   } else if (inInterior && nextScene.setting === "indoor") {

@@ -276,7 +276,7 @@ export const storyScenes: Record<StorySceneId, StoryScene> = {
         next: "library_police",
         statChanges: { sanity: -8, stamina: -5, clues: 6 },
         setFlag: "investigatedLin",
-        effect: "jumpscare",
+        effect: "shake",
       },
       {
         id: "retreat",
@@ -291,9 +291,9 @@ export const storyScenes: Record<StorySceneId, StoryScene> = {
     title: "警车的远光灯",
     chapter: "第一章",
     locationId: "library",
-    setting: "outdoor",
+    setting: "indoor",
     body: [
-      "二十分钟后，救护车和警车呼啸而至。医学院教学楼下拉起了警戒线。警察、校领导、辅导员围成一圈。林老师——你的辅导员，一个三十多岁的女老师——急匆匆走过来问你情况，听你提到歌声时，她的脸色明显变了一下，又马上恢复成职业性的平静。",
+      "你走到医学分馆出口门前。门外的红蓝灯隔着玻璃一阵阵扫进来，把书架、楼梯和地上的水痕切成短促的明暗。二十分钟后，救护车和警车呼啸而至，医学院教学楼下拉起了警戒线。",
       "一位姓张的警官带你去做笔录。问了一个多小时。做完后他放了一段监控录像：画面里，林伟走到三楼窗户前，站了半分钟，翻身跳了下去。但画面的角落里，模模糊糊出现了一双脚——穿着绣花鞋，裙摆遮住了脚踝。那个身影站了几秒，转身消失了。",
       "「警官，监控最后那个……那双脚是怎么回事？」张警官的目光微微闪烁了一下。「光线反射的问题，我们有经验。」「可那明明是一双绣花鞋啊！」「同学，案件结论是林伟因学业压力过大自杀身亡。这件事就到此为止。」",
       "他话里有话。你盯着他的眼睛，忽然明白了：他知道那不是光线反射。他只是不能说。一个警察用官方结论堵住你的嘴，说明这件事的盖子远比你想象的重。",
@@ -301,16 +301,10 @@ export const storyScenes: Record<StorySceneId, StoryScene> = {
     ],
     choices: [
       {
-        id: "ask",
-        text: "问警察那双脚是怎么回事",
+        id: "return-dorm",
+        text: "带着监控线索回白沙宿舍，去找白秋",
         next: "dorm_baiqiu",
-        statChanges: { sanity: -2, clues: 5 },
-      },
-      {
-        id: "silent",
-        text: "保持沉默，回宿舍等白秋",
-        next: "dorm_baiqiu",
-        statChanges: { trust: 4 },
+        statChanges: { sanity: -2, clues: 5, trust: 2, stamina: -3 },
       },
     ],
   },
@@ -620,7 +614,7 @@ export const storyScenes: Record<StorySceneId, StoryScene> = {
     id: "ghost_choice",
     title: "走廊尽头的女人",
     chapter: "第五章",
-    locationId: "east-teaching",
+    locationId: "medical-college",
     setting: "indoor",
     distortionBoost: 0.25,
     body: [
@@ -659,7 +653,7 @@ export const storyScenes: Record<StorySceneId, StoryScene> = {
     id: "stand_ground",
     title: "苏婉的照片",
     chapter: "第五章",
-    locationId: "east-teaching",
+    locationId: "medical-college",
     setting: "indoor",
     body: [
       "你没有跑。那个女人看了你很久，脸上的表情从戒备慢慢变成了某种接近释然的东西。她抬手指向小剧场的方向，身体像雾气一样一点点散去。她消失后，地上多了一张泛黄的老照片。",

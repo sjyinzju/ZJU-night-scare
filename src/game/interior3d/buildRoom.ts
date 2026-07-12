@@ -787,8 +787,13 @@ function buildLibrary(ctx: LibCtx): LibResult {
   addStudyTable(1.0, -3.35);
   addStudyTable(4.25, -3.35);
 
-  addBox(4.2, 3.7, 0.2, -4.65, 1.85, 0.45, wallMat);
-  addBox(6.1, 3.7, 0.2, 3.45, 1.85, 0.45, wallMat);
+  const introWallLeft = addBox(4.2, 3.7, 0.2, -4.65, 1.85, 0.45, wallMat);
+  const introWallRight = addBox(6.1, 3.7, 0.2, 3.45, 1.85, 0.45, wallMat);
+  // The real asset has a known gap around the intro gate on some exports.
+  // Keep these two shell segments visible, while the gate itself comes only
+  // from the GLB phase visual.
+  introWallLeft.userData.keepWithAsset = true;
+  introWallRight.userData.keepWithAsset = true;
   const storyGate = addBox(2.7, 2.45, 0.16, -0.8, 1.25, 0.45, whiteMat, false);
   phaseObjects.push({ object: storyGate, activeSceneIds: ["library_intro"] });
   colliders.push({ minX: -2.15, maxX: 0.55, minZ: 0.37, maxZ: 0.53, activeSceneIds: ["library_intro"] });
