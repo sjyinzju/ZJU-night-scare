@@ -18,6 +18,123 @@ export interface InteriorOverlayProps {
 
 const JOYSTICK_RADIUS = 56;
 
+// ── 3D内景小地图（右上角俯视图）──
+
+interface MiniMapSnap {
+  playerX: number;
+  playerZ: number;
+  ghostX: number;
+  ghostZ: number;
+  ghostVisible: boolean;
+}
+
+/** 小地图覆盖的游戏世界范围 */
+const MM_BOUNDS = { minX: -12, maxX: 30, minZ: -5, maxZ: 29 };
+
+function toCanvas(gameX: number, gameZ: number, cw: number, ch: number) {
+  const x = ((gameX - MM_BOUNDS.minX) / (MM_BOUNDS.maxX - MM_BOUNDS.minX)) * cw;
+  const y = ((MM_BOUNDS.maxZ - gameZ) / (MM_BOUNDS.maxZ - MM_BOUNDS.minZ)) * ch;
+  return { x, y };
+}
+
+function drawInteriorMiniMap(canvas: HTMLCanvasElement, snap: MiniMapSnap): void {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  const w = rect.width;
+  const h = rect.height;
+  if (!w || !h) return;
+
+  canvas.width = Math.floor(w * dpr);
+  canvas.height = Math.floor(h * dpr);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  // 背景
+  ctx.fillStyle = "rgba(3, 6, 10, 0.88)";
+  ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = "rgba(215, 183, 118, 0.35)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
+
+  // ── 走廊轮廓 ──
+  // 外环外墙
+  const outer = [
+    toCanvas(-10.3, -3.3, w, h), toCanvas(27.7, -3.3, w, h),
+    toCanvas(27.7, 27.3, w, h), toCanvas(-10.3, 27.3, w, h),
+  ];
+  ctx.beginPath();
+  ctx.moveTo(outer[0].x, outer[0].y);
+  for (let i = 1; i < outer.length; i++) ctx.lineTo(outer[i].x, outer[i].y);
+  ctx.closePath();
+  ctx.strokeStyle = "rgba(168, 146, 118, 0.55)";
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+
+  // 内环内墙（中央区域）
+  const inner = [
+    toCanvas(-7.5, 9.3, w, h), toCanvas(24.2, 9.3, w, h),
+    toCanvas(24.2, 24.2, w, h), toCanvas(-7.5, 24.2, w, h),
+  ];
+  ctx.beginPath();
+  ctx.moveTo(inner[0].x, inner[0].y);
+  for (let i = 1; i < inner.length; i++) ctx.lineTo(inner[i].x, inner[i].y);
+  ctx.closePath();
+  ctx.strokeStyle = "rgba(168, 146, 118, 0.38)";
+  ctx.setLineDash([3, 3]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // 宿舍（左下角实心矩形）
+  const dorm = { x: toCanvas(-8, 0, w, h).x, y: toCanvas(-8, 9.3, w, h).y, w: toCanvas(-1.3, 0, w, h).x - toCanvas(-8, 0, w, h).x, h: toCanvas(-8, 0, w, h).y - toCanvas(-8, 9.3, w, h).y };
+  ctx.fillStyle = "rgba(110, 140, 155, 0.30)";
+  ctx.fillRect(dorm.x, dorm.y, dorm.w, dorm.h);
+  ctx.strokeStyle = "rgba(140, 170, 185, 0.50)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(dorm.x, dorm.y, dorm.w, dorm.h);
+
+  // 中横廊鬼捷径
+  const sc = { x: toCanvas(-7.5, 14, w, h).x, y: toCanvas(-7.5, 17, w, h).y, w: toCanvas(10, 14, w, h).x - toCanvas(-7.5, 14, w, h).x, h: toCanvas(-7.5, 14, w, h).y - toCanvas(-7.5, 17, w, h).y };
+  ctx.fillStyle = "rgba(180, 60, 50, 0.16)";
+  ctx.fillRect(sc.x, sc.y, sc.w, sc.h);
+  ctx.strokeStyle = "rgba(200, 70, 60, 0.32)";
+  ctx.setLineDash([2, 4]);
+  ctx.strokeRect(sc.x, sc.y, sc.w, sc.h);
+  ctx.setLineDash([]);
+
+  // 出口标记（左下角）
+  const exit = toCanvas(-8.5, -1, w, h);
+  ctx.fillStyle = "#d7b776";
+  ctx.beginPath();
+  ctx.moveTo(exit.x, exit.y - 4);
+  ctx.lineTo(exit.x + 4, exit.y + 3);
+  ctx.lineTo(exit.x - 4, exit.y + 3);
+  ctx.closePath();
+  ctx.fill();
+
+  // ── 玩家（绿色圆点 + 光晕）──
+  const player = toCanvas(snap.playerX, snap.playerZ, w, h);
+  ctx.shadowColor = "rgba(130, 230, 160, 0.7)";
+  ctx.shadowBlur = 5;
+  ctx.fillStyle = "#82e6a0";
+  ctx.beginPath();
+  ctx.arc(player.x, player.y, 3.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+
+  // ── 鬼（红色圆点，仅可见时显示）──
+  if (snap.ghostVisible) {
+    const ghost = toCanvas(snap.ghostX, snap.ghostZ, w, h);
+    ctx.shadowColor = "rgba(255, 40, 40, 0.85)";
+    ctx.shadowBlur = 7;
+    ctx.fillStyle = "#ff2020";
+    ctx.beginPath();
+    ctx.arc(ghost.x, ghost.y, 3.8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+}
+
 /**
  * Full-screen overlay hosting a first-person interior exploration scene.
  * Owns the Interior3D lifecycle: creates it on mount, disposes on unmount.
@@ -35,10 +152,15 @@ export default function InteriorOverlay({
 }: InteriorOverlayProps): React.ReactElement {
   const hostRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<Interior3D | null>(null);
+  const miniMapRef = useRef<HTMLCanvasElement | null>(null);
+  const miniMapFrameRef = useRef<number | null>(null);
   const currentSceneIdRef = useRef(currentSceneId);
   const inventoryRef = useRef(inventory);
   // WebGL 初始化失败（部分低端/受限浏览器无法创建 WebGL 上下文）时降级为提示。
   const [failed, setFailed] = useState(false);
+  // GLB 加载进度
+  const [loadFraction, setLoadFraction] = useState(0);
+  const [assetLoaded, setAssetLoaded] = useState(false);
   // 拾取道具时的短暂提示文案。
   const [pickupToast, setPickupToast] = useState<string | null>(null);
   const toastTimer = useRef<number | null>(null);
@@ -131,6 +253,53 @@ export default function InteriorOverlay({
     if (toastTimer.current !== null) window.clearTimeout(toastTimer.current);
   }, []);
 
+  // GLB 加载进度监听
+  useEffect(() => {
+    const onProgress = (event: Event) => {
+      const { fraction } = (event as CustomEvent<{ fraction: number }>).detail;
+      setLoadFraction(fraction);
+      if (fraction >= 1) setAssetLoaded(true);
+    };
+    const onAssetState = (event: Event) => {
+      const { loaded } = (event as CustomEvent<{ loaded: boolean }>).detail;
+      if (loaded) { setLoadFraction(1); setAssetLoaded(true); }
+    };
+    window.addEventListener("zju-horror-interior-load-progress", onProgress);
+    window.addEventListener("zju-horror-interior-asset-state", onAssetState);
+    return () => {
+      window.removeEventListener("zju-horror-interior-load-progress", onProgress);
+      window.removeEventListener("zju-horror-interior-asset-state", onAssetState);
+    };
+  }, []);
+
+  // 建筑切换时重置
+  useEffect(() => {
+    setLoadFraction(0);
+    setAssetLoaded(false);
+  }, [building.id]);
+
+  // ── 小地图绘制循环（每 200ms 刷新）──
+  useEffect(() => {
+    const canvas = miniMapRef.current;
+    if (!canvas || isMobile) return; // 桌面端显示，移动端隐藏节省性能
+
+    let running = true;
+    const draw = () => {
+      if (!running) return;
+      const engine = engineRef.current;
+      if (!engine) { miniMapFrameRef.current = window.setTimeout(draw, 200); return; }
+      const snap = engine.getMiniMapSnapshot();
+      if (snap) drawInteriorMiniMap(canvas, snap);
+      miniMapFrameRef.current = window.setTimeout(draw, 200);
+    };
+    miniMapFrameRef.current = window.setTimeout(draw, 100);
+
+    return () => {
+      running = false;
+      if (miniMapFrameRef.current !== null) window.clearTimeout(miniMapFrameRef.current);
+    };
+  }, [isMobile, building.id]);
+
   const handleExit = useCallback(() => {
     if (!canExit) return;
     engineRef.current?.exitPointerLock();
@@ -218,6 +387,17 @@ export default function InteriorOverlay({
       {/* 氛围叠层：暗角 + 轻微冷调，与外层地图的恐怖质感统一。 */}
       <div style={styles.vignette} aria-hidden="true" />
       <div style={styles.scanline} aria-hidden="true" />
+
+      {/* 右上角俯视图小地图 */}
+      <canvas ref={miniMapRef} style={styles.miniMap} aria-label="走廊俯视图" />
+
+      {/* GLB 加载进度条 */}
+      {!assetLoaded && (
+        <div style={styles.loadBar}>
+          <div style={{ ...styles.loadBarFill, width: `${Math.round(loadFraction * 100)}%` }} />
+          <span style={styles.loadBarLabel}>{Math.round(loadFraction * 100)}%</span>
+        </div>
+      )}
 
       {/* Mobile look surface covers the right half of the screen. */}
       {isMobile && (
@@ -307,6 +487,49 @@ const styles: Record<string, CSSProperties> = {
     background:
       "radial-gradient(ellipse 124% 118% at 50% 50%, transparent 56%, rgba(4,5,9,0.2) 80%, rgba(2,3,6,0.46) 92%, rgba(0,0,0,0.8) 100%)",
     mixBlendMode: "multiply",
+  },
+  // 小地图：右上角俯视图
+  miniMap: {
+    position: "absolute",
+    top: 52,
+    right: 16,
+    zIndex: 6,
+    width: 146,
+    height: 118,
+    borderRadius: 6,
+    border: "1px solid rgba(215, 183, 118, 0.30)",
+    boxShadow: "0 6px 18px rgba(0, 0, 0, 0.55)",
+    pointerEvents: "none",
+  },
+  // 加载进度条
+  loadBar: {
+    position: "absolute",
+    bottom: 60,
+    left: "50%",
+    transform: "translateX(-50%)",
+    zIndex: 6,
+    width: 220,
+    height: 6,
+    borderRadius: 3,
+    background: "rgba(21, 15, 15, 0.72)",
+    border: "1px solid rgba(179, 50, 46, 0.4)",
+    overflow: "hidden",
+  },
+  loadBarFill: {
+    height: "100%",
+    borderRadius: 2,
+    background: "linear-gradient(90deg, #6a2020, #b3322e, #d74a3a)",
+    transition: "width 0.2s ease-out",
+  },
+  loadBarLabel: {
+    position: "absolute",
+    top: -22,
+    left: "50%",
+    transform: "translateX(-50%)",
+    color: "#c9a87c",
+    fontSize: 12,
+    letterSpacing: "0.08em",
+    textShadow: "0 0 6px rgba(0,0,0,0.9)",
   },
   // 扫描线：极淡的冷调横纹，制造老旧监控/胶片质感。
   scanline: {

@@ -44,6 +44,8 @@ export interface InteriorAssetRequest {
   roomKind: RoomKind;
   isMobile: boolean;
   renderer?: THREE.WebGLRenderer;
+  /** 加载进度回调 0..1 */
+  onProgress?: (fraction: number) => void;
 }
 
 const ASSET_ROOTS: Record<string, string> = {
@@ -85,15 +87,16 @@ function tuneLoadedScene(root: THREE.Group): void {
   root.traverse((obj) => {
     const mesh = obj as THREE.Mesh;
     if (!mesh.isMesh) return;
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
+    // 仅对较大几何体（墙面、地板等）开启阴影，小装饰（书本、杂物）跳过
+    const box = mesh.geometry.boundingBox;
+    const large = !box || (box.max.x - box.min.x > 0.8 || box.max.z - box.min.z > 0.8);
+    mesh.castShadow = large;
+    mesh.receiveShadow = large;
 
     const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     for (const mat of materials) {
       const standard = mat as THREE.MeshStandardMaterial;
-      for (const texture of [standard.map, standard.normalMap, standard.roughnessMap, standard.metalnessMap]) {
-        if (texture) texture.anisotropy = Math.max(texture.anisotropy, 4);
-      }
+      if (standard.map) standard.map.anisotropy = Math.max(standard.map.anisotropy, 2);
       standard.needsUpdate = true;
     }
   });
@@ -139,7 +142,21 @@ export async function loadInteriorAsset(req: InteriorAssetRequest): Promise<Inte
     ktx2Loader.detectSupport(req.renderer);
     gltfLoader.setKTX2Loader(ktx2Loader);
   }
-  const gltf = await gltfLoader.loadAsync(assetUrl(`${rootPath}/${preferredModel}`));
+
+  // 使用回调式 load 以支持 onProgress
+  const url = assetUrl(`${rootPath}/${preferredModel}`);
+  const gltf = await new Promise<{ scene: THREE.Group }>((resolve, reject) => {
+    gltfLoader.load(
+      url,
+      (result) => resolve(result as { scene: THREE.Group }),
+      (event) => {
+        if (event.total > 0 && req.onProgress) {
+          req.onProgress(event.loaded / event.total);
+        }
+      },
+      (err) => reject(err as Error),
+    );
+  });
   const root = gltf.scene as THREE.Group;
   tuneLoadedScene(root);
 

@@ -11,7 +11,10 @@ type Callback = {
 
 const GHOST_SPEED = 2.78;
 const CATCH_DISTANCE = 0.78;
-const RIGHT_JUNCTION = new THREE.Vector3(10, 0, 22);
+// 右竖廊岔路截击点——鬼从中横廊穿出后到达的位置
+const RIGHT_JUNCTION = new THREE.Vector3(25, 0, 15);
+// 左下出口位置——玩家绕完一圈后到达
+const EXIT_POINT = new THREE.Vector3(-8.5, 0, -1);
 const _tempVec = new THREE.Vector3();
 
 /**
@@ -20,18 +23,24 @@ const _tempVec = new THREE.Vector3();
  */
 export class BaishaChaseController {
   private readonly ghostFallback = new THREE.Group();
-  private readonly ghostGlow = new THREE.PointLight(0xff1010, 0, 9, 1.35);
+  // 鬼自发光：血红色，与走廊暗红灯色一致
+  private readonly ghostGlow = new THREE.PointLight(0xcc1111, 0, 12, 1.5);
   private ghost: THREE.Object3D;
   private visualRoot?: THREE.Object3D;
   private openingStartedAt = 0;
   private missedEnergyAt = 0;
+  private corridorLights: THREE.PointLight[] = [];
+  private dormLights: THREE.PointLight[] = [];
   private readonly ghostPath = [
-    new THREE.Vector3(-8, 0, 11.5),
-    new THREE.Vector3(-5, 0, 14),
+    // 鬼在左竖廊后门下方 (x≈-8.7, z≈7) → 上移 → 中横廊横穿 → 右竖廊截击
+    new THREE.Vector3(-8.7, 0, 7.0),
+    new THREE.Vector3(-7.2, 0, 15.5),
+    new THREE.Vector3(7.2,  0, 15.5),
     RIGHT_JUNCTION,
   ];
   private ghostPathIndex = 0;
   private disposed = false;
+  private _dbgWaitLog = 0; // 追踪等待状态
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -39,11 +48,11 @@ export class BaishaChaseController {
     private readonly callbacks: Callback,
   ) {
     this.ghostFallback.name = "GHOST_SLENDER_FALLBACK";
-    const black = new THREE.MeshStandardMaterial({ color: 0x060407, roughness: 0.74, metalness: 0.08 });
-    const skin = new THREE.MeshStandardMaterial({ color: 0x9b8885, roughness: 0.9 });
-    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.24, 1.9, 5, 10), black);
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1a0000, roughness: 0.6, metalness: 0.15, emissive: 0x330000, emissiveIntensity: 0.5 });
+    const skinMat = new THREE.MeshStandardMaterial({ color: 0x8b1a1a, roughness: 0.7, emissive: 0x220000, emissiveIntensity: 0.3 });
+    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.24, 1.9, 5, 10), bodyMat);
     body.position.y = 1.35;
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 14, 10), skin);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 14, 10), skinMat);
     head.position.y = 2.62;
     this.ghostFallback.add(body, head, this.ghostGlow);
     this.ghostFallback.position.copy(this.ghostPath[0]);
@@ -67,7 +76,7 @@ export class BaishaChaseController {
     }
     this.ghost.visible = false;
     if (!this.ghost.getObjectByName("GHOST_RED_GLOW")) {
-      const glow = new THREE.PointLight(0xff0808, 6.5, 9, 1.4);
+      const glow = new THREE.PointLight(0xcc1111, 8.5, 12, 1.6);
       glow.name = "GHOST_RED_GLOW";
       glow.position.y = 1.6;
       this.ghost.add(glow);
@@ -78,7 +87,9 @@ export class BaishaChaseController {
     const { baishaRun, patchBaishaRun } = useGameStore.getState();
     if (itemId === "photograph" && baishaRun.phase === "searching") {
       patchBaishaRun({ photoCollected: true, phase: "photo-reveal" });
-      this.callbacks.onPhotoReveal();
+      // 将回调推迟到下一个 microtask，避免在 rAF 回调内触发 React setState
+      // 导致 DOM 更新与 3D 渲染争抢帧预算
+      queueMicrotask(() => this.callbacks.onPhotoReveal());
       return;
     }
     if (itemId === "energy" && ["chasing", "cut-off", "tail-chase"].includes(baishaRun.phase)) {
@@ -114,6 +125,14 @@ export class BaishaChaseController {
     if (currentSceneId === "dorm_escape" && run.phase === "photo-reveal") {
       this.openingStartedAt = performance.now();
       store.patchBaishaRun({ phase: "door-opening" });
+      console.log(`[BAISHA-DEBUG] 门开始打开 currentSceneId="${currentSceneId}" phase=photo-reveal`);
+    }
+    if (run.phase === "photo-reveal" && currentSceneId !== "dorm_escape") {
+      // 每2秒输出一次，确认是否卡在等待 dorm_escape
+      if (!this._dbgWaitLog || performance.now() - this._dbgWaitLog > 2000) {
+        this._dbgWaitLog = performance.now();
+        console.log(`[BAISHA-DEBUG] 等待剧情推进... currentSceneId="${currentSceneId}" phase=${run.phase}`);
+      }
     }
 
     const latest = useGameStore.getState().baishaRun;
@@ -124,6 +143,7 @@ export class BaishaChaseController {
     if (latest.phase === "door-opening" && performance.now() - this.openingStartedAt > 850) {
       useGameStore.getState().patchBaishaRun({ entryDoorOpen: true, phase: "look-left-trap" });
       this.ghost.visible = true;
+      console.log("[BAISHA-DEBUG] 门已打开！entryDoorOpen=true, 玩家可通过门禁");
       return;
     }
     if (!["look-left-trap", "chasing", "cut-off", "tail-chase"].includes(latest.phase)) return;
@@ -148,15 +168,29 @@ export class BaishaChaseController {
     });
   }
 
+  /** 获取鬼在世界空间的位置（供小地图等使用） */
+  getGhostWorldPosition(target: THREE.Vector3): THREE.Vector3 {
+    return this.ghost.getWorldPosition(target);
+  }
+
+  /** 鬼当前是否可见 */
+  isGhostVisible(): boolean {
+    return this.ghost.visible;
+  }
+
+  /** GLB 加载后由 Interior3D 注入灯光引用数组，替代每帧 root.traverse() */
+  setLights(corridorLights: THREE.PointLight[], dormLights: THREE.PointLight[]): void {
+    this.corridorLights = corridorLights;
+    this.dormLights = dormLights;
+  }
+
   private tryTriggerFirstSight(): void {
     const player = this.camera.position;
-    // The initial left-side pool of light is only visible after crossing the
-    // dorm threshold.  Looking at the red silhouette, rather than a mouse
-    // delta, is the actual trigger.
-    if (player.z < 9.5 || player.z > 12 || player.x > -3.5) return;
-    const toGhost = this.ghost.position.clone().sub(player).setY(0);
+    // 玩家从后墙门 (z≈9.5) 走出，鬼在左竖廊下方 (x≈-8.7, z≈7)。
+    if (player.z < 9.2 || player.z > 12 || player.x > -5.5) return;
+    const toGhost = this.ghost.getWorldPosition(_tempVec).clone().sub(player).setY(0);
     const distance = toGhost.length();
-    if (distance > 12 || distance < 0.1) return;
+    if (distance > 14 || distance < 0.1) return;
     toGhost.multiplyScalar(1 / distance);
     const forward = new THREE.Vector3();
     this.camera.getWorldDirection(forward);
@@ -170,14 +204,18 @@ export class BaishaChaseController {
 
   private updateChase(dt: number, state: ReturnType<typeof useGameStore.getState>["baishaRun"]): void {
     const player = this.camera.position;
-    const playerPassedJunction = player.x >= 8 && player.z > 18;
+    // 玩家是否已过右上拐角进入右竖廊（x>20 且 z>20，即已转过顶部横廊）
+    const playerPassedJunction = player.x >= 20 && player.z > 20;
+    // 鬼是否已到达右竖廊岔路截击点
     const ghostAtJunction = this.ghostPathIndex >= this.ghostPath.length - 1
-      && this.ghost.getWorldPosition(_tempVec).distanceToSquared(RIGHT_JUNCTION) < 0.35;
+      && this.ghost.getWorldPosition(_tempVec).distanceToSquared(RIGHT_JUNCTION) < 0.5;
 
     if (state.phase === "chasing") {
       if (playerPassedJunction && !ghostAtJunction) {
+        // 分支 B: 玩家先到 → 尾追
         useGameStore.getState().patchBaishaRun({ phase: "tail-chase" });
       } else if (ghostAtJunction && !playerPassedJunction) {
+        // 分支 A: 鬼先到 → 截击 + 铁门打开
         useGameStore.getState().patchBaishaRun({
           phase: "cut-off",
           secondScareTriggered: true,
@@ -189,16 +227,23 @@ export class BaishaChaseController {
 
     const latest = useGameStore.getState().baishaRun;
     if (latest.phase === "chasing") this.moveAlongShortcut(dt);
-    else if (latest.phase === "cut-off") this.moveTowards(dt, new THREE.Vector3(8, 0, 20));
-    else this.moveTowards(dt, new THREE.Vector3(player.x, 0, player.z));
+    else if (latest.phase === "cut-off") {
+      // 截击分支：鬼从右竖廊往玩家方向反追
+      this.moveTowards(dt, new THREE.Vector3(player.x, 0, player.z));
+    } else {
+      // 尾追分支：鬼沿玩家路径追赶
+      this.moveTowards(dt, new THREE.Vector3(player.x, 0, player.z));
+    }
 
-    const energy = Math.hypot(player.x - 10, player.z - 22);
-    if (!latest.energyCollected && !latest.energyMissed && player.z > 16 && energy > 2.4) {
+    // 能量饮料错过检测：玩家经过右竖廊上段（饮料位置附近）
+    const energyDist = Math.hypot(player.x - 25.5, player.z - 15);
+    if (!latest.energyCollected && !latest.energyMissed && player.x > 20 && energyDist > 3.0 && player.z < 18) {
       this.missedEnergyAt = performance.now();
       useGameStore.getState().patchBaishaRun({ energyMissed: true });
     }
 
-    const exitReached = player.x > 20 && player.z > 22;
+    // 出口检测：左下角 (x<-7, z<0)，完成一圈后到达
+    const exitReached = player.x < -7 && player.z < 0;
     if (exitReached) {
       useGameStore.getState().patchBaishaRun({ exitReached: true, phase: "exiting" });
       this.callbacks.onLevelExit();
@@ -248,31 +293,51 @@ export class BaishaChaseController {
   }
 
   private updateRedLights(state: ReturnType<typeof useGameStore.getState>["baishaRun"]): void {
-    const root = this.visualRoot;
-    if (!root) return;
     const player = this.camera.position;
     const t = performance.now() / 1000;
-    root.traverse((obj) => {
-      // 控制模型自带吊灯 + 走廊补光
-      const isDormLight = obj.name === "DORM_CEILING_LIGHT";
-      const isCorridorLight = obj.name.startsWith("CORRIDOR_LIGHT_");
-      if (!isDormLight && !isCorridorLight) return;
-      const light = obj as THREE.Light;
-      if (!light.isLight) return;
-      const distance = Math.hypot(light.position.x - player.x, light.position.z - player.z);
 
+    // ── 宿舍吊灯 ──
+    for (const light of this.dormLights) {
+      const dist = Math.hypot(light.position.x - player.x, light.position.z - player.z);
       if (state.phase === "searching") {
-        // 探索阶段：吊灯暗红忽明忽暗，走廊灯全灭
-        if (isCorridorLight) { light.intensity = 0; return; }
-        if (distance > 10) { light.intensity = 0; return; }
+        if (dist > 10) { light.intensity = 0; continue; }
         const flicker = 0.55 + 0.45 * Math.sin(t * 2.7 + light.position.x * 3.1);
         light.intensity = 100 * Math.max(0.25, flicker);
       } else {
-        // 追逐阶段：全部灯高亮剧烈闪烁
-        if (distance > 14) { light.intensity = 0; return; }
+        if (dist > 14) { light.intensity = 0; continue; }
         const flicker = 0.5 + 0.5 * Math.sin(t * 5.5 + light.position.x * 4.3);
-        light.intensity = (isDormLight ? 140 : 80) * Math.max(0.15, flicker);
+        light.intensity = 140 * Math.max(0.15, flicker);
       }
-    });
+    }
+
+    // ── 走廊灯：8 盏动态布置在玩家前方 ──
+    if (state.phase === "searching") {
+      // 探索阶段：走廊灯全灭，GLB 灯管 emissive 提供微弱氛围
+      for (const light of this.corridorLights) light.intensity = 0;
+      return;
+    }
+
+    // 追逐阶段：8 盏灯分布在玩家前后 8m 范围内
+    const forward = new THREE.Vector3();
+    this.camera.getWorldDirection(forward);
+    forward.y = 0;
+    forward.normalize();
+    // 玩家朝向可能指向走廊走向；同时考虑玩家位置到各路段的最短距离
+    const px = player.x;
+    const pz = player.z;
+    // 把 8 盏灯均匀分布在玩家前后 ±6m 区间
+    for (let i = 0; i < this.corridorLights.length; i++) {
+      const light = this.corridorLights[i];
+      const frac = (i - 3) / 4; // -0.75 到 1.0，前方多后方少
+      const tx = px + forward.x * frac * 8;
+      const tz = pz + forward.z * frac * 8;
+      light.position.set(tx, 3.1, tz);
+      const dist = Math.abs(frac * 8);
+      if (dist > 10) { light.intensity = 0; continue; }
+      // 渐亮/渐灭：距离越远越暗
+      const falloff = 1 - Math.min(1, dist / 10);
+      const flicker = 0.6 + 0.4 * Math.sin(t * 4.8 + i * 1.7);
+      light.intensity = 80 * falloff * Math.max(0.2, flicker);
+    }
   }
 }

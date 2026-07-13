@@ -120,6 +120,10 @@ export class Interior3D {
   private debugColliders?: THREE.Group;
   private guideLine?: THREE.Line;
   private baishaChase?: BaishaChaseController;
+  private _dbgDoorState = false; // 追踪门状态变化
+  // 灯光引用数组——避免每帧 root.traverse() 遍历整个 GLB
+  private corridorLights: THREE.PointLight[] = [];
+  private dormLights: THREE.PointLight[] = [];
 
   private rafId = 0;
   private disposed = false;
@@ -162,10 +166,12 @@ export class Interior3D {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.68;
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.isMobile ? 1.5 : 2));
+    // 像素比降到 1.5，避免高 DPI 屏幕上 4×像素渲染
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.isMobile ? 1 : 1.5));
     if (!this.isMobile) {
       this.renderer.shadowMap.enabled = true;
-      this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      // BasicShadowMap 比 PCFSoft 快 3-5×，恐怖场景暗光下差异不可见
+      this.renderer.shadowMap.type = THREE.BasicShadowMap;
     }
     this.renderer.domElement.style.display = "block";
     this.renderer.domElement.style.width = "100%";
@@ -206,7 +212,7 @@ export class Interior3D {
     this.flashlight.position.set(0, 0, 0);
     if (!this.isMobile) {
       this.flashlight.castShadow = true;
-      this.flashlight.shadow.mapSize.set(1024, 1024);
+      this.flashlight.shadow.mapSize.set(512, 512);
       this.flashlight.shadow.camera.near = 0.2;
       this.flashlight.shadow.camera.far = 20;
     }
@@ -318,6 +324,20 @@ export class Interior3D {
     return door.interactionLabel + " — 按 E";
   }
 
+  /** 小地图快照：玩家位置 + 鬼位置 + 鬼可见性 */
+  getMiniMapSnapshot(): { playerX: number; playerZ: number; ghostX: number; ghostZ: number; ghostVisible: boolean } | null {
+    if (!this.baishaChase) return null;
+    const ghostPos = new THREE.Vector3();
+    this.baishaChase.getGhostWorldPosition(ghostPos);
+    return {
+      playerX: this.camera.position.x,
+      playerZ: this.camera.position.z,
+      ghostX: ghostPos.x,
+      ghostZ: ghostPos.z,
+      ghostVisible: this.baishaChase.isGhostVisible(),
+    };
+  }
+
   // ── Door interaction ──
 
   private ePressed = false;
@@ -419,6 +439,11 @@ export class Interior3D {
         roomKind: this.roomKind,
         isMobile: this.isMobile,
         renderer: this.renderer,
+        onProgress: (fraction) => {
+          window.dispatchEvent(new CustomEvent("zju-horror-interior-load-progress", {
+            detail: { buildingId, fraction },
+          }));
+        },
       });
       if (!handle) return;
       if (this.disposed) {
@@ -437,15 +462,26 @@ export class Interior3D {
           const node = handle.root.getObjectByName(name);
           if (node) node.position.set(wx - rx, wy - ry, wz - rz);
         };
-        reposition("GHOST_SLENDER",             -8.5, 1.6, 11.5);
-        reposition("GATE_SHORTCUT",             -6.0, 1.6, 16.0);
+        reposition("GHOST_SLENDER",             -8.7, 1.6, 7.0);
+        reposition("GATE_SHORTCUT",             -7.0, 1.6, 15.5);
         reposition("PICKUP_PHOTOGRAPH_VISUAL",  -4.5, 0.8,  4.5);
-        reposition("PICKUP_ENERGY_VISUAL",      10.0, 0.8, 22.0);
+        reposition("PICKUP_ENERGY_VISUAL",      25.5, 0.8, 15.0);
 
-        // 隐藏我加的所有假灯管 mesh（模型自带吊灯才是正确光源）
-        for (let i = 0; i < 13; i++) {
-          const fakeMesh = handle.root.getObjectByName(`RUN_LIGHT_MESH_${String(i).padStart(2, "0")}`);
-          if (fakeMesh) fakeMesh.visible = false;
+        // GLB 自带红色灯管 mesh 保持可见——Blender 已设好 emissive 材质，
+        // 无需额外 PointLight 即可提供走廊氛围光。clone 材质避免共享污染。
+        for (let i = 0; i < 16; i++) {
+          const mesh = handle.root.getObjectByName(`RUN_LIGHT_MESH_${String(i).padStart(2, "0")}`);
+          if (!mesh) continue;
+          mesh.visible = true;
+          mesh.traverse((child) => {
+            const m = child as THREE.Mesh;
+            if (!m.isMesh || !m.material) return;
+            if (Array.isArray(m.material)) {
+              m.material = m.material.map((mat) => (mat as THREE.Material).clone());
+            } else {
+              m.material = m.material.clone();
+            }
+          });
         }
 
         // 将模型自带的吊灯材质改为血红色自发光
@@ -470,29 +506,34 @@ export class Interior3D {
               std.emissiveIntensity = 5.0;
             }
           });
-          // 挂红色 PointLight
+          // 挂红色 PointLight——存入数组供 BaishaChaseController 直接访问
           const worldPos = new THREE.Vector3();
           chandelier.getWorldPosition(worldPos);
           const pt = new THREE.PointLight(0xdd1111, 100, 14, 2);
           pt.name = `DORM_CEILING_LIGHT`;
           pt.position.copy(worldPos);
           handle.root.add(pt);
+          this.dormLights.push(pt);
         }
 
-        // 走廊补几个红色 PointLight（追逐阶段用）
-        const corridorSpots = [[-8.5,11.5],[-8.5,14],[-5,17],[2,19],[7,14],[7,18],[7,22]];
-        for (let i = 0; i < corridorSpots.length; i++) {
-          const [wx, wz] = corridorSpots[i];
-          const pt = new THREE.PointLight(0xdd1111, 0, 10, 1.5);
+        // 走廊只放 8 盏动态 PointLight，追逐时跟随玩家位置重新布置。
+        // 静态红色氛围由 GLB 自带的 RUN_LIGHT_MESH（emissive 材质）提供，不消耗 GPU 光照计算。
+        for (let i = 0; i < 8; i++) {
+          const pt = new THREE.PointLight(0xdd1111, 0, 10, 1.8);
           pt.name = `CORRIDOR_LIGHT_${String(i).padStart(2, "0")}`;
-          pt.position.set(wx, 3.1, wz);
+          pt.position.set(-99, 3.1, -99); // 初始置于场景外
           handle.root.add(pt);
+          this.corridorLights.push(pt);
         }
       }
 
       this.scene.add(handle.root);
       this.bindInteriorAssetMetadata(handle);
       this.baishaChase?.bindAsset(handle.root);
+      // 传递灯光引用数组，避免每帧 root.traverse()
+      if (this.baishaChase) {
+        this.baishaChase.setLights(this.corridorLights, this.dormLights);
+      }
       this.setProceduralRoomVisualsVisible(false);
       window.dispatchEvent(new CustomEvent("zju-horror-interior-asset-state", {
         detail: {
@@ -682,6 +723,7 @@ export class Interior3D {
     });
   }
 
+  private _dbgCollideLog = 0;
   private collides(x: number, z: number): boolean {
     if (this.room.isWalkable && !this.room.isWalkable(x, z)) return true;
     for (const c of this.colliders) {
@@ -692,6 +734,19 @@ export class Interior3D {
         z > c.minZ - PLAYER_RADIUS &&
         z < c.maxZ + PLAYER_RADIUS
       ) {
+        // 记录所有非搜索阶段的碰撞
+        const run = useGameStore.getState().baishaRun;
+        if (run.phase !== "searching" && run.phase !== "inactive") {
+          const now = performance.now();
+          if (now - this._dbgCollideLog > 600) {
+            this._dbgCollideLog = now;
+            console.log(
+              `[BAISHA-DEBUG] 碰撞! p=(x:${x.toFixed(2)},z:${z.toFixed(2)}) ` +
+              `wall=[x:${c.minX}~${c.maxX},z:${c.minZ}~${c.maxZ}] ` +
+              `gateId=${c.gateId ?? "-"} doorOpen=${run.entryDoorOpen} phase=${run.phase}`,
+            );
+          }
+        }
         return true;
       }
     }
@@ -730,7 +785,7 @@ export class Interior3D {
 
   private resolvePenetration(): void {
     const pos = this.camera.position;
-    for (let pass = 0; pass < 8; pass++) {
+    for (let pass = 0; pass < 4; pass++) {
       let moved = false;
       for (const collider of this.colliders) {
         if (!this.isColliderActive(collider)) continue;
@@ -1250,7 +1305,15 @@ export class Interior3D {
   }
 
   private isColliderActive(collider: AABB): boolean {
-    if (collider.gateId === "baisha-entry") return !useGameStore.getState().baishaRun.entryDoorOpen;
+    if (collider.gateId === "baisha-entry") {
+      const open = useGameStore.getState().baishaRun.entryDoorOpen;
+      // DEBUG: 追踪门状态
+      if (this._dbgDoorState !== open) {
+        this._dbgDoorState = open;
+        console.log(`[BAISHA-DEBUG] 门禁碰撞体: ${open ? "已打开(可通过)" : "已锁住(阻挡)"}  phase=${useGameStore.getState().baishaRun.phase}`);
+      }
+      return !open;
+    }
     if (collider.gateId === "baisha-shortcut") return !useGameStore.getState().baishaRun.shortcutGateOpen;
     if (!collider.activeSceneIds?.length) return true;
     const sceneId = this.getStorySceneId?.();
