@@ -186,14 +186,13 @@ export class Interior3D {
 
     // ---- Lights ----
     // 略微抬高环境光/半球光,让房间整体不再纯黑(仍保留昏暗恐怖基调)。
-    const isBaisha = options.buildingId === "dorm-baisha";
-    this.ambientLight = new THREE.AmbientLight(isBaisha ? 0x3a2830 : 0x2a3038, isBaisha ? 1.6 : 0.85);
+    this.ambientLight = new THREE.AmbientLight(0x2a3038, 0.85);
     this.scene.add(this.ambientLight);
-    this.fillLight = new THREE.HemisphereLight(0x28303c, 0x0a0c10, isBaisha ? 1.0 : 0.55);
+    this.fillLight = new THREE.HemisphereLight(0x28303c, 0x0a0c10, 0.55);
     this.scene.add(this.fillLight);
 
     // 近距离补光:跟随相机的一盏很弱、短射程点光,只照亮角色周围、脚下和近处墙壁。
-    this.nearFillLight = new THREE.PointLight(isBaisha ? 0xd4b8b0 : 0xaeb6c6, isBaisha ? 1.4 : 0.85, 5.0, 2.0);
+    this.nearFillLight = new THREE.PointLight(0xaeb6c6, 0.85, 5.0, 2.0);
     this.nearFillLight.position.set(0, -0.2, 0.1);
     this.camera.add(this.nearFillLight);
 
@@ -203,7 +202,7 @@ export class Interior3D {
     this.scheduleBloodFlash(0);
 
     // Flashlight follows the camera.
-    this.flashlight = new THREE.SpotLight(0xfff2d0, 6.0, 20, Math.PI / 6, 0.4, 1.4);
+    this.flashlight = new THREE.SpotLight(0xfff2d0, 3.5, 20, Math.PI / 6, 0.4, 1.4);
     this.flashlight.position.set(0, 0, 0);
     if (!this.isMobile) {
       this.flashlight.castShadow = true;
@@ -429,22 +428,66 @@ export class Interior3D {
 
       this.assetHandle = handle;
 
-      // 白沙宿舍模型原点偏移：Blender 中缩放后原点未归零，
-      // 需要将宿舍地板中心移动到 (x≈-4.5, y≈0, z≈4) 附近。
-      // 命名节点（GHOST_SLENDER 等）的 local position 需补偿根偏移。
+      // 新宿舍 GLB 原点偏移：Blender 模型缩放后原点未归零，
+      // 需将宿舍中心平移到游戏坐标 (~ -4.5, 0, ~4)
       if (buildingId === "dorm-baisha") {
         const rx = -97, ry = -24.7, rz = -46;
         handle.root.position.set(rx, ry, rz);
-
         const reposition = (name: string, wx: number, wy: number, wz: number) => {
           const node = handle.root.getObjectByName(name);
           if (node) node.position.set(wx - rx, wy - ry, wz - rz);
         };
-        // 世界坐标 → local position 补偿
-        reposition("GHOST_SLENDER",             -8.5,  1.6, 11.5);
-        reposition("GATE_SHORTCUT",             -6.0,  1.6, 16.0);
-        reposition("PICKUP_PHOTOGRAPH_VISUAL",  -4.5,  0.8,  4.5);
-        reposition("PICKUP_ENERGY_VISUAL",      10.0,  0.8, 22.0);
+        reposition("GHOST_SLENDER",             -8.5, 1.6, 11.5);
+        reposition("GATE_SHORTCUT",             -6.0, 1.6, 16.0);
+        reposition("PICKUP_PHOTOGRAPH_VISUAL",  -4.5, 0.8,  4.5);
+        reposition("PICKUP_ENERGY_VISUAL",      10.0, 0.8, 22.0);
+
+        // 隐藏我加的所有假灯管 mesh（模型自带吊灯才是正确光源）
+        for (let i = 0; i < 13; i++) {
+          const fakeMesh = handle.root.getObjectByName(`RUN_LIGHT_MESH_${String(i).padStart(2, "0")}`);
+          if (fakeMesh) fakeMesh.visible = false;
+        }
+
+        // 将模型自带的吊灯材质改为血红色自发光
+        // 关键：clone() 材质，因为吊灯和地板共享材质索引，直接改会染红地板
+        for (const name of ["吊灯1", "吊灯2"]) {
+          const chandelier = handle.root.getObjectByName(name);
+          if (!chandelier) continue;
+          chandelier.traverse((child) => {
+            const mesh = child as THREE.Mesh;
+            if (!mesh.isMesh) return;
+            if (Array.isArray(mesh.material)) {
+              mesh.material = mesh.material.map(m => (m as THREE.MeshStandardMaterial).clone());
+              for (const mat of mesh.material) {
+                const std = mat as THREE.MeshStandardMaterial;
+                std.emissive = new THREE.Color(0xff0000);
+                std.emissiveIntensity = 8.0;
+              }
+            } else {
+              mesh.material = (mesh.material as THREE.MeshStandardMaterial).clone();
+              const std = mesh.material as THREE.MeshStandardMaterial;
+              std.emissive = new THREE.Color(0xdd1111);
+              std.emissiveIntensity = 5.0;
+            }
+          });
+          // 挂红色 PointLight
+          const worldPos = new THREE.Vector3();
+          chandelier.getWorldPosition(worldPos);
+          const pt = new THREE.PointLight(0xdd1111, 100, 14, 2);
+          pt.name = `DORM_CEILING_LIGHT`;
+          pt.position.copy(worldPos);
+          handle.root.add(pt);
+        }
+
+        // 走廊补几个红色 PointLight（追逐阶段用）
+        const corridorSpots = [[-8.5,11.5],[-8.5,14],[-5,17],[2,19],[7,14],[7,18],[7,22]];
+        for (let i = 0; i < corridorSpots.length; i++) {
+          const [wx, wz] = corridorSpots[i];
+          const pt = new THREE.PointLight(0xdd1111, 0, 10, 1.5);
+          pt.name = `CORRIDOR_LIGHT_${String(i).padStart(2, "0")}`;
+          pt.position.set(wx, 3.1, wz);
+          handle.root.add(pt);
+        }
       }
 
       this.scene.add(handle.root);

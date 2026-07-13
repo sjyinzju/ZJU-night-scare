@@ -2,20 +2,19 @@ import * as THREE from "three";
 import type { AABB, InteriorGuideNode, Pickup, RoomBuildResult } from "./buildRoom";
 
 const PHOTO_SPOTS = [
-  { x: -4.5, z: 4.5 },
-  { x: -3.8, z: 4.1 },
-  { x: -3.0, z: 5.5 },
-  { x: -4.1, z: 3.2 },
+  { x: -5.5, z: 6.0 },
+  { x: -3.8, z: 7.0 },
+  { x: -5.5, z: 8.0 },
+  { x: -2.5, z: 5.5 },
 ];
 
 /**
- * Gameplay-only geometry for the authored Baisha GLB.  The rendered scene is
- * supplied by Blender; this small fallback owns collision, pickup and route
- * truth so the level remains playable if a visual LOD cannot be fetched.
+ * Gameplay-only geometry for the new dorm GLB (3D_Assets\宿舍\宿舍.blend).
+ * The GLB root is offset by (-97, -24.7, -46) to centre the dorm.
  *
- * Coordinate system: after GLB root offset of (-97, -24.7, -46),
- * the dorm room is centered around x≈-4.5, z≈4.
- * The corridor extends from the dorm door (z≈10) forward to z≈25 and right to x≈26.
+ * After offset:
+ *   dorm centred near (-4.5, 0, ~4), door at z≈10
+ *   corridor extends right to x≈26, forward to z≈25
  */
 export function buildBaishaRunRoom(photoAnchor: number): RoomBuildResult {
   const root = new THREE.Group();
@@ -23,31 +22,28 @@ export function buildBaishaRunRoom(photoAnchor: number): RoomBuildResult {
   const geometries: THREE.BufferGeometry[] = [];
   const materials: THREE.Material[] = [];
   const colliders: AABB[] = [
-    // Dorm entry door gate — blocks exit until photo is acknowledged
+    // 门禁：初始锁住，拾取照片后打开
     { minX: -5.5, maxX: -3.5, minZ: 9.3, maxZ: 10.3, gateId: "baisha-entry" },
-    // Shortcut gate in corridor — blocks player until cut-off sequence
-    { minX: -9, maxX: 2, minZ: 15.5, maxZ: 17, gateId: "baisha-shortcut" },
+    // 捷径门：cut-off 阶段打开
+    { minX: -9, maxX: -6.5, minZ: 16, maxZ: 18, gateId: "baisha-shortcut" },
 
-    // ── 走廊外墙碰撞体（防止穿墙走到场景外）──
-    // 走廊左侧外墙
-    { minX: -9.5, maxX: -8.8, minZ: 10, maxZ: 26 },
-    // 走廊顶侧外墙
-    { minX: -9, maxX: 27, minZ: 25.5, maxZ: 26.5 },
-    // 走廊右侧外墙
-    { minX: 26.5, maxX: 27.5, minZ: 10, maxZ: 26 },
-
-    // ── 宿舍外墙碰撞体（防止穿墙）──
-    // 宿舍左侧墙
-    { minX: -7, maxX: -6.3, minZ: 2, maxZ: 10 },
-    // 宿舍右侧墙
-    { minX: -1.7, maxX: -1, minZ: 2, maxZ: 10 },
-    // 宿舍后墙（门的左右两侧）
-    { minX: -7, maxX: -5.5, minZ: 9.5, maxZ: 10.5 },
-    { minX: -3.5, maxX: -1, minZ: 9.5, maxZ: 10.5 },
+    // ── 外墙：基于 GLB 实际几何位置 ──
+    // 走廊左边界 (x≈-7.5)
+    { minX: -8, maxX: -7.3, minZ: 9.5, maxZ: 26 },
+    // 走廊右边界 (x≈26.5)
+    { minX: 26.5, maxX: 27.5, minZ: 9.5, maxZ: 26 },
+    // 走廊远端墙 (z≈25)
+    { minX: -8, maxX: 27.5, minZ: 25.5, maxZ: 26.5 },
+    // 宿舍左墙 (x≈-7.5)
+    { minX: -8, maxX: -7.3, minZ: 0, maxZ: 9.5 },
+    // 宿舍右墙 (x≈-1.5)
+    { minX: -2, maxX: -1.3, minZ: 0, maxZ: 9.5 },
+    // 宿舍前墙 (z≈0)
+    { minX: -8, maxX: -1.3, minZ: -1, maxZ: 0.5 },
   ];
 
   const pickupMat = (color: number) => {
-    const mat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.75, roughness: 0.3 });
+    const mat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 3.0, roughness: 0.3 });
     materials.push(mat);
     return mat;
   };
@@ -56,26 +52,23 @@ export function buildBaishaRunRoom(photoAnchor: number): RoomBuildResult {
     group.name = `fallback_${id}`;
     group.position.set(position.x, 0.78, position.z);
     root.add(group);
-    const core = new THREE.Mesh(new THREE.IcosahedronGeometry(0.14, 1), pickupMat(color));
+    const core = new THREE.Mesh(new THREE.IcosahedronGeometry(0.18, 1), pickupMat(color));
     geometries.push(core.geometry);
     group.add(core);
-    const haloMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.22, depthWrite: false });
+    const haloMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.35, depthWrite: false });
     materials.push(haloMat);
-    const halo = new THREE.Mesh(new THREE.SphereGeometry(0.42, 12, 8), haloMat);
+    const halo = new THREE.Mesh(new THREE.SphereGeometry(0.55, 12, 8), haloMat);
     geometries.push(halo.geometry);
     group.add(halo);
-    const light = new THREE.PointLight(color, 1.8, 4.5, 2);
+    const light = new THREE.PointLight(color, 5.0, 10.0, 2);
     group.add(light);
-    return { id, itemId: id, name, glow: group, position: group.position.clone(), radius: 0.78, taken: false };
+    return { id, itemId: id, name, glow: group, position: group.position.clone(), radius: 0.9, taken: false };
   };
 
-  // 老照片 — 宿舍桌面上随机位置
-  const photo = makePickup("photograph", "苏婉的老照片", PHOTO_SPOTS[photoAnchor % PHOTO_SPOTS.length], 0xffd37c);
-  // 能量饮料 — 走廊右段
+  const photo = makePickup("photograph", "苏婉的老照片", PHOTO_SPOTS[photoAnchor % PHOTO_SPOTS.length], 0x88ccff);
   const energy = makePickup("energy", "能量饮料", { x: 10, z: 22 }, 0xff4f3c);
   energy.glow.visible = false;
 
-  // 导航图：宿舍 → 门 → 走廊 → 出口
   const guideNodes: InteriorGuideNode[] = [
     { id: "dorm-center", x: -4.5, z: 4, links: ["dorm-door"] },
     { id: "dorm-door", x: -4.5, z: 9.5, links: ["dorm-center", "corridor-left"] },
@@ -85,10 +78,8 @@ export function buildBaishaRunRoom(photoAnchor: number): RoomBuildResult {
     { id: "exit", x: 22, z: 24, links: ["corridor-energy"] },
   ];
 
-  // 可步行矩形 — 一个连续的大矩形覆盖全部可玩区域，
-  // 外墙由 AABB colliders 阻挡，避免产生空气墙。
-  const isWalkable = (x: number, z: number) =>
-    x >= -8 && x <= 28 && z >= 2 && z <= 26;
+  // 关闭 isWalkable 软约束，避免空气墙。外墙由 colliders 阻挡，bounds 做最终 clamp。
+  const isWalkable = undefined;
 
   const update = (time: number): void => {
     for (const pickup of [photo, energy]) {
@@ -101,7 +92,7 @@ export function buildBaishaRunRoom(photoAnchor: number): RoomBuildResult {
   return {
     root,
     colliders,
-    bounds: { minX: -10, maxX: 30, minZ: -2, maxZ: 28 },
+    bounds: { minX: -11, maxX: 31, minZ: -2, maxZ: 29 },
     update,
     floorHeightAt: () => 0,
     pickups: [photo, energy],

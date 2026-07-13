@@ -1,5 +1,5 @@
 {
-  "assetVersion": 2,
+  "assetVersion": 1,
   "buildingId": "dorm-baisha",
   "roomKind": "dorm",
   "model": "scene.glb",
@@ -7,11 +7,10 @@
   "units": "meters",
   "qualityProfile": "baisha-high-asset-chase",
   "sourceAssets": [
-    "宿舍/宿舍.blend",
-    "已删除国旗（旗面×3 + 柱体×3）",
-    "缩放 0.1x → 天花板 ~3.6m",
-    "13 组红色灯管 RUN_LIGHT_* + 自发光材质",
-    "命名标记 DOOR_DORM_EXIT / GATE_SHORTCUT / GHOST_SLENDER / PICKUP_*"
+    "宿舍内景/dormitory_source.fbx",
+    "红砖贴图/BrickWall27_4K",
+    "走廊/CORIDOR/HORROR.blend",
+    "瘦长鬼影/Blender_2.81.blend"
   ],
   "spawn": {
     "x": -4.5,
@@ -20,34 +19,40 @@
     "yaw": 1.57
   },
   "bounds": {
-    "minX": -10,
-    "maxX": 30,
+    "minX": -11,
+    "maxX": 31,
     "minZ": -2,
-    "maxZ": 28
+    "maxZ": 29
   },
-  "pickupVisuals": {
-    "photograph": [
-      "PICKUP_PHOTOGRAPH_VISUAL"
-    ],
-    "energy": [
-      "PICKUP_ENERGY_VISUAL"
-    ]
-  },
+  "pickupVisuals": {},
   "pickupSpots": {
     "photograph": [
-      { "x": -4.5, "z": 4.5 },
-      { "x": -3.8, "z": 4.1 },
-      { "x": -3.0, "z": 5.5 },
-      { "x": -4.1, "z": 3.2 }
+      {
+        "x": -5.5,
+        "z": 6.0
+      },
+      {
+        "x": -3.8,
+        "z": 7.0
+      },
+      {
+        "x": -5.5,
+        "z": 8.0
+      },
+      {
+        "x": -2.5,
+        "z": 5.5
+      }
     ],
     "energy": [
-      { "x": 10, "z": 22 }
+      {
+        "x": 10,
+        "z": 22
+      }
     ]
   },
   "notes": [
-    "GLB 包含完整宿舍（床/桌/椅/柜/空调/淋浴）+ 红色灯管 + 走廊结构。",
-    "根节点偏移 (-97, -24.7, -46) 在 Interior3D.loadStaticInteriorAsset 中应用。",
-    "DOOR_DORM_EXIT、GATE_SHORTCUT、GHOST_SLENDER 坐标在代码中手动修正。",
-    "碰撞和可行走区域由 buildBaishaRunRoom.isWalkable 定义。"
+    "Static high-detail environment; TypeScript owns the run FSM, gates, nav route and pickup persistence.",
+    "GLB is Draco-compressed when supported by the installed Blender exporter. KTX2 decoder is configured frontend-side for future texture exports."
   ]
 }

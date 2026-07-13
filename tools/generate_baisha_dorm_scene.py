@@ -175,13 +175,13 @@ def corridor(name, x, z, w, d, brick, floor, ceiling, detail):
 
 
 def strip_light(index, x, z, rotation, active=True):
-    emissive = new_mat(f"red_strip_emissive_{index}", (0.38, 0.006, 0.008, 1), 0.35, 0.15, ((1, 0.005, 0.008, 1), 7.5))
+    emissive = new_mat(f"red_strip_emissive_{index}", (0.68, 0.01, 0.01, 1), 0.28, 0.12, ((0.95, 0.02, 0.015, 1), 8.5))
     cube(f"RUN_LIGHT_MESH_{index:02d}", x, 3.05, z, 2.15, 0.07, 0.16, emissive, rotation)
     bpy.ops.object.light_add(type="POINT", location=three_to_blender(x, 2.92, z))
     light = bpy.context.object
     light.name = f"RUN_LIGHT_{index:02d}"
-    light.data.color = (1.0, 0.02, 0.025)
-    light.data.energy = 165 if active else 0
+    light.data.color = (0.92, 0.03, 0.03)
+    light.data.energy = 220 if active else 0
     light.data.shadow_soft_size = 0.42
 
 

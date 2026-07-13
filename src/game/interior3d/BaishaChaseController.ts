@@ -26,9 +26,9 @@ export class BaishaChaseController {
   private openingStartedAt = 0;
   private missedEnergyAt = 0;
   private readonly ghostPath = [
-    new THREE.Vector3(-8, 0, 11.5),   // 鬼出生点：宿舍门外左侧
-    new THREE.Vector3(-5, 0, 14),      // 走廊中段
-    RIGHT_JUNCTION,                     // 走廊右段能量饮料处 (10, 0, 22)
+    new THREE.Vector3(-8, 0, 11.5),
+    new THREE.Vector3(-5, 0, 14),
+    RIGHT_JUNCTION,
   ];
   private ghostPathIndex = 0;
   private disposed = false;
@@ -251,17 +251,27 @@ export class BaishaChaseController {
     const root = this.visualRoot;
     if (!root) return;
     const player = this.camera.position;
+    const t = performance.now() / 1000;
     root.traverse((obj) => {
-      if (!obj.name.startsWith("RUN_LIGHT_")) return;
+      // 控制模型自带吊灯 + 走廊补光
+      const isDormLight = obj.name === "DORM_CEILING_LIGHT";
+      const isCorridorLight = obj.name.startsWith("CORRIDOR_LIGHT_");
+      if (!isDormLight && !isCorridorLight) return;
       const light = obj as THREE.Light;
       if (!light.isLight) return;
       const distance = Math.hypot(light.position.x - player.x, light.position.z - player.z);
+
       if (state.phase === "searching") {
-        // 探索阶段：低亮度红色氛围光，帮助玩家看清宿舍
-        light.intensity = distance < 8 ? 1.2 : 0;
+        // 探索阶段：吊灯暗红忽明忽暗，走廊灯全灭
+        if (isCorridorLight) { light.intensity = 0; return; }
+        if (distance > 10) { light.intensity = 0; return; }
+        const flicker = 0.55 + 0.45 * Math.sin(t * 2.7 + light.position.x * 3.1);
+        light.intensity = 100 * Math.max(0.25, flicker);
       } else {
-        // 追逐阶段：高亮度红色闪烁灯
-        light.intensity = distance < 10 ? 3.2 : 0;
+        // 追逐阶段：全部灯高亮剧烈闪烁
+        if (distance > 14) { light.intensity = 0; return; }
+        const flicker = 0.5 + 0.5 * Math.sin(t * 5.5 + light.position.x * 4.3);
+        light.intensity = (isDormLight ? 140 : 80) * Math.max(0.15, flicker);
       }
     });
   }
