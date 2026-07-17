@@ -4,7 +4,6 @@ import { DoorComponent } from "./DoorComponent";
 import { buildStraightStairs, buildLStairs } from "./StaircaseBuilder";
 import { RoomDivider } from "./RoomDivider";
 import { getInteriorStoryItems, getInteriorStoryTriggers, getStoryItemName } from "../storyEngine";
-import { buildBaishaRunRoom } from "./buildBaishaRunRoom";
 
 /** Room archetypes with distinct furniture layouts. */
 export type RoomKind = "library" | "medical" | "dorm" | "hall";
@@ -16,8 +15,6 @@ export interface AABB {
   minZ: number;
   maxZ: number;
   activeSceneIds?: string[];
-  /** Runtime-only gates used by the Baisha escape level. */
-  gateId?: "baisha-entry" | "baisha-shortcut";
 }
 
 /** A glowing, collectable item on the floor. */
@@ -81,8 +78,6 @@ export interface RoomBuildResult {
   npcGroups: THREE.Group[];
   /** Suggested spawn point for the camera. */
   spawn: THREE.Vector3;
-  /** Optional precise walkable topology, used by non-rectangular levels. */
-  isWalkable?: (x: number, z: number) => boolean;
   /** Free all geometries + materials. */
   dispose: () => void;
 }
@@ -116,8 +111,7 @@ const PALETTES: Record<RoomKind, Palette> = {
 
 const WALL_T = 0.28;
 
-export function buildRoom(kind: RoomKind, buildingId?: string, baishaPhotoAnchor = 0): RoomBuildResult {
-  if (kind === "dorm" && buildingId === "dorm-baisha") return buildBaishaRunRoom(baishaPhotoAnchor);
+export function buildRoom(kind: RoomKind): RoomBuildResult {
   const root = new THREE.Group();
   root.name = `room-${kind}`;
 

@@ -43,27 +43,18 @@ export interface InteriorAssetRequest {
   buildingId: string;
   roomKind: RoomKind;
   isMobile: boolean;
-  renderer?: THREE.WebGLRenderer;
-  /** 加载进度回调 0..1 */
-  onProgress?: (fraction: number) => void;
 }
 
 const ASSET_ROOTS: Record<string, string> = {
   "medical-library:library": "models/interiors/medical-library",
-  "dorm-baisha:dorm": "models/interiors/dorm-baisha",
 };
 
 let loader: import("three/examples/jsm/loaders/GLTFLoader.js").GLTFLoader | undefined;
-let dracoLoader: import("three/examples/jsm/loaders/DRACOLoader.js").DRACOLoader | undefined;
 
 async function getLoader(): Promise<import("three/examples/jsm/loaders/GLTFLoader.js").GLTFLoader> {
   if (!loader) {
     const { GLTFLoader } = await import("three/examples/jsm/loaders/GLTFLoader.js");
-    const { DRACOLoader } = await import("three/examples/jsm/loaders/DRACOLoader.js");
     loader = new GLTFLoader();
-    dracoLoader = new DRACOLoader();
-    dracoLoader.setDecoderPath(assetUrl("draco/"));
-    loader.setDRACOLoader(dracoLoader);
   }
   return loader;
 }
@@ -83,20 +74,19 @@ async function loadMeta(rootPath: string): Promise<InteriorAssetMeta | undefined
 }
 
 function tuneLoadedScene(root: THREE.Group): void {
-  root.name = "interior-asset";
+  root.name = "medical-library-asset";
   root.traverse((obj) => {
     const mesh = obj as THREE.Mesh;
     if (!mesh.isMesh) return;
-    // 仅对较大几何体（墙面、地板等）开启阴影，小装饰（书本、杂物）跳过
-    const box = mesh.geometry.boundingBox;
-    const large = !box || (box.max.x - box.min.x > 0.8 || box.max.z - box.min.z > 0.8);
-    mesh.castShadow = large;
-    mesh.receiveShadow = large;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
 
     const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     for (const mat of materials) {
       const standard = mat as THREE.MeshStandardMaterial;
-      if (standard.map) standard.map.anisotropy = Math.max(standard.map.anisotropy, 2);
+      for (const texture of [standard.map, standard.normalMap, standard.roughnessMap, standard.metalnessMap]) {
+        if (texture) texture.anisotropy = Math.max(texture.anisotropy, 4);
+      }
       standard.needsUpdate = true;
     }
   });
@@ -133,30 +123,7 @@ export async function loadInteriorAsset(req: InteriorAssetRequest): Promise<Inte
   const meta = await loadMeta(rootPath);
   const preferredModel = req.isMobile ? (meta?.lodModel ?? "scene.lod.glb") : (meta?.model ?? "scene.glb");
   const gltfLoader = await getLoader();
-  // KTX2 is optional per asset, but configured up front so future high-detail
-  // texture exports do not require another frontend pipeline change.
-  if (req.renderer) {
-    const { KTX2Loader } = await import("three/examples/jsm/loaders/KTX2Loader.js");
-    const ktx2Loader = new KTX2Loader();
-    ktx2Loader.setTranscoderPath(assetUrl("basis/"));
-    ktx2Loader.detectSupport(req.renderer);
-    gltfLoader.setKTX2Loader(ktx2Loader);
-  }
-
-  // 使用回调式 load 以支持 onProgress
-  const url = assetUrl(`${rootPath}/${preferredModel}`);
-  const gltf = await new Promise<{ scene: THREE.Group }>((resolve, reject) => {
-    gltfLoader.load(
-      url,
-      (result) => resolve(result as { scene: THREE.Group }),
-      (event) => {
-        if (event.total > 0 && req.onProgress) {
-          req.onProgress(event.loaded / event.total);
-        }
-      },
-      (err) => reject(err as Error),
-    );
-  });
+  const gltf = await gltfLoader.loadAsync(assetUrl(`${rootPath}/${preferredModel}`));
   const root = gltf.scene as THREE.Group;
   tuneLoadedScene(root);
 
