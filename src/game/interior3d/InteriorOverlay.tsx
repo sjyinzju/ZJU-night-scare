@@ -38,6 +38,9 @@ export default function InteriorOverlay({
   // 拾取道具时的短暂提示文案。
   const [pickupToast, setPickupToast] = useState<string | null>(null);
   const toastTimer = useRef<number | null>(null);
+  const [doorHint, setDoorHint] = useState("");
+  const [doorMessage, setDoorMessage] = useState<string | null>(null);
+  const doorMessageTimer = useRef<number | null>(null);
 
   // Joystick state.
   const joyRef = useRef<HTMLDivElement>(null);
@@ -117,6 +120,26 @@ export default function InteriorOverlay({
   // 卸载时清掉拾取提示定时器。
   useEffect(() => () => {
     if (toastTimer.current !== null) window.clearTimeout(toastTimer.current);
+    if (doorMessageTimer.current !== null) window.clearTimeout(doorMessageTimer.current);
+  }, []);
+
+  useEffect(() => {
+    const refreshDoorHint = (): void => {
+      setDoorHint(engineRef.current?.doorHint ?? "");
+    };
+    const hintTimer = window.setInterval(refreshDoorHint, 100);
+    const showDoorMessage = (event: Event): void => {
+      const message = (event as CustomEvent<{ message?: string }>).detail?.message;
+      if (!message) return;
+      setDoorMessage(message);
+      if (doorMessageTimer.current !== null) window.clearTimeout(doorMessageTimer.current);
+      doorMessageTimer.current = window.setTimeout(() => setDoorMessage(null), 2600);
+    };
+    window.addEventListener("zju-horror-door-message", showDoorMessage);
+    return () => {
+      window.clearInterval(hintTimer);
+      window.removeEventListener("zju-horror-door-message", showDoorMessage);
+    };
   }, []);
 
   const handleExit = useCallback(() => {
@@ -238,11 +261,14 @@ export default function InteriorOverlay({
         </div>
       )}
 
+      {doorMessage && <div style={styles.doorMessage}>{doorMessage}</div>}
+      {doorHint && <div style={styles.doorHint}>{doorHint}</div>}
+
       {/* Bottom control hint. */}
       <div style={styles.hint}>
         {isMobile
           ? "左下摇杆移动 · 右侧拖动看视角 · 右上角离开"
-          : "点击画面锁定鼠标 · WASD/方向键移动 · 移动鼠标转视角 · Esc 释放"}
+          : "点击画面锁定鼠标 · WASD/方向键移动 · E 交互 · 移动鼠标转视角 · Esc 释放"}
       </div>
 
       {/* Mobile virtual joystick, bottom-left. */}
@@ -365,6 +391,37 @@ const styles: Record<string, CSSProperties> = {
     maxWidth: "94vw",
     overflow: "hidden",
     textOverflow: "ellipsis",
+  },
+  doorHint: {
+    position: "absolute",
+    bottom: 58,
+    left: "50%",
+    transform: "translateX(-50%)",
+    zIndex: 6,
+    padding: "8px 16px",
+    borderRadius: 7,
+    background: "rgba(10,8,8,0.82)",
+    border: "1px solid rgba(215,183,118,0.5)",
+    color: "#f3d79a",
+    fontSize: 14,
+    letterSpacing: "0.08em",
+    pointerEvents: "none",
+    whiteSpace: "nowrap",
+  },
+  doorMessage: {
+    position: "absolute",
+    top: 76,
+    left: "50%",
+    transform: "translateX(-50%)",
+    zIndex: 7,
+    padding: "9px 18px",
+    borderRadius: 8,
+    background: "rgba(21,15,15,0.9)",
+    border: "1px solid rgba(179,50,46,0.65)",
+    color: "#f0c98a",
+    fontSize: 14,
+    letterSpacing: "0.08em",
+    pointerEvents: "none",
   },
   joystick: {
     position: "absolute",

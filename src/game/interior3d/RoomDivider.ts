@@ -28,6 +28,8 @@ export interface RoomDividerConfig {
   thickness?: number;
   /** Wall colour. */
   color?: number;
+  /** Align visible meshes with the configured segment. Opt-in keeps other rooms unchanged. */
+  alignVisualToSegment?: boolean;
   /** Door configuration. If provided, a door is placed in the wall. */
   door?: {
     /** Fractional position along the wall (0-1). Default 0.5. */
@@ -38,8 +40,12 @@ export interface RoomDividerConfig {
     height?: number;
     /** Key item ID if the door is locked. */
     keyItemId?: string;
+    /** Override whether the door begins locked. */
+    initiallyLocked?: boolean;
     /** Door label for interaction hint. */
     label?: string;
+    /** Put the panel pivot on the left door jamb instead of the doorway centre. */
+    pivotAtLeftJamb?: boolean;
   };
 }
 
@@ -69,7 +75,9 @@ export class RoomDivider {
     const ndz = dz / len;
     const pnx = -ndz; // perpendicular
     const pnz = ndx;
-    const angle = Math.atan2(ndx, ndz);
+    const angle = config.alignVisualToSegment
+      ? Math.atan2(-ndz, ndx)
+      : Math.atan2(ndx, ndz);
 
     const doorPos = config.door?.position ?? 0.5;
     const doorWidth = config.door?.width ?? 1.0;
@@ -125,6 +133,8 @@ export class RoomDivider {
         height: doorHeight,
         facing: angle,
         keyItemId: config.door.keyItemId,
+        initiallyLocked: config.door.initiallyLocked,
+        pivotAtLeftJamb: config.door.pivotAtLeftJamb,
         label: config.door.label ?? (config.door.keyItemId ? "上锁的门" : "门"),
       };
       this.door = new DoorComponent(doorCfg);

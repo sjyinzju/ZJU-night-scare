@@ -15,6 +15,8 @@ export interface AABB {
   minZ: number;
   maxZ: number;
   activeSceneIds?: string[];
+  /** Optional room-local live state, used by the medical-college door only. */
+  isActive?: () => boolean;
 }
 
 /** A glowing, collectable item on the floor. */
@@ -449,6 +451,7 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
   // Entrance mundane props (visible immediately so it never looks unloaded).
   addBox(1.6, 0.02, 1.0, 0, 0.011, halfL - 1.3, fabricMat, false);
   addBox(0.5, 0.9, 0.5, halfW - 1.0, 0.45, halfL - 1.4, metalMat);
+  let flatFloorHeightAt = (_x: number, _z: number): number => 0;
 
   if (kind === "medical") {
     for (let i = 0; i < 3; i++) {
@@ -469,18 +472,31 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
       wallHeight: WALL_H,
       thickness: 0.2,
       color: palette.wall,
-      door: { position: 0.5, width: 1.0, height: 2.2, keyItemId: "key_card", label: "地下仓库（需要门禁卡）" },
+      alignVisualToSegment: true,
+      // A 1 m opening left only ~0.24 m of centre-line tolerance after the
+      // collider padding and player radius were applied. Keep this medical
+      // doorway comfortably walkable without changing dividers in other rooms.
+      door: {
+        position: 0.5,
+        width: 1.6,
+        height: 2.2,
+        keyItemId: "key_card",
+        initiallyLocked: false,
+        label: "地下仓库门",
+        pivotAtLeftJamb: true,
+      },
     });
     root.add(medDivider.group);
     colliders.push(...medDivider.wallColliders);
     if (medDivider.door) {
       doors.push(medDivider.door);
-      colliders.push(medDivider.door.closedCollider);
+      const door = medDivider.door;
+      door.closedCollider.isActive = () => !door.isOpen;
+      colliders.push(door.closedCollider);
     }
-    // 隔间内：黑暗储物柜 + 解剖台暗示
+    // 隔间内保留两侧储物柜；中央通道必须直达地下仓库门。
     addBox(1.2, 0.5, 2.0, 1.5, 0.35, -halfL + 6.6, metalMat);
     addBox(1.2, 0.5, 2.0, -1.5, 0.35, -halfL + 6.6, metalMat);
-    addBox(2.0, 0.8, 0.8, 0, 0.55, -halfL + 6.3, stdMat(0x6f7d82, 0.85));
 
     // ── 剧情触发区（医学院内景：鬼现形 + 苏婉照片）──
     // 触发器碰撞区保持在地面，视觉改为天花板中式灯笼（不再悬空红球）
@@ -553,19 +569,30 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
       wallHeight: WALL_H,
       thickness: 0.2,
       color: palette.wall,
-      door: { position: 0.25, width: 1.0, height: 2.2, label: "卫生间门" },
+      alignVisualToSegment: true,
+      door: { position: 0.25, width: 1.6, height: 2.2, label: "宿舍门", pivotAtLeftJamb: true },
     });
     root.add(dormDivider.group);
     colliders.push(...dormDivider.wallColliders);
     if (dormDivider.door) {
       doors.push(dormDivider.door);
+      const door = dormDivider.door;
+      door.closedCollider.isActive = () => !door.isOpen;
+      colliders.push(door.closedCollider);
     }
+    guideNodes.push(
+      { id: "dorm-entry", x: 0, z: 5.6, links: ["dorm-door-front"] },
+      { id: "dorm-door-front", x: -2.0, z: -1.4, links: ["dorm-entry", "dorm-door-back"] },
+      { id: "dorm-door-back", x: -2.0, z: -2.6, links: ["dorm-door-front", "dorm-forum"] },
+      { id: "dorm-forum", x: -2.0, z: -3.6, links: ["dorm-door-back"] },
+    );
     // 隔断后面：一个小卫生间（洗手台 + 蹲位示意）
     addBox(0.6, 0.8, 0.4, 0, 0.4, -halfL + 6.7, whiteMat);
     addBox(0.7, 1.8, 0.06, 1.6, 0.9, -halfL + 6.8, fabricMat, false);
     getInteriorStoryTriggers("dorm").forEach((trigger) => {
       if (trigger.position === "forum") {
-        addStoryTrigger(trigger.sceneId, -halfW + 1.1, 0.85, -3.6, trigger.action, trigger.activeSceneIds, trigger.radius);
+        // Stand in front of the loft desk instead of inside its collision box.
+        addStoryTrigger(trigger.sceneId, -2.0, 0.85, -3.6, trigger.action, trigger.activeSceneIds, trigger.radius);
       }
     });
   } else {
@@ -573,7 +600,9 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
     const stageY = 0.5;
     const stageZ = -halfL + 3.5;
     // 舞台平台
-    addBox(ROOM_W - 1.5, stageY, 3.5, 0, stageY / 2, stageZ, woodMat);
+    addBox(ROOM_W - 1.5, stageY, 3.5, 0, stageY / 2, stageZ, woodMat, false);
+    flatFloorHeightAt = (x: number, z: number): number =>
+      Math.abs(x) <= (ROOM_W - 1.5) / 2 && Math.abs(z - stageZ) <= 3.5 / 2 ? stageY : 0;
     // 舞台幕布(红绒布柱)
     const curtainMat = stdMat(0x7b2229, 0.7);
     for (const sx of [-2.8, -1.4, 0, 1.4, 2.8]) {
@@ -598,14 +627,25 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
       wallHeight: WALL_H,
       thickness: 0.2,
       color: palette.wall,
-      door: { position: 0.6, width: 1.0, height: 2.2, label: "后台门" },
+      alignVisualToSegment: true,
+      door: { position: 0.6, width: 1.6, height: 2.2, label: "后台门", pivotAtLeftJamb: true },
     });
     root.add(hallDivider.group);
     colliders.push(...hallDivider.wallColliders);
     if (hallDivider.door) {
       doors.push(hallDivider.door);
-      colliders.push(hallDivider.door.closedCollider);
+      const door = hallDivider.door;
+      door.closedCollider.isActive = () => !door.isOpen;
+      colliders.push(door.closedCollider);
     }
+    guideNodes.push(
+      { id: "hall-entry", x: 0, z: 5.8, links: ["hall-right-aisle"] },
+      { id: "hall-right-aisle", x: 3.7, z: 4.0, links: ["hall-entry", "hall-right-mid"] },
+      { id: "hall-right-mid", x: 3.7, z: 1.5, links: ["hall-right-aisle", "hall-right-front"] },
+      { id: "hall-right-front", x: 3.7, z: -1.7, links: ["hall-right-mid", "hall-stage-edge"] },
+      { id: "hall-stage-edge", x: 3.3, z: -2.2, links: ["hall-right-front", "hall-stage-clue"] },
+      { id: "hall-stage-clue", x: 0, z: stageZ + 1.2, links: ["hall-stage-edge"] },
+    );
     // 后台：化妆台 + 道具箱
     addBox(1.6, 0.02, 0.9, 0, stageY + 0.01, -halfL + 1.2, fabricMat, false);
     addBox(0.9, 0.7, 0.5, -1.8, stageY + 0.35, -halfL + 0.9, woodMat);
@@ -630,7 +670,11 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
     const npcZ = -halfL + 1.6;
     npc.group.position.set(0.2, 0, npcZ);
     npc.group.rotation.y = 0;
-    colliders.push({ minX: -0.5, maxX: 0.7, minZ: npcZ - 0.5, maxZ: npcZ + 0.5 });
+    const npcCollider: AABB = { minX: -0.5, maxX: 0.7, minZ: npcZ - 0.5, maxZ: npcZ + 0.5 };
+    // The medical NPC starts hidden. Its collider must not remain as an
+    // invisible obstacle before the corresponding story phase reveals it.
+    if (kind === "medical") npcCollider.isActive = () => npc.group.visible;
+    colliders.push(npcCollider);
   }
   npc.group.visible = false;
   root.add(npc.group);
@@ -639,7 +683,7 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
   // Pickups on open, reachable floor (avoid furniture footprints per room).
   const items = getInteriorStoryItems(kind);
   const spotsByKind: Record<string, { x: number; z: number }[]> = {
-    medical: [{ x: 1.6, z: 2.2 }, { x: -1.4, z: -1.2 }],
+    medical: [{ x: -1.4, z: -1.2 }],
     dorm: [{ x: 0, z: 2.6 }, { x: 1.8, z: 1.4 }],
     hall: [{ x: -2.4, z: 0.2 }, { x: 2.4, z: 0.2 }],
   };
@@ -657,7 +701,7 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
   };
   const spawn = new THREE.Vector3(0, 1.6, halfL - 1.2);
 
-  return finalize(bounds, spawn, () => 0);
+  return finalize(bounds, spawn, flatFloorHeightAt);
 }
 
 // ============================================================ LIBRARY BUILDER

@@ -56,8 +56,8 @@ const INTERIOR_STORY_ITEMS: Record<string, InteriorStoryItemDefinition[]> = {
     { itemId: "flashlight", placement: "flashlight", activeSceneIds: ["library_intro", "library_sound"], color: 0xfff1a8 },
   ],
   medical: [
-    { itemId: "key_card", placement: "item-0", color: 0xffe08a },
-    { itemId: "medicine", placement: "item-1", color: 0x8fd0ff },
+    // The key card is already awarded by Zhang Yicheng before this chapter.
+    { itemId: "medicine", placement: "item-0", color: 0x8fd0ff },
   ],
   dorm: [
     { itemId: "photograph", placement: "item-0", color: 0xffe08a },

@@ -23,8 +23,12 @@ export interface DoorConfig {
   facing: number;
   /** Key item ID required to unlock.  Undefined → door is never locked. */
   keyItemId?: string;
+  /** Override the initial lock state when story progression already granted access. */
+  initiallyLocked?: boolean;
   /** Maximum open angle (radians). Default 90°. */
   openAngle?: number;
+  /** Place the rotating pivot on the left jamb while keeping `hinge` at the doorway centre. */
+  pivotAtLeftJamb?: boolean;
   /** Rotation speed multiplier. Default 2.5. */
   speed?: number;
   /** Custom label shown in the interaction hint. */
@@ -65,7 +69,7 @@ export class DoorComponent {
     this.hinge = config.hinge.clone();
     this.width = config.width;
     this.keyItemId = config.keyItemId;
-    this._isLocked = config.keyItemId !== undefined;
+    this._isLocked = config.initiallyLocked ?? (config.keyItemId !== undefined);
     this.openAngle = config.openAngle ?? Math.PI / 2; // 90°
     this.speed = config.speed ?? 2.5;
     this.label = config.label ?? (this._isLocked ? "上锁的门" : "门");
@@ -112,8 +116,9 @@ export class DoorComponent {
     knob.position.set(w - 0.2, h * 0.55, t / 2 + 0.06);
     this.panelGroup.add(knob);
 
-    // Pivot: rotation happens around the left edge (x = 0 in panelGroup space).
-    this.panelGroup.position.set(0, 0, 0);
+    // RoomDivider positions the parent at the doorway centre. Medical-college
+    // opts into a left-jamb pivot so its closed leaf spans the entire opening.
+    this.panelGroup.position.set(config.pivotAtLeftJamb ? -w / 2 : 0, 0, 0);
     this.group.add(this.panelGroup);
 
     // Lock indicator (small red/green dot above the handle).

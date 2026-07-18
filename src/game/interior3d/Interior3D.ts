@@ -1149,6 +1149,7 @@ export class Interior3D {
   }
 
   private isColliderActive(collider: AABB): boolean {
+    if (collider.isActive && !collider.isActive()) return false;
     if (!collider.activeSceneIds?.length) return true;
     const sceneId = this.getStorySceneId?.();
     return Boolean(sceneId && collider.activeSceneIds.includes(sceneId));
