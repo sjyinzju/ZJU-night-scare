@@ -44,10 +44,12 @@ jobs:
 
       - name: Combine site (homepage) + game
         run: |
-          mkdir -p publish/game
+          mkdir -p publish/game publish/pitch
           cp -r site/* publish/
           cp -r dist/game/* publish/game/
           cp -r dist/assets publish/game/
+          cp pitch/index.html pitch/motion.min.js publish/pitch/
+          cp -r pitch/images publish/pitch/
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
