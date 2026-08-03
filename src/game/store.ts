@@ -30,6 +30,8 @@ export type StoryStage = number;
 export type WorldState = "title" | "map" | "interior" | "ending" | "dead";
 export type TransitionState = "idle" | "entering" | "leaving";
 export type EnterableBuilding = { id: string; name: string; zone?: string };
+export const INITIAL_REVIVES = 2;
+export const REVIVE_SANITY = 65;
 
 export interface AtmosphereState {
   timeLabel: string;
@@ -59,6 +61,10 @@ export interface GameStore {
   nearBuilding: EnterableBuilding | null;
   // ── 玩家 ──
   playerIso: IsoPoint;
+  /** 初始生命不计在内；2 次复活 = 共 3 条命。 */
+  revivesRemaining: number;
+  /** 死亡场景会临时覆盖剧情指针，复活时回到最近的安全剧情。 */
+  lastSafeSceneId: StorySceneId;
 
   // ── 故事状态 (从 React 写入, Phaser 读取) ──
   storyState: {
@@ -94,6 +100,7 @@ export interface GameStore {
 
   // ── Actions ──
   setPlayerIso: (iso: IsoPoint) => void;
+  revive: () => boolean;
   startSession: (building: EnterableBuilding) => void;
   openInterior: (building: EnterableBuilding) => boolean;
   closeInterior: () => void;
@@ -148,13 +155,15 @@ const initialMiniMap: MiniMapSnapshot = {
   ghostVisible: false,
 };
 
-export const useGameStore = create<GameStore>((set) => ({
+export const useGameStore = create<GameStore>((set, get) => ({
   world: "title",
   transition: "idle",
   gameStarted: false,
   interiorBuilding: null,
   nearBuilding: null,
   playerIso: { x: 19.4, y: 30.2 },
+  revivesRemaining: INITIAL_REVIVES,
+  lastSafeSceneId: "library_intro" as StorySceneId,
   storyState: { ...initialStoryState, stats: { ...initialStoryState.stats }, log: [...initialStoryState.log] },
   activeSceneId: null,
   guideHotspotId: "library" as HotspotId,
@@ -169,6 +178,33 @@ export const useGameStore = create<GameStore>((set) => ({
   jumpscareText: "别回头",
 
   setPlayerIso: (iso) => set({ playerIso: iso }),
+
+  revive: () => {
+    const state = get();
+    if (state.world !== "dead" || state.revivesRemaining <= 0) return false;
+    const restoredStoryState = {
+      ...state.storyState,
+      currentSceneId: state.lastSafeSceneId,
+      stats: { ...state.storyState.stats, sanity: REVIVE_SANITY },
+      log: [
+        `你在倒下的位置重新醒来。还剩 ${state.revivesRemaining - 1} 次复活机会。`,
+        ...state.storyState.log,
+      ].slice(0, 6),
+    };
+    set({
+      world: "map",
+      transition: "idle",
+      activeSceneId: null,
+      nearBuilding: null,
+      storyState: restoredStoryState,
+      guideHotspotId: getSceneHotspot(restoredStoryState.currentSceneId),
+      revivesRemaining: state.revivesRemaining - 1,
+      ghost: { ...initialGhost },
+      screenEffect: "",
+      nextObjectiveCue: null,
+    });
+    return true;
+  },
 
   startSession: (building) =>
     set({
@@ -207,7 +243,11 @@ export const useGameStore = create<GameStore>((set) => ({
   setStoryState: (updater) =>
     set((s) => {
       const storyState = updater(s.storyState);
-      return { storyState, guideHotspotId: getSceneHotspot(storyState.currentSceneId) };
+      return {
+        storyState,
+        guideHotspotId: getSceneHotspot(storyState.currentSceneId),
+        lastSafeSceneId: storyState.currentSceneId === "death_sanity" ? s.lastSafeSceneId : storyState.currentSceneId,
+      };
     }),
 
   setActiveSceneId: (id) =>
@@ -240,6 +280,8 @@ export const useGameStore = create<GameStore>((set) => ({
       interiorBuilding: null,
       nearBuilding: null,
       playerIso: { x: 19.4, y: 30.2 },
+      revivesRemaining: INITIAL_REVIVES,
+      lastSafeSceneId: "library_intro" as StorySceneId,
       storyState: {
         ...initialStoryState,
         stats: { ...initialStoryState.stats },

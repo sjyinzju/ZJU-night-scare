@@ -303,12 +303,16 @@ export class CampusScene extends Phaser.Scene {
     window.addEventListener("zju-horror-effect", this.handleHorrorEffect as EventListener);
     window.addEventListener("zju-horror-interior-state", this.handleInteriorState as EventListener);
     window.addEventListener("zju-horror-player-run-start", this.handlePlayerRunStart as EventListener);
+    window.addEventListener("zju-horror-player-relocate", this.handlePlayerRelocate as EventListener);
+    window.addEventListener("zju-horror-player-revive", this.handlePlayerRevive as EventListener);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.sceneReady = false;
       window.removeEventListener("zju-horror-map-state", this.handleMapState as EventListener);
       window.removeEventListener("zju-horror-effect", this.handleHorrorEffect as EventListener);
       window.removeEventListener("zju-horror-interior-state", this.handleInteriorState as EventListener);
       window.removeEventListener("zju-horror-player-run-start", this.handlePlayerRunStart as EventListener);
+      window.removeEventListener("zju-horror-player-relocate", this.handlePlayerRelocate as EventListener);
+      window.removeEventListener("zju-horror-player-revive", this.handlePlayerRevive as EventListener);
     });
 
     this.emitHud("", "沿红色虚线路线前进，绕开红鬼。");
@@ -2622,7 +2626,6 @@ export class CampusScene extends Phaser.Scene {
       return;
     }
     if (this.ghost.shouldRespawn) {
-      this.ghost.iso = this.pickGhostSpawnPoint();
       this.ghost.route = [];
       this.ghost.routeIndex = 1;
       this.ghost.shouldRespawn = false;
@@ -2678,7 +2681,11 @@ export class CampusScene extends Phaser.Scene {
       time - this.ghost.lastRouteAt > director.routeRefreshMs ||
       this.ghost.routeIndex >= this.ghost.route.length
     ) {
-      const target = director.fsm === "retreating" ? this.pickGhostSpawnPoint() : director.target;
+      const target = director.fsm === "retreating"
+        ? this.pickGhostSpawnPoint()
+        : director.fsm === "patrol"
+          ? this.pickGhostPatrolPoint()
+          : director.target;
       this.ghost.route = this.findRoadRoute(this.ghost.iso, target);
       this.ghost.routeIndex = 1;
       this.ghost.lastRouteAt = time;
@@ -2729,7 +2736,9 @@ export class CampusScene extends Phaser.Scene {
       this.cameras.main.shake(620, 0.018);
       this.flashScreen(0.72, 700);
       useGameStore.getState().setGhost({ visible: false });
-      window.dispatchEvent(new CustomEvent("zju-horror-ghost-hit", { detail: { type: "death" } }));
+      window.dispatchEvent(new CustomEvent("zju-horror-ghost-hit", {
+        detail: { type: "death", playerIso: { ...this.playerIso } },
+      }));
       return;
     }
     if (playerDistance <= GHOST_CLOSE_RADIUS && time - this.ghost.lastSanityHitAt > GHOST_SANITY_COOLDOWN) {
@@ -2965,12 +2974,14 @@ export class CampusScene extends Phaser.Scene {
   private emitMiniMap(time: number) {
     if (time - this.lastMiniMapAt < 80) return;
     this.lastMiniMapAt = time;
-    const active = Boolean(this.ghost && !this.dead && this.ghost.container.visible);
+    // 小地图是玩家的持续追踪工具：鬼在出生延迟或剧情遮挡期间仍保留位置，
+    // 不再因为世界精灵暂时隐藏而让红点凭空消失。
+    const trackable = Boolean(this.ghost && !this.dead);
     useGameStore.getState().setPlayerIso({ ...this.playerIso });
     useGameStore.getState().setMiniMap({
       player: { ...this.playerIso },
-      ghost: active && this.ghost ? { ...this.ghost.iso } : undefined,
-      ghostVisible: active,
+      ghost: trackable && this.ghost ? { ...this.ghost.iso } : undefined,
+      ghostVisible: trackable,
     });
   }
 
@@ -2999,25 +3010,62 @@ export class CampusScene extends Phaser.Scene {
     this.scheduleGhostRespawn();
   };
 
-  private handleInteriorState = (event: Event) => {
-    const detail = (event as CustomEvent<{ open: boolean }>).detail;
-    const wasFrozen = this.frozen;
-    this.frozen = detail.open;
+  private handleInteriorState = (_event: Event) => {
+    // 3D 内景初始化可能较慢，旧的 open=true 事件会在玩家已经离开后才抵达。
+    // 不信任事件快照，始终以共享状态里的当前内景为准，避免地图再次被错误冻结。
+    const interiorOpen = Boolean(getStore().interiorBuilding);
+    this.frozen = interiorOpen;
     // 进入内景时立刻停下外层玩家，避免退出后仍在漂移。
-    if (detail.open) this.touchInput = { x: 0, y: 0 };
+    if (interiorOpen) this.touchInput = { x: 0, y: 0 };
     // 退出内景时总是重生鬼（不管之前是否 frozen——Phaser 可能刚初始化）
-    if (!detail.open && this.ghost && !this.dead) this.scheduleGhostRespawn();
+    if (!interiorOpen && this.ghost && !this.dead) this.scheduleGhostRespawn();
+  };
+
+  private handlePlayerRelocate = (event: Event) => {
+    if (!this.sceneReady) return;
+    const detail = (event as CustomEvent<{ playerIso: IsoPoint }>).detail;
+    this.playerIso = this.snapToRoad(detail.playerIso);
+    this.lockedMoveDir = null;
+    this.lockedScreenDir = null;
+    this.touchInput = { x: 0, y: 0 };
+    const playerScreen = this.toScreen(this.playerIso);
+    this.player.setPosition(playerScreen.x, playerScreen.y);
+    this.cameras?.main?.centerOn(playerScreen.x, playerScreen.y);
+    useGameStore.getState().setPlayerIso({ ...this.playerIso });
+    this.emitMiniMap(this.time.now + 100);
+  };
+
+  private handlePlayerRevive = (event: Event) => {
+    if (!this.sceneReady) return;
+    const detail = (event as CustomEvent<{ playerIso: IsoPoint; sanity: number }>).detail;
+    this.dead = false;
+    this.storyOpen = false;
+    this.sanity = detail.sanity;
+    this.playerIso = this.snapToRoad(detail.playerIso);
+    this.lockedMoveDir = null;
+    this.lockedScreenDir = null;
+    this.touchInput = { x: 0, y: 0 };
+    const playerScreen = this.toScreen(this.playerIso);
+    this.player.setPosition(playerScreen.x, playerScreen.y);
+    this.player.setVisible(true);
+    this.playerBody.setFillStyle(0x2c3c45);
+    this.cameras?.main?.centerOn(playerScreen.x, playerScreen.y);
+    this.scheduleGhostRespawn();
+    this.flashScreen(0.22, 420);
+    this.emitMiniMap(this.time.now + 100);
   };
 
   private scheduleGhostRespawn() {
     if (!this.ghost) return;
+    const spawn = this.pickGhostSpawnPoint();
+    this.ghost.iso = spawn;
     this.ghost.container.setVisible(false);
     this.ghost.nextSpawnAt = this.time.now + GHOST_SPAWN_DELAY;
     this.ghost.shouldRespawn = true;
     this.ghost.route = [];
     this.ghost.routeIndex = 1;
     audioManager.updateGhostBreath(999);
-    useGameStore.getState().setGhost({ visible: false, fsm: "hidden" });
+    useGameStore.getState().setGhost({ iso: { ...spawn }, visible: false, fsm: "hidden" });
   }
 
   private handleHorrorEffect = (event: Event) => {
@@ -3107,6 +3155,19 @@ export class CampusScene extends Phaser.Scene {
     return farthest ? { ...farthest } : { ...this.playerIso };
   }
 
+  /** 巡逻必须选择新的道路目标；把自身位置当目标会生成零长度路线并永久停住。 */
+  private pickGhostPatrolPoint() {
+    if (!this.ghost) return this.randomRoadPoint();
+    for (let i = 0; i < 48; i += 1) {
+      const point = this.randomRoadPoint();
+      const directDistance = Math.hypot(point.x - this.ghost.iso.x, point.y - this.ghost.iso.y);
+      if (directDistance < 5) continue;
+      const route = this.findRoadRoute(this.ghost.iso, point);
+      if (this.routeLength(route) >= 6) return point;
+    }
+    return this.pickGhostSpawnPoint();
+  }
+
   private randomRoadPoint(): IsoPoint {
     let total = 0;
     const segments: { a: IsoPoint; b: IsoPoint; length: number }[] = [];
@@ -3143,10 +3204,6 @@ export class CampusScene extends Phaser.Scene {
     return campusRoadGraph.findRoute(from, to);
   }
 }
-
-
-
-
 
 
 
