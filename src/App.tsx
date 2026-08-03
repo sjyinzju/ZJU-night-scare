@@ -31,7 +31,7 @@ import {
   type StorySceneId,
 } from "./game/storyData";
 import { useGameAudio } from "./game/audio/useGameAudio";
-import { useGameStore } from "./game/store";
+import { INITIAL_REVIVES, REVIVE_SANITY, useGameStore } from "./game/store";
 import { pickJumpscareText, contextForHotspot, textVariantClass, type JumpscareContext } from "./game/jumpscareTexts";
 import { JumpscarePipeline } from "./game/JumpscarePipeline";
 import {
@@ -261,8 +261,11 @@ function App() {
   const nextObjectiveCue = useGameStore((s) => s.nextObjectiveCue);
   const setNextObjectiveCue = useGameStore((s) => s.setNextObjectiveCue);
   const gameStarted = useGameStore((s) => s.gameStarted);
+  const world = useGameStore((s) => s.world);
   const interiorBuilding = useGameStore((s) => s.interiorBuilding);
   const nearBuilding = useGameStore((s) => s.nearBuilding);
+  const revivesRemaining = useGameStore((s) => s.revivesRemaining);
+  const revive = useGameStore((s) => s.revive);
   const startSession = useGameStore((s) => s.startSession);
   const openInterior = useGameStore((s) => s.openInterior);
   const closeInterior = useGameStore((s) => s.closeInterior);
@@ -549,10 +552,22 @@ function App() {
     if (nearBuilding) openInterior(nearBuilding);
   }, [nearBuilding, openInterior]);
 
+  const placePlayerAtInteriorExit = useCallback((buildingId?: string) => {
+    if (!buildingId) return false;
+    const exitPoint = campusBuildings.find((building) => building.id === buildingId)?.exitPoint;
+    if (!exitPoint) return false;
+    setPlayerIso({ ...exitPoint });
+    window.dispatchEvent(new CustomEvent("zju-horror-player-relocate", {
+      detail: { playerIso: { ...exitPoint } },
+    }));
+    return true;
+  }, [setPlayerIso]);
+
   const leaveInterior = useCallback(() => {
+    placePlayerAtInteriorExit(interiorBuilding?.id);
     closeInterior();
     setPhaserReady(true);
-  }, [closeInterior]);
+  }, [closeInterior, interiorBuilding?.id, placePlayerAtInteriorExit]);
 
   const leaveInteriorFromTrigger = useCallback(() => {
     const nextActiveSceneId = resolveInteriorExitTrigger(storyState);
@@ -560,12 +575,12 @@ function App() {
     // prevents a newly-created map from immediately retargeting the player
     // back into the library to discover the same scene again.
     if (nextActiveSceneId) setActiveSceneId(nextActiveSceneId);
-    if (storyState.currentSceneId === "library_police") {
+    if (!placePlayerAtInteriorExit(interiorBuilding?.id) && storyState.currentSceneId === "library_police") {
       setPlayerIso({ x: 19.4, y: 30.2 });
     }
     closeInterior();
     setPhaserReady(true);
-  }, [closeInterior, setPlayerIso, setActiveSceneId, storyState]);
+  }, [closeInterior, interiorBuilding?.id, placePlayerAtInteriorExit, setPlayerIso, setActiveSceneId, storyState]);
 
   // Story interiors cannot be abandoned through the top-right button.  The
   // active red exit performs the atomic "leave + show outdoor scene" step.
@@ -591,9 +606,20 @@ function App() {
     setGameSessionId((value) => value + 1);
   }, [resetAll, resetAudio, startSession]);
 
+  const reviveGame = useCallback(() => {
+    const deathPoint = { ...useGameStore.getState().playerIso };
+    if (!revive()) return;
+    JumpscarePipeline.reset();
+    triggerEffect("reveal");
+    window.dispatchEvent(new CustomEvent("zju-horror-player-revive", {
+      detail: { playerIso: deathPoint, sanity: REVIVE_SANITY },
+    }));
+  }, [revive, triggerEffect]);
+
   useEffect(() => {
     const handleGhostHit = (event: Event) => {
-      const detail = (event as CustomEvent<{ type: "sanity" | "death"; amount?: number }>).detail;
+      const detail = (event as CustomEvent<{ type: "sanity" | "death"; amount?: number; playerIso?: IsoPoint }>).detail;
+      if (detail.playerIso) setPlayerIso({ ...detail.playerIso });
 
       // 使用 storyEngine 的统一鬼伤害管道（护身符格挡、日志、死亡判断全部统一）
       setStoryState((previous) => {
@@ -608,6 +634,15 @@ function App() {
         } else {
           playGhostHit();
           triggerEffect("jumpscare", result.talismanBlocked ? "ghost_close" : "ghost_close");
+          // 红鬼的致命碰撞若被护身符挡住，Phaser 侧仍需解除碰撞锁并把鬼移走。
+          if (detail.type === "death" && result.talismanBlocked) {
+            const survivedAt = detail.playerIso ?? useGameStore.getState().playerIso;
+            window.setTimeout(() => {
+              window.dispatchEvent(new CustomEvent("zju-horror-player-revive", {
+                detail: { playerIso: { ...survivedAt }, sanity: result.nextState.stats.sanity },
+              }));
+            }, 0);
+          }
         }
 
         return result.nextState;
@@ -616,7 +651,7 @@ function App() {
 
     window.addEventListener("zju-horror-ghost-hit", handleGhostHit);
     return () => window.removeEventListener("zju-horror-ghost-hit", handleGhostHit);
-  }, [playGhostHit, setWorld, triggerEffect]);
+  }, [playGhostHit, setPlayerIso, setWorld, triggerEffect]);
 
   // ── Jumpscare pipeline listener ──
   useEffect(() => {
@@ -689,7 +724,7 @@ function App() {
           // Clear the in-room modal before mounting Phaser.  A stale modal
           // used to leave the newly-created map frozen at the library door.
           setActiveSceneId(null);
-          if (activeScene.locationId === "library") {
+          if (!placePlayerAtInteriorExit(interiorBuilding?.id) && activeScene.locationId === "library") {
             setPlayerIso({ x: 19.4, y: 30.2 });
           }
           closeInterior();
@@ -705,7 +740,7 @@ function App() {
         }
       }
     },
-    [activeScene, closeInterior, interiorBuilding, openInterior, playChoice, setActiveSceneId, setPlayerIso, storyState, triggerNarrativeEffect],
+    [activeScene, closeInterior, interiorBuilding, openInterior, placePlayerAtInteriorExit, playChoice, setActiveSceneId, setPlayerIso, storyState, triggerNarrativeEffect],
   );
 
   const usableItems = useMemo<Set<ItemId>>(
@@ -715,6 +750,7 @@ function App() {
 
   const rootClass = ["appShell", !gameStarted ? "titleMode" : "", screenEffect ? `fx-${screenEffect}` : ""].filter(Boolean).join(" ");
   const completedCount = storyState.completedHotspots.length;
+  const livesAvailable = revivesRemaining + (world === "dead" ? 0 : 1);
 
   return (
     <main className={rootClass}>
@@ -726,6 +762,18 @@ function App() {
             <span>00:47 / 紫金港校区</span>
           </div>
         </header>
+
+        <section className="railSection lifeStrip" aria-label={`剩余生命 ${livesAvailable}`}>
+          <div>
+            <span>生命</span>
+            <b>{livesAvailable}/{INITIAL_REVIVES + 1}</b>
+          </div>
+          <div className="lifeHearts" aria-hidden="true">
+            {Array.from({ length: INITIAL_REVIVES + 1 }, (_, index) => (
+              <Heart key={index} size={18} fill={index < livesAvailable ? "currentColor" : "none"} />
+            ))}
+          </div>
+        </section>
 
         <section className="railSection statusGrid" aria-label="状态">
           {(Object.entries(storyState.stats) as Array<[StatKey, number]>)
@@ -874,9 +922,21 @@ function App() {
               ))}
             </div>
             {activeScene.ending ? (
-              <button className="choiceButton primary" onClick={restartGame}>
-                重新开始
-              </button>
+              <div className="endingActions">
+                {activeScene.id === "death_sanity" && revivesRemaining > 0 && (
+                  <button className="choiceButton primary reviveButton" onClick={reviveGame} type="button">
+                    <span>原地复活</span>
+                    <em>剩余 {revivesRemaining} 次复活机会</em>
+                  </button>
+                )}
+                <button
+                  className={activeScene.id === "death_sanity" && revivesRemaining > 0 ? "choiceButton restartButton" : "choiceButton primary"}
+                  onClick={restartGame}
+                  type="button"
+                >
+                  重新开始
+                </button>
+              </div>
             ) : (
               <div className="choiceList">
                 {activeScene.choices.map((choice) => {

@@ -275,6 +275,41 @@ button {
   padding: 11px;
 }
 
+.lifeStrip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+}
+
+.lifeStrip > div:first-child {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.lifeStrip span {
+  color: var(--text-dim);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+}
+
+.lifeStrip b {
+  color: #f0d2c1;
+  font-size: 13px;
+}
+
+.lifeHearts {
+  display: flex;
+  gap: 5px;
+  color: #c94b46;
+}
+
+.lifeHearts svg {
+  filter: drop-shadow(0 0 7px rgba(201, 75, 70, 0.28));
+}
+
 .statusGrid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1203,6 +1238,37 @@ button {
   width: 160px;
   margin-top: 18px;
   text-align: center;
+}
+
+.endingActions {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.endingActions .choiceButton {
+  margin-top: 0;
+}
+
+.endingActions .reviveButton {
+  width: min(280px, 100%);
+}
+
+.endingActions .reviveButton em {
+  display: block;
+  margin-top: 4px;
+  color: rgba(255, 232, 216, 0.68);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.endingActions .restartButton {
+  width: auto;
+  min-width: 132px;
+  color: var(--text-dim);
+  background: rgba(16, 11, 11, 0.72);
 }
 
 .storyModal.ending {

@@ -40,6 +40,8 @@ export interface CampusBuilding {
   massing?: BuildingMass[];
   /** 标记为可进入建筑：玩家靠近后可进入第一人称 3D 内景。 */
   enterable?: boolean;
+  /** 离开 3D 内景后的安全落点，必须位于道路直线段而非拐角。 */
+  exitPoint?: IsoPoint;
 }
 
 export interface CampusRoad {
@@ -136,6 +138,7 @@ export const campusBuildings: CampusBuilding[] = [
   {
     id: "dorm-baisha",
     enterable: true,
+    exitPoint: { x: 7.6, y: 8.11 },
     name: "白沙宿舍区",
     zone: "living",
     x: 4.6,
@@ -728,6 +731,5 @@ export const storyTasks: CampusTask[] = [
     completedText: "门禁日志已读取",
   },
 ];
-
 
 
