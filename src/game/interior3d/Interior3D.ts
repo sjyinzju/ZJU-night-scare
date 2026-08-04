@@ -124,9 +124,18 @@ export class Interior3D {
     this.inputManager.handleKeyDown(e);
   };
   private readonly onKeyUp = (e: KeyboardEvent) => this.inputManager.handleKeyUp(e);
+  private readonly resetInput = () => {
+    this.inputManager.reset();
+    this.moveCtx.velocity.x = 0;
+    this.moveCtx.velocity.y = 0;
+  };
+  private readonly onVisibilityChange = () => {
+    if (document.hidden) this.resetInput();
+  };
   private readonly onMouseMove = (e: MouseEvent) => this.handleMouseMove(e);
   private readonly onPointerLockChange = () => {
     this.pointerLocked = document.pointerLockElement === this.renderer.domElement;
+    if (!this.pointerLocked) this.resetInput();
   };
   private readonly onCanvasClick = () => {
     if (!this.isMobile && !this.pointerLocked) this.requestPointerLock();
@@ -257,6 +266,9 @@ export class Interior3D {
     window.addEventListener("resize", this.onResize);
     window.addEventListener("keydown", this.onKeyDown);
     window.addEventListener("keyup", this.onKeyUp);
+    window.addEventListener("blur", this.resetInput);
+    window.addEventListener("pagehide", this.resetInput);
+    document.addEventListener("visibilitychange", this.onVisibilityChange);
     if (!this.isMobile) {
       document.addEventListener("mousemove", this.onMouseMove);
       document.addEventListener("pointerlockchange", this.onPointerLockChange);
@@ -354,6 +366,9 @@ export class Interior3D {
     window.removeEventListener("resize", this.onResize);
     window.removeEventListener("keydown", this.onKeyDown);
     window.removeEventListener("keyup", this.onKeyUp);
+    window.removeEventListener("blur", this.resetInput);
+    window.removeEventListener("pagehide", this.resetInput);
+    document.removeEventListener("visibilitychange", this.onVisibilityChange);
     document.removeEventListener("mousemove", this.onMouseMove);
     document.removeEventListener("pointerlockchange", this.onPointerLockChange);
     this.renderer.domElement.removeEventListener("click", this.onCanvasClick);
@@ -795,6 +810,13 @@ export class Interior3D {
     // 1. Feed the latest input snapshot into the context.
     const snap = this.inputManager.pollInput();
     ctx.input = snap;
+    if (snap.moveX === 0 && snap.moveZ === 0) {
+      // Horror exploration needs deterministic stops, not FPS-style inertia:
+      // once W/A/S/D or the virtual stick is released, horizontal motion ends
+      // on this frame instead of coasting through the room.
+      ctx.velocity.x = 0;
+      ctx.velocity.y = 0;
+    }
 
     // 2. Update ground state.
     ctx.wasOnGround = ctx.isOnGround;

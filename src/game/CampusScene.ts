@@ -303,6 +303,7 @@ export class CampusScene extends Phaser.Scene {
     window.addEventListener("zju-horror-effect", this.handleHorrorEffect as EventListener);
     window.addEventListener("zju-horror-interior-state", this.handleInteriorState as EventListener);
     window.addEventListener("zju-horror-player-run-start", this.handlePlayerRunStart as EventListener);
+    window.addEventListener("zju-horror-map-move-input", this.handleMapMoveInput as EventListener);
     window.addEventListener("zju-horror-player-relocate", this.handlePlayerRelocate as EventListener);
     window.addEventListener("zju-horror-player-revive", this.handlePlayerRevive as EventListener);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
@@ -311,6 +312,7 @@ export class CampusScene extends Phaser.Scene {
       window.removeEventListener("zju-horror-effect", this.handleHorrorEffect as EventListener);
       window.removeEventListener("zju-horror-interior-state", this.handleInteriorState as EventListener);
       window.removeEventListener("zju-horror-player-run-start", this.handlePlayerRunStart as EventListener);
+      window.removeEventListener("zju-horror-map-move-input", this.handleMapMoveInput as EventListener);
       window.removeEventListener("zju-horror-player-relocate", this.handlePlayerRelocate as EventListener);
       window.removeEventListener("zju-horror-player-revive", this.handlePlayerRevive as EventListener);
     });
@@ -319,6 +321,7 @@ export class CampusScene extends Phaser.Scene {
   }
 
   update(time: number, delta: number) {
+    this.syncInputLocksWithStore();
     const dt = Math.min(delta / 1000, 0.05);
     this.movePlayer(dt);
     this.updateGhost(time, dt);
@@ -3010,15 +3013,36 @@ export class CampusScene extends Phaser.Scene {
     this.scheduleGhostRespawn();
   };
 
+  private syncInputLocksWithStore() {
+    const state = getStore();
+    const nextFrozen = Boolean(state.interiorBuilding);
+    const nextStoryOpen = Boolean(state.activeSceneId) || !state.gameStarted;
+    const wasLocked = this.frozen || this.storyOpen;
+    const willBeLocked = nextFrozen || nextStoryOpen;
+
+    this.frozen = nextFrozen;
+    this.storyOpen = nextStoryOpen;
+
+    if (willBeLocked) {
+      this.touchInput = { x: 0, y: 0 };
+      this.input.keyboard?.resetKeys();
+    } else if (wasLocked) {
+      // 白沙内景退出可能错过 React 发出的单次解锁事件。每帧和 Store
+      // 对齐后，只要真实状态已经回到地图，就一定解除输入锁。
+      this.touchInput = { x: 0, y: 0 };
+      this.input.keyboard?.resetKeys();
+      if (this.ghost && !this.dead) this.scheduleGhostRespawn();
+    }
+  }
+
   private handleInteriorState = (_event: Event) => {
-    // 3D 内景初始化可能较慢，旧的 open=true 事件会在玩家已经离开后才抵达。
-    // 不信任事件快照，始终以共享状态里的当前内景为准，避免地图再次被错误冻结。
-    const interiorOpen = Boolean(getStore().interiorBuilding);
-    this.frozen = interiorOpen;
-    // 进入内景时立刻停下外层玩家，避免退出后仍在漂移。
-    if (interiorOpen) this.touchInput = { x: 0, y: 0 };
-    // 退出内景时总是重生鬼（不管之前是否 frozen——Phaser 可能刚初始化）
-    if (!interiorOpen && this.ghost && !this.dead) this.scheduleGhostRespawn();
+    this.syncInputLocksWithStore();
+  };
+
+  private handleMapMoveInput = (event: Event) => {
+    if (!this.sceneReady) return;
+    const detail = (event as CustomEvent<{ x: number; y: number }>).detail;
+    this.setTouchInput(detail.x, detail.y);
   };
 
   private handlePlayerRelocate = (event: Event) => {
@@ -3204,8 +3228,6 @@ export class CampusScene extends Phaser.Scene {
     return campusRoadGraph.findRoute(from, to);
   }
 }
-
-
 
 
 

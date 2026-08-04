@@ -149,6 +149,33 @@ export default function InteriorOverlay({
   }, [canExit, onExit]);
 
   // ---- Joystick pointer handlers ----
+  const resetJoystick = useCallback(() => {
+    joyPointerId.current = null;
+    const knob = joyKnobRef.current;
+    if (knob) knob.style.transform = "translate(0px, 0px)";
+    engineRef.current?.setMoveInput(0, 0);
+  }, []);
+
+  useEffect(() => {
+    const handlePointerRelease = (event: PointerEvent) => {
+      if (joyPointerId.current === event.pointerId) resetJoystick();
+    };
+    const handleVisibilityChange = () => {
+      if (document.hidden) resetJoystick();
+    };
+    window.addEventListener("pointerup", handlePointerRelease);
+    window.addEventListener("pointercancel", handlePointerRelease);
+    window.addEventListener("blur", resetJoystick);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("pointerup", handlePointerRelease);
+      window.removeEventListener("pointercancel", handlePointerRelease);
+      window.removeEventListener("blur", resetJoystick);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      resetJoystick();
+    };
+  }, [resetJoystick]);
+
   const onJoyDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
     joyPointerId.current = e.pointerId;
@@ -157,7 +184,12 @@ export default function InteriorOverlay({
       x: rect.left + rect.width / 2,
       y: rect.top + rect.height / 2,
     };
-    e.currentTarget.setPointerCapture(e.pointerId);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Safari can reject capture after an interrupted gesture.
+    }
+    engineRef.current?.setMoveInput(0, 0);
   }, []);
 
   const onJoyMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
@@ -178,11 +210,8 @@ export default function InteriorOverlay({
 
   const onJoyUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (joyPointerId.current !== e.pointerId) return;
-    joyPointerId.current = null;
-    const knob = joyKnobRef.current;
-    if (knob) knob.style.transform = "translate(0px, 0px)";
-    engineRef.current?.setMoveInput(0, 0);
-  }, []);
+    resetJoystick();
+  }, [resetJoystick]);
 
   // ---- Look-drag handlers (attached to the right-half surface) ----
   const onLookDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
@@ -280,6 +309,7 @@ export default function InteriorOverlay({
           onPointerMove={onJoyMove}
           onPointerUp={onJoyUp}
           onPointerCancel={onJoyUp}
+          onLostPointerCapture={resetJoystick}
         >
           <div ref={joyKnobRef} style={styles.joyKnob} />
         </div>

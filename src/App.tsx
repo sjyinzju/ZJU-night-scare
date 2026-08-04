@@ -96,13 +96,45 @@ function MapJoystick({ onMove }: { onMove: (x: number, y: number) => void }): Re
   const pointerId = useRef<number | null>(null);
   const origin = useRef({ x: 0, y: 0 });
 
+  const resetJoystick = useCallback(() => {
+    pointerId.current = null;
+    if (knobRef.current) knobRef.current.style.transform = "translate(0px, 0px)";
+    onMove(0, 0);
+  }, [onMove]);
+
+  useEffect(() => {
+    const handlePointerRelease = (event: PointerEvent) => {
+      if (pointerId.current === event.pointerId) resetJoystick();
+    };
+    const handleVisibilityChange = () => {
+      if (document.hidden) resetJoystick();
+    };
+    window.addEventListener("pointerup", handlePointerRelease);
+    window.addEventListener("pointercancel", handlePointerRelease);
+    window.addEventListener("blur", resetJoystick);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("pointerup", handlePointerRelease);
+      window.removeEventListener("pointercancel", handlePointerRelease);
+      window.removeEventListener("blur", resetJoystick);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      resetJoystick();
+    };
+  }, [resetJoystick]);
+
   const onDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
     pointerId.current = e.pointerId;
     const rect = e.currentTarget.getBoundingClientRect();
     origin.current = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-    e.currentTarget.setPointerCapture(e.pointerId);
-  }, []);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Safari can reject capture after an interrupted gesture. Window-level
+      // release listeners below still guarantee that movement is reset.
+    }
+    onMove(0, 0);
+  }, [onMove]);
 
   const onMovePointer = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
@@ -124,11 +156,9 @@ function MapJoystick({ onMove }: { onMove: (x: number, y: number) => void }): Re
   const onUp = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       if (pointerId.current !== e.pointerId) return;
-      pointerId.current = null;
-      if (knobRef.current) knobRef.current.style.transform = "translate(0px, 0px)";
-      onMove(0, 0);
+      resetJoystick();
     },
-    [onMove],
+    [resetJoystick],
   );
 
   return (
@@ -138,6 +168,7 @@ function MapJoystick({ onMove }: { onMove: (x: number, y: number) => void }): Re
       onPointerMove={onMovePointer}
       onPointerUp={onUp}
       onPointerCancel={onUp}
+      onLostPointerCapture={resetJoystick}
       aria-label="移动摇杆"
     >
       <div ref={knobRef} className="touchJoyKnob" />
@@ -544,8 +575,9 @@ function App() {
 
   // 虚拟摇杆把移动向量注入到 Phaser 的 CampusScene。
   const handleJoystick = useCallback((x: number, y: number) => {
-    const scene = gameRef.current?.scene?.getScene("CampusScene") as CampusScene | undefined;
-    scene?.setTouchInput?.(x, y);
+    window.dispatchEvent(new CustomEvent("zju-horror-map-move-input", {
+      detail: { x, y },
+    }));
   }, []);
 
   const enterNearBuilding = useCallback(() => {
