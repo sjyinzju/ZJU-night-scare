@@ -19,9 +19,8 @@ import {
 } from "./horrorConfig";
 import { storyHotspots, storyScenes, getSceneHotspot, type HorrorEffect, type HotspotId, type StoryHotspot, type StorySceneId } from "./storyData";
 import { audioManager } from "./audio/audioManager";
-import { useGameStore, getStore, type GhostFSM } from "./store";
+import { useGameStore, getStore } from "./store";
 import { campusRoadGraph, type RoadProjection } from "./mapGraph";
-import { decideGhostAction } from "./horrorDirector";
 import { HORROR_POST_FX_KEY, HorrorPostFxPipeline } from "./visualFxPipeline";
 import {
   resolveStoryBuildingEntry,
@@ -46,21 +45,18 @@ const JUNCTION_RADIUS = 1.85;
 // 玩家中心距离可进入建筑中心小于此值时，判定为"可进入"。
 const ENTER_RADIUS = 2.6;
 const WORLD_BOUNDS = { x: -1200, y: 0, width: 4300, height: 2200 };
-const GHOST_SPEED = 9.7;
-const GHOST_CHASE_SPEED = 14.4;
-const GHOST_STALK_SPEED = 7.2;
-const GHOST_PATROL_SPEED = 4.8;
+// The red ghost is a relentless pursuer. It is still slightly slower than a
+// player running flat-out (PLAYER_SPEED), but it never wastes time patrolling.
+const GHOST_CHASE_SPEED = 16;
 const GHOST_CLOSE_RADIUS = 1.65;
 const GHOST_CAUGHT_RADIUS = 0.55;
 const GHOST_SANITY_COOLDOWN = 2200;
-const GHOST_ROUTE_REFRESH_INTERVAL = 1350;
+// Recalculate against the player's latest road position often enough that a
+// turn at a junction is reflected immediately, including on mobile screens.
+const GHOST_ROUTE_REFRESH_INTERVAL = 140;
 const GHOST_SPAWN_DELAY = 3000;
 const GHOST_MIN_SPAWN_DISTANCE = 13;
 const GHOST_MIN_SPAWN_ROUTE_DISTANCE = 22;
-// FSM: 不同状态的距离/速度参数
-const FSM_STALK_DIST = 4.5;
-const FSM_CHASE_DIST = 2.2;
-const FSM_RETREAT_DURATION = 4000;
 
 type KeySet = {
   up: Phaser.Input.Keyboard.Key;
@@ -126,6 +122,7 @@ type GhostState = {
   route: IsoPoint[];
   routeIndex: number;
   lastRouteAt: number;
+  routeTarget: IsoPoint;
   lastSanityHitAt: number;
   nextSpawnAt: number;
   shouldRespawn: boolean;
@@ -2511,6 +2508,7 @@ export class CampusScene extends Phaser.Scene {
       route: [],
       routeIndex: 1,
       lastRouteAt: 0,
+      routeTarget: { ...this.playerIso },
       lastSanityHitAt: 0,
       nextSpawnAt: GHOST_SPAWN_DELAY, // 3秒后出生——兜底，不再依赖外部事件激活
       shouldRespawn: true,
@@ -2635,65 +2633,31 @@ export class CampusScene extends Phaser.Scene {
       this.flashGhostSpawnWarning();
     }
 
-    const playerDistance = Math.hypot(this.ghost.iso.x - this.playerIso.x, this.ghost.iso.y - this.playerIso.y);
-
     const currentFsm = getStore().ghost.fsm;
-    // 检测玩家是否在奔跑（Shift 按下 + 有移动输入）
-    const playerMoving = this.keys && (
-      this.keys.w.isDown || this.keys.a.isDown || this.keys.s.isDown || this.keys.d.isDown ||
-      this.keys.up.isDown || this.keys.down.isDown || this.keys.left.isDown || this.keys.right.isDown
-    );
-    const playerRunning = !this.frozen && playerMoving && this.keys && (
-      this.keys.w.isDown || this.keys.up.isDown
-    ) && (this.keys.w.isDown && this.keys.w.shiftKey || this.keys.up.isDown && this.keys.up.shiftKey);
-
-    const director = decideGhostAction(
-      {
-        currentFsm,
-        playerIso: this.playerIso,
-        ghostIso: this.ghost.iso,
-        ghostFacing: this.ghost.facing,
-        activeHotspot: this.activeHotspot,
-        sanity: this.sanity,
-        storyStage: this.storyStage,
-        lastSanityHitAt: this.ghost.lastSanityHitAt,
-        time,
-        playerIsRunning: playerRunning,
-      },
-      {
-        baseSpeed: GHOST_SPEED,
-        chaseSpeed: GHOST_CHASE_SPEED,
-        stalkSpeed: GHOST_STALK_SPEED,
-        patrolSpeed: GHOST_PATROL_SPEED,
-        caughtRadius: GHOST_CAUGHT_RADIUS,
-        chaseDistance: FSM_CHASE_DIST,
-        stalkDistance: FSM_STALK_DIST,
-        retreatDuration: FSM_RETREAT_DURATION,
-        routeRefreshMs: GHOST_ROUTE_REFRESH_INTERVAL,
-        viewConeAngle: Math.PI / 2.5,
-        viewDistance: 8.5,
-      },
-    );
-
-    if (director.fsm !== currentFsm) {
-      useGameStore.getState().setGhost({ fsm: director.fsm, lastStateChangeAt: time });
+    if (currentFsm !== "chasing") {
+      useGameStore.getState().setGhost({ fsm: "chasing", lastStateChangeAt: time });
     }
 
+    const roadTarget = this.snapToRoad(this.playerIso);
+    const targetShift = Math.hypot(
+      roadTarget.x - this.ghost.routeTarget.x,
+      roadTarget.y - this.ghost.routeTarget.y,
+    );
     if (
       !this.ghost.route.length ||
-      time - this.ghost.lastRouteAt > director.routeRefreshMs ||
+      time - this.ghost.lastRouteAt >= GHOST_ROUTE_REFRESH_INTERVAL ||
+      targetShift >= 0.18 ||
       this.ghost.routeIndex >= this.ghost.route.length
     ) {
-      const target = director.fsm === "retreating"
-        ? this.pickGhostSpawnPoint()
-        : director.fsm === "patrol"
-          ? this.pickGhostPatrolPoint()
-          : director.target;
-      this.ghost.route = this.findRoadRoute(this.ghost.iso, target);
+      // MapGraph uses Dijkstra over the complete campus-road graph, so this is
+      // always the shortest currently walkable route rather than a direct line
+      // through buildings or an old patrol destination.
+      this.ghost.route = this.findRoadRoute(this.ghost.iso, roadTarget);
       this.ghost.routeIndex = 1;
       this.ghost.lastRouteAt = time;
+      this.ghost.routeTarget = { ...roadTarget };
     }
-    let step = dt * director.speed;
+    let step = dt * GHOST_CHASE_SPEED;
     while (step > 0 && this.ghost.routeIndex < this.ghost.route.length) {
       const target = this.ghost.route[this.ghost.routeIndex];
       const dx = target.x - this.ghost.iso.x;
@@ -2724,8 +2688,9 @@ export class CampusScene extends Phaser.Scene {
     const p = this.toScreen(this.ghost.iso);
     this.ghost.container.setPosition(p.x, p.y);
     this.ghost.container.setDepth(p.y + 52);
-    // 不同 FSM 状态的视觉反馈
-    if (this.ghost.aura) this.ghost.aura.setAlpha(director.auraAlpha);
+    this.ghost.aura.setAlpha(0.74);
+
+    const playerDistance = Math.hypot(this.ghost.iso.x - this.playerIso.x, this.ghost.iso.y - this.playerIso.y);
 
     audioManager.updateGhostBreath(playerDistance);
 
@@ -3088,6 +3053,7 @@ export class CampusScene extends Phaser.Scene {
     this.ghost.shouldRespawn = true;
     this.ghost.route = [];
     this.ghost.routeIndex = 1;
+    this.ghost.routeTarget = { ...this.playerIso };
     audioManager.updateGhostBreath(999);
     useGameStore.getState().setGhost({ iso: { ...spawn }, visible: false, fsm: "hidden" });
   }
@@ -3179,19 +3145,6 @@ export class CampusScene extends Phaser.Scene {
     return farthest ? { ...farthest } : { ...this.playerIso };
   }
 
-  /** 巡逻必须选择新的道路目标；把自身位置当目标会生成零长度路线并永久停住。 */
-  private pickGhostPatrolPoint() {
-    if (!this.ghost) return this.randomRoadPoint();
-    for (let i = 0; i < 48; i += 1) {
-      const point = this.randomRoadPoint();
-      const directDistance = Math.hypot(point.x - this.ghost.iso.x, point.y - this.ghost.iso.y);
-      if (directDistance < 5) continue;
-      const route = this.findRoadRoute(this.ghost.iso, point);
-      if (this.routeLength(route) >= 6) return point;
-    }
-    return this.pickGhostSpawnPoint();
-  }
-
   private randomRoadPoint(): IsoPoint {
     let total = 0;
     const segments: { a: IsoPoint; b: IsoPoint; length: number }[] = [];
@@ -3228,6 +3181,5 @@ export class CampusScene extends Phaser.Scene {
     return campusRoadGraph.findRoute(from, to);
   }
 }
-
 
 
