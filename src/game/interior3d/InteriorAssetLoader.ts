@@ -46,10 +46,11 @@ export interface InteriorAssetRequest {
 }
 
 const ASSET_ROOTS: Record<string, string> = {
-  // Demo stability: keep the medical library on the procedural room whose
-  // visible furniture and collision boxes share the same source of truth.
-  // The imported GLB used different geometry, so the old procedural
-  // colliders appeared as invisible walls in otherwise empty walkways.
+  // The authored model and the current library builder now share the same
+  // coordinates for walls, furniture, spawn and story markers. Keep the
+  // procedural room alive as the collision/interaction authority and swap
+  // only its visuals after the GLB has loaded successfully.
+  "medical-library:library": "models/interiors/medical-library",
 };
 
 let loader: import("three/examples/jsm/loaders/GLTFLoader.js").GLTFLoader | undefined;

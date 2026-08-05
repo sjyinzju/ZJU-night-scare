@@ -139,7 +139,7 @@ export function isHotspotAccessible(hotspotId: HotspotId, guideHotspotId: Hotspo
 
 /**
  * 解析游戏开始时应该进入的建筑。
- * 始终从第一个热点（library / 医学分馆）开始。
+ * 始终从第一个热点（library / 农医馆）开始。
  */
 export function resolveGameStartBuilding(): StoryBuildingRef | null {
   const firstHotspot = storyHotspots.find((h) => h.order === 1);

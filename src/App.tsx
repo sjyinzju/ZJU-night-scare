@@ -623,7 +623,7 @@ function App() {
     triggerEffect("reveal");
     // 使用 storyEngine 统一解析起始建筑（始终从第一个热点开始）
     const startBuilding = resolveGameStartBuilding();
-    startSession(startBuilding ?? { id: "medical-library", name: "医学分馆", zone: "story" });
+    startSession(startBuilding ?? { id: "medical-library", name: "农医馆", zone: "story" });
   }, [startSession, triggerEffect]);
 
   const restartGame = useCallback(() => {
@@ -632,7 +632,7 @@ function App() {
     JumpscarePipeline.reset();
     setHud(initialHud);
     const startBuilding = resolveGameStartBuilding();
-    startSession(startBuilding ?? { id: "medical-library", name: "医学分馆", zone: "story" });
+    startSession(startBuilding ?? { id: "medical-library", name: "农医馆", zone: "story" });
     miniMapSnapshotRef.current = { player: { x: 19.4, y: 30.2 }, ghostVisible: false };
     resetAudio();
     setGameSessionId((value) => value + 1);

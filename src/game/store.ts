@@ -150,7 +150,7 @@ const initialAtmosphere: AtmosphereState = {
 };
 
 const initialMiniMap: MiniMapSnapshot = {
-  // 医学分馆门外：开场 3D 内景结束后回到这里，而不是默认的医学院入口。
+  // 农医馆门外：开场 3D 内景结束后回到这里，而不是默认的医学院入口。
   player: { x: 19.4, y: 30.2 },
   ghostVisible: false,
 };
