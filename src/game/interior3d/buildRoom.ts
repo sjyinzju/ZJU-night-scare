@@ -87,7 +87,7 @@ export interface RoomBuildResult {
 /** Map a building id / zone onto a room archetype. */
 export function classifyRoom(id: string, zone?: string): RoomKind {
   const key = `${id} ${zone ?? ""}`.toLowerCase();
-  // 医学分馆是图书馆，不是医院——用 library 布局（螺旋楼梯）
+  // 农医馆开场区域沿用 library 布局，而不是后续医学院的 medical 布局。
   if (/medical-library/.test(key)) return "library";
   if (/dorm|hostel|宿舍|寝|baisha|白沙/.test(key)) return "dorm";
   if (/medical|med|hospital|clinic|医|health|病/.test(key)) return "medical";
@@ -869,11 +869,15 @@ function buildLibrary(ctx: LibCtx): LibResult {
     { id: "right-entry", x: 0.75, z: -2.35, links: ["upper-cross", "intro"] },
     { id: "intro", x: 2.25, z: -2.05, links: ["right-entry"] },
     { id: "passage-top", x: -0.85, z: 0.05, links: ["upper-cross", "passage-bottom"] },
-    { id: "passage-bottom", x: -0.85, z: 2.2, links: ["passage-top", "shelf-entry", "gate-approach"] },
-    { id: "shelf-entry", x: 5.0, z: 2.35, links: ["passage-bottom", "shelf-aisle"] },
-    { id: "shelf-aisle", x: 5.0, z: 3.35, links: ["shelf-entry", "shelf-exit"] },
-    { id: "shelf-exit", x: 5.0, z: 6.82, links: ["shelf-aisle", "gate-approach"] },
-    { id: "gate-approach", x: 0.35, z: 6.85, links: ["passage-bottom", "shelf-exit", "gate"] },
+    { id: "passage-bottom", x: -0.85, z: 2.2, links: ["passage-top", "shelf-cross-left", "gate-approach"] },
+    // The imported shelves occupy x≈2 and x≈5.15. The former guide nodes sat
+    // inside those collider boxes, producing the old invisible-wall rollback.
+    // Cross the open row gap at z=3.35. The route then returns through the
+    // left passage; trying to cut across the last shelf row clips its collider.
+    { id: "shelf-cross-left", x: -0.85, z: 3.35, links: ["passage-bottom", "shelf-cross-mid"] },
+    { id: "shelf-cross-mid", x: 3.3, z: 3.35, links: ["shelf-cross-left", "shelf-aisle"] },
+    { id: "shelf-aisle", x: 5.0, z: 3.35, links: ["shelf-cross-mid"] },
+    { id: "gate-approach", x: 0.35, z: 6.85, links: ["passage-bottom", "gate"] },
     { id: "gate", x: 0.0, z: exitZ, links: ["gate-approach"] },
   );
 

@@ -422,7 +422,7 @@ export const campusBuildings: CampusBuilding[] = [
   {
     id: "medical-library",
     enterable: true,
-    name: "图书馆医学分馆",
+    name: "农医馆",
     zone: "story",
     x: 17.4,
     y: 28.5,
@@ -731,5 +731,4 @@ export const storyTasks: CampusTask[] = [
     completedText: "门禁日志已读取",
   },
 ];
-
 
