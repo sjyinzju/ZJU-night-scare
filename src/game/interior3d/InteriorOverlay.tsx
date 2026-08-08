@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useState, type CSSProperties } from "react";
-import { Interior3D } from "./Interior3D";
+import { Interior3D, type InteriorAssetState } from "./Interior3D";
 import { useGameStore } from "../store";
 
 export interface InteriorOverlayProps {
@@ -12,6 +12,9 @@ export interface InteriorOverlayProps {
   onExitTrigger?: () => void;
   /** When true, shows a virtual joystick + drag-to-look controls. */
   isMobile?: boolean;
+  /** Keeps the renderer hidden until authored static visuals are attached. */
+  blockUntilAssetReady?: boolean;
+  onAssetStateChange?: (state: InteriorAssetState) => void;
 }
 
 const JOYSTICK_RADIUS = 56;
@@ -28,13 +31,19 @@ export default function InteriorOverlay({
   canExit = true,
   onExitTrigger,
   isMobile = false,
+  blockUntilAssetReady = false,
+  onAssetStateChange,
 }: InteriorOverlayProps): React.ReactElement {
   const hostRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<Interior3D | null>(null);
   const currentSceneIdRef = useRef(currentSceneId);
   const inventoryRef = useRef(inventory);
+  const onExitRef = useRef(onExit);
+  const onExitTriggerRef = useRef(onExitTrigger);
+  const onAssetStateChangeRef = useRef(onAssetStateChange);
   // WebGL 初始化失败（部分低端/受限浏览器无法创建 WebGL 上下文）时降级为提示。
   const [failed, setFailed] = useState(false);
+  const [assetState, setAssetState] = useState<InteriorAssetState>("loading");
   // 拾取道具时的短暂提示文案。
   const [pickupToast, setPickupToast] = useState<string | null>(null);
   const toastTimer = useRef<number | null>(null);
@@ -61,9 +70,24 @@ export default function InteriorOverlay({
   }, [inventory]);
 
   useEffect(() => {
+    onAssetStateChangeRef.current = onAssetStateChange;
+  }, [onAssetStateChange]);
+
+  useEffect(() => {
+    onExitRef.current = onExit;
+    onExitTriggerRef.current = onExitTrigger;
+  }, [onExit, onExitTrigger]);
+
+  useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
     let engine: Interior3D | null = null;
+    const reportAssetState = (state: InteriorAssetState): void => {
+      setAssetState(state);
+      onAssetStateChangeRef.current?.(state);
+    };
+    setFailed(false);
+    reportAssetState("loading");
     try {
       engine = new Interior3D({
         container: host,
@@ -86,7 +110,7 @@ export default function InteriorOverlay({
         },
         onExitTrigger: () => {
           engineRef.current?.exitPointerLock();
-          (onExitTrigger ?? onExit)();
+          (onExitTriggerRef.current ?? onExitRef.current)();
         },
         getStamina: () => useGameStore.getState().storyState.stats.stamina,
         setStamina: (v) => {
@@ -96,6 +120,7 @@ export default function InteriorOverlay({
             stats: { ...prev.stats, stamina: Math.max(0, Math.min(100, Math.round(v))) },
           }));
         },
+        onAssetStateChange: reportAssetState,
       });
       engineRef.current = engine;
       engine.start();
@@ -103,6 +128,7 @@ export default function InteriorOverlay({
       // 通常是 WebGL 上下文创建失败——不让异常冒泡破坏外层地图，改为降级提示。
       console.warn("[InteriorOverlay] 3D 内景初始化失败，降级为提示：", err);
       setFailed(true);
+      reportAssetState("failed");
       try {
         engine?.dispose();
       } catch {
@@ -253,7 +279,13 @@ export default function InteriorOverlay({
 
   return (
     <div style={styles.root} className="interiorOverlay">
-      <div ref={hostRef} style={styles.host} />
+      <div
+        ref={hostRef}
+        style={{
+          ...styles.host,
+          ...(blockUntilAssetReady && assetState !== "ready" ? styles.hostBlocked : undefined),
+        }}
+      />
 
       {/* 氛围叠层：暗角 + 轻微冷调，与外层地图的恐怖质感统一。 */}
       <div style={styles.vignette} aria-hidden="true" />
@@ -339,6 +371,9 @@ const styles: Record<string, CSSProperties> = {
     inset: 0,
     width: "100%",
     height: "100%",
+  },
+  hostBlocked: {
+    visibility: "hidden",
   },
   // 暗角：四周压暗，聚焦画面中心，和外层 .vignette 呼应。
   vignette: {

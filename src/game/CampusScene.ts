@@ -54,7 +54,7 @@ const GHOST_SANITY_COOLDOWN = 2200;
 // Recalculate against the player's latest road position often enough that a
 // turn at a junction is reflected immediately, including on mobile screens.
 const GHOST_ROUTE_REFRESH_INTERVAL = 140;
-const GHOST_SPAWN_DELAY = 3000;
+const GHOST_SPAWN_DELAY = 5000;
 const GHOST_MIN_SPAWN_DISTANCE = 13;
 const GHOST_MIN_SPAWN_ROUTE_DISTANCE = 22;
 
@@ -124,7 +124,6 @@ type GhostState = {
   lastRouteAt: number;
   routeTarget: IsoPoint;
   lastSanityHitAt: number;
-  nextSpawnAt: number;
   shouldRespawn: boolean;
   /** 鬼当前移动朝向（用于视线锥检测）。 */
   facing: IsoPoint;
@@ -196,6 +195,9 @@ export class CampusScene extends Phaser.Scene {
   private sanity = 100;
   private dead = false;
   private ghost?: GhostState;
+  private ghostSpawnTimer?: Phaser.Time.TimerEvent;
+  private ghostSpawnReady = false;
+  private horrorApparitions: Array<Phaser.GameObjects.Ellipse | Phaser.GameObjects.Arc> = [];
   private lastMiniMapAt = 0;
   private sceneReady = false;
   private hotspotMarkers = new Map<HotspotId, HotspotMarker>();
@@ -305,6 +307,7 @@ export class CampusScene extends Phaser.Scene {
     window.addEventListener("zju-horror-player-revive", this.handlePlayerRevive as EventListener);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.sceneReady = false;
+      this.cancelGhostSpawnTimer();
       window.removeEventListener("zju-horror-map-state", this.handleMapState as EventListener);
       window.removeEventListener("zju-horror-effect", this.handleHorrorEffect as EventListener);
       window.removeEventListener("zju-horror-interior-state", this.handleInteriorState as EventListener);
@@ -2460,6 +2463,11 @@ export class CampusScene extends Phaser.Scene {
       const head = this.add.circle(p.x, p.y - 80, 10, 0xd8e1d5, 0.0);
       body.setDepth(p.y + 34);
       head.setDepth(p.y + 35);
+      // These ambient figures read as ghosts too, so they must obey the same
+      // spawn protection as the red chaser instead of flashing in at delay 0.
+      body.setVisible(false);
+      head.setVisible(false);
+      this.horrorApparitions.push(body, head);
       this.tweens.add({
         targets: [body, head],
         alpha: { from: 0, to: 0.16 },
@@ -2472,6 +2480,10 @@ export class CampusScene extends Phaser.Scene {
         repeatDelay: 4200,
       });
     });
+  }
+
+  private setHorrorApparitionsVisible(visible: boolean) {
+    this.horrorApparitions.forEach((apparition) => apparition.setVisible(visible));
   }
 
   private createGuideLine() {
@@ -2510,11 +2522,11 @@ export class CampusScene extends Phaser.Scene {
       lastRouteAt: 0,
       routeTarget: { ...this.playerIso },
       lastSanityHitAt: 0,
-      nextSpawnAt: GHOST_SPAWN_DELAY, // 3秒后出生——兜底，不再依赖外部事件激活
       shouldRespawn: true,
       facing: { x: 1, y: 0 },
     };
     container.setVisible(false);
+    this.scheduleGhostRespawn(spawn);
   }
 
   private createScreenEffects() {
@@ -2608,21 +2620,23 @@ export class CampusScene extends Phaser.Scene {
 
   private updateGhost(time: number, dt: number) {
     if (!this.ghost || this.dead) {
+      this.ghost?.container.setVisible(false);
+      this.setHorrorApparitionsVisible(false);
       audioManager.updateGhostBreath(999);
       return;
     }
-    // 剧情弹窗打开、或玩家进入建筑内景(frozen)时：玩家在"室内"，鬼不应继续追杀。
-    // 隐藏鬼、安排重生延迟，退出后鬼在别处重新出现（不会贴脸秒杀）。
+    // 剧情弹窗打开、或玩家进入建筑内景(frozen)时：玩家尚未取得控制权，
+    // 因此只隐藏鬼，不在每一帧反复向后推迟倒计时。真正的 5 秒保护
+    // 会在锁定状态解除时由 scheduleGhostRespawn() 统一开始。
     if (this.storyOpen || this.frozen) {
-      this.ghost.container.setVisible(false);
-      this.ghost.nextSpawnAt = time + GHOST_SPAWN_DELAY;
-      this.ghost.shouldRespawn = true;
-      audioManager.updateGhostBreath(999);
-      useGameStore.getState().setGhost({ visible: false, fsm: "hidden" });
+      this.suppressGhostUntilUnlock();
       return;
     }
-    if (time < this.ghost.nextSpawnAt) {
+    // A single explicit timer owns the protection window. Until it fires, no
+    // ghost-like visual, AI, pathfinding, collision, audio or minimap marker runs.
+    if (!this.ghostSpawnReady) {
       this.ghost.container.setVisible(false);
+      this.setHorrorApparitionsVisible(false);
       audioManager.updateGhostBreath(999);
       return;
     }
@@ -2685,6 +2699,7 @@ export class CampusScene extends Phaser.Scene {
 
     // ── 渲染 ──
     this.ghost.container.setVisible(true);
+    this.setHorrorApparitionsVisible(true);
     const p = this.toScreen(this.ghost.iso);
     this.ghost.container.setPosition(p.x, p.y);
     this.ghost.container.setDepth(p.y + 52);
@@ -2700,7 +2715,9 @@ export class CampusScene extends Phaser.Scene {
     // ── 碰撞检测 ──
     if (playerDistance <= GHOST_CAUGHT_RADIUS) {
       this.dead = true;
+      this.ghostSpawnReady = false;
       this.ghost.container.setVisible(false);
+      this.setHorrorApparitionsVisible(false);
       this.cameras.main.shake(620, 0.018);
       this.flashScreen(0.72, 700);
       useGameStore.getState().setGhost({ visible: false });
@@ -2942,14 +2959,16 @@ export class CampusScene extends Phaser.Scene {
   private emitMiniMap(time: number) {
     if (time - this.lastMiniMapAt < 80) return;
     this.lastMiniMapAt = time;
-    // 小地图是玩家的持续追踪工具：鬼在出生延迟或剧情遮挡期间仍保留位置，
-    // 不再因为世界精灵暂时隐藏而让红点凭空消失。
-    const trackable = Boolean(this.ghost && !this.dead);
+    // 预选的重生点不是世界里已经存在的鬼。延迟/剧情遮挡期间不泄露
+    // 该位置，等鬼真正渲染并开始追击后才显示小地图红点。
+    const ghostVisible = Boolean(
+      this.ghostSpawnReady && this.ghost?.container.visible && !this.ghost.shouldRespawn && !this.dead,
+    );
     useGameStore.getState().setPlayerIso({ ...this.playerIso });
     useGameStore.getState().setMiniMap({
       player: { ...this.playerIso },
-      ghost: trackable && this.ghost ? { ...this.ghost.iso } : undefined,
-      ghostVisible: trackable,
+      ghost: ghostVisible && this.ghost ? { ...this.ghost.iso } : undefined,
+      ghostVisible,
     });
   }
 
@@ -3044,18 +3063,51 @@ export class CampusScene extends Phaser.Scene {
     this.emitMiniMap(this.time.now + 100);
   };
 
-  private scheduleGhostRespawn() {
+  private scheduleGhostRespawn(spawn = this.pickGhostSpawnPoint()) {
     if (!this.ghost) return;
-    const spawn = this.pickGhostSpawnPoint();
+    // Duplicate React/Phaser unlock notifications must not extend an already
+    // running protection window. A real lock first cancels it in suppress().
+    if (this.ghostSpawnTimer && !this.ghostSpawnReady) return;
+    if (this.storyOpen || this.frozen) {
+      this.suppressGhostUntilUnlock();
+      return;
+    }
+    this.cancelGhostSpawnTimer();
+    this.ghostSpawnReady = false;
     this.ghost.iso = spawn;
     this.ghost.container.setVisible(false);
-    this.ghost.nextSpawnAt = this.time.now + GHOST_SPAWN_DELAY;
+    this.setHorrorApparitionsVisible(false);
     this.ghost.shouldRespawn = true;
     this.ghost.route = [];
     this.ghost.routeIndex = 1;
     this.ghost.routeTarget = { ...this.playerIso };
     audioManager.updateGhostBreath(999);
     useGameStore.getState().setGhost({ iso: { ...spawn }, visible: false, fsm: "hidden" });
+    this.ghostSpawnTimer = this.time.delayedCall(GHOST_SPAWN_DELAY, () => {
+      this.ghostSpawnTimer = undefined;
+      if (!this.sceneReady || !this.ghost || this.dead || this.storyOpen || this.frozen) return;
+      this.ghostSpawnReady = true;
+    });
+  }
+
+  private suppressGhostUntilUnlock() {
+    if (!this.ghost) return;
+    const alreadySuppressed = !this.ghostSpawnReady && !this.ghostSpawnTimer && !this.ghost.container.visible;
+    this.cancelGhostSpawnTimer();
+    this.ghostSpawnReady = false;
+    this.ghost.container.setVisible(false);
+    this.setHorrorApparitionsVisible(false);
+    audioManager.updateGhostBreath(999);
+    if (alreadySuppressed) return;
+    this.ghost.shouldRespawn = true;
+    this.ghost.route = [];
+    this.ghost.routeIndex = 1;
+    useGameStore.getState().setGhost({ visible: false, fsm: "hidden" });
+  }
+
+  private cancelGhostSpawnTimer() {
+    this.ghostSpawnTimer?.remove(false);
+    this.ghostSpawnTimer = undefined;
   }
 
   private handleHorrorEffect = (event: Event) => {

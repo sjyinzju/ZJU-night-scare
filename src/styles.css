@@ -200,6 +200,363 @@ button {
   }
 }
 
+/* ── 首次进入 / 重新轮回的黑幕加载过场 ── */
+.launchSequence {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  padding: clamp(24px, 5vw, 72px);
+  color: #d8c9bd;
+  background: #000;
+  cursor: default;
+  isolation: isolate;
+}
+
+.launchSequence::before,
+.launchSequence::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.launchSequence::before {
+  z-index: -2;
+  background:
+    radial-gradient(circle at 50% 46%, rgba(92, 0, 0, 0.18), transparent 42%),
+    repeating-linear-gradient(0deg, transparent 0 3px, rgba(255, 255, 255, 0.025) 4px);
+}
+
+.launchSequence::after {
+  z-index: 3;
+  opacity: 0.16;
+  background: linear-gradient(90deg, rgba(255, 0, 0, 0.05), transparent 27%, rgba(0, 144, 255, 0.03) 72%, transparent);
+  mix-blend-mode: screen;
+  animation: launchScreenTear 5.2s steps(1, end) infinite;
+}
+
+.launchSequence__noise {
+  position: absolute;
+  inset: -30%;
+  z-index: -1;
+  opacity: 0.11;
+  pointer-events: none;
+  background-image:
+    repeating-radial-gradient(circle at 17% 29%, rgba(255, 255, 255, 0.16) 0 0.7px, transparent 0.9px 4px),
+    repeating-linear-gradient(107deg, transparent 0 23px, rgba(126, 0, 0, 0.14) 24px 25px);
+  animation: launchNoiseDrift 0.38s steps(2, end) infinite;
+}
+
+.launchSequence__copy {
+  position: relative;
+  width: min(900px, 92vw);
+  text-align: left;
+  will-change: transform, filter, opacity;
+}
+
+.launchSequence__kicker {
+  margin: 0 0 clamp(16px, 2.8vh, 28px);
+  color: rgba(151, 98, 87, 0.7);
+  font-size: clamp(10px, 1.25vw, 13px);
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  animation: launchLineReveal 0.7s ease-out 0.08s both;
+}
+
+.launchSequence__story {
+  display: grid;
+  gap: clamp(7px, 1.1vh, 11px);
+}
+
+.launchSequence__line,
+.launchSequence__tutorial p {
+  position: relative;
+  margin: 0;
+  opacity: 0;
+  animation:
+    launchLineReveal 0.82s cubic-bezier(0.22, 1, 0.36, 1) var(--launch-delay) both,
+    launchTextFlicker 3.2s steps(1, end) calc(var(--launch-delay) + 0.9s) infinite;
+}
+
+.launchSequence__line {
+  color: #b92424;
+  font-family: "STKaiti", "KaiTi", "Microsoft YaHei", serif;
+  font-size: clamp(15px, 2vw, 24px);
+  font-weight: 700;
+  line-height: 1.28;
+  letter-spacing: 0.055em;
+  text-shadow:
+    0 0 8px rgba(255, 26, 26, 0.52),
+    0 0 30px rgba(117, 0, 0, 0.48);
+}
+
+.launchSequence__line::after {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+  color: rgba(255, 47, 47, 0.42);
+  pointer-events: none;
+  clip-path: inset(42% 0 37% 0);
+  transform: translateX(1.5px);
+  animation: launchTextGlitch 2.7s steps(1, end) infinite;
+}
+
+.launchSequence__tutorial {
+  display: grid;
+  gap: 6px;
+  margin-top: clamp(10px, 1.8vh, 18px);
+  padding-top: 10px;
+  border-top: 1px solid rgba(128, 24, 24, 0.32);
+}
+
+.launchSequence__tutorial p {
+  color: rgba(226, 211, 198, 0.82);
+  font-size: clamp(14px, 1.55vw, 17px);
+  line-height: 1.5;
+  letter-spacing: 0.055em;
+}
+
+.launchSequence__tutorial .launchSequence__controls {
+  margin-top: 5px;
+  color: rgba(183, 113, 98, 0.86);
+  font-size: clamp(11px, 1.3vw, 14px);
+}
+
+.launchSequence__footer {
+  position: absolute;
+  right: 24px;
+  bottom: clamp(22px, 5vh, 52px);
+  left: 24px;
+  z-index: 5;
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  text-align: center;
+  animation: launchFooterIn 0.55s ease-out both;
+}
+
+.launchSequence__footer p {
+  margin: 0;
+}
+
+.launchSequence__loading {
+  color: rgba(138, 89, 81, 0.72);
+  font-size: 12px;
+  letter-spacing: 0.22em;
+  animation: launchLoadingPulse 1.8s ease-in-out infinite;
+}
+
+.launchSequence__error {
+  color: #d65c52;
+  font-size: 13px;
+  letter-spacing: 0.12em;
+}
+
+.launchSequence__footer button {
+  min-width: 210px;
+  padding: 13px 24px;
+  cursor: pointer;
+  border: 1px solid rgba(183, 43, 38, 0.58);
+  color: #e8d9ce;
+  background: rgba(61, 6, 6, 0.28);
+  letter-spacing: 0.2em;
+  box-shadow: 0 0 28px rgba(139, 10, 10, 0.16);
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.launchSequence__footer button:hover,
+.launchSequence__footer button:focus-visible {
+  border-color: rgba(255, 76, 65, 0.82);
+  background: rgba(112, 11, 11, 0.5);
+  box-shadow: 0 0 36px rgba(181, 20, 20, 0.3);
+  outline: none;
+}
+
+.launchSequence__continue {
+  animation: launchContinuePulse 1.7s ease-in-out infinite;
+}
+
+.launchSequence.is-intro.is-ready {
+  cursor: pointer;
+}
+
+.launchSequence.is-dismissing {
+  pointer-events: none;
+}
+
+.launchSequence.is-dismissing .launchSequence__copy,
+.launchSequence.is-dismissing .launchSequence__footer {
+  animation: launchSmokeAway 0.9s cubic-bezier(0.4, 0, 0.7, 1) both;
+}
+
+.launchSequence.is-dismissing .launchSequence__noise {
+  animation: launchNoiseBurst 0.9s ease-out both;
+}
+
+@keyframes launchLineReveal {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 14px, 0) skewX(-4deg);
+    filter: blur(8px) brightness(1.8);
+  }
+  42% { opacity: 0.35; }
+  48% { opacity: 0.08; transform: translate3d(-3px, 4px, 0) skewX(2deg); }
+  56% { opacity: 0.82; }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) skewX(0);
+    filter: blur(0) brightness(1);
+  }
+}
+
+@keyframes launchTextFlicker {
+  0%, 9%, 12%, 46%, 49%, 100% { opacity: 1; }
+  10%, 47% { opacity: 0.54; }
+  11% { opacity: 0.12; }
+}
+
+@keyframes launchTextGlitch {
+  0%, 81%, 100% { transform: translateX(1.5px); opacity: 0; }
+  82% { transform: translate(-5px, 1px); opacity: 0.7; }
+  84% { transform: translate(4px, -1px); opacity: 0.34; }
+  86% { transform: translateX(1.5px); opacity: 0; }
+}
+
+@keyframes launchScreenTear {
+  0%, 70%, 100% { transform: translateX(0); clip-path: inset(0); }
+  71% { transform: translateX(-7px); clip-path: inset(18% 0 64% 0); }
+  72% { transform: translateX(5px); clip-path: inset(63% 0 22% 0); }
+  73% { transform: translateX(0); clip-path: inset(0); }
+}
+
+@keyframes launchNoiseDrift {
+  0% { transform: translate3d(-1.4%, -0.8%, 0) rotate(0.01deg); }
+  50% { transform: translate3d(1%, 1.6%, 0) rotate(-0.01deg); }
+  100% { transform: translate3d(0.6%, -1.2%, 0) rotate(0.01deg); }
+}
+
+@keyframes launchFooterIn {
+  from { opacity: 0; transform: translateY(8px); filter: blur(5px); }
+  to { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+
+@keyframes launchLoadingPulse {
+  0%, 100% { opacity: 0.38; }
+  50% { opacity: 0.9; }
+}
+
+@keyframes launchContinuePulse {
+  0%, 100% { opacity: 0.64; box-shadow: 0 0 16px rgba(181, 20, 20, 0.12); }
+  50% { opacity: 1; box-shadow: 0 0 38px rgba(181, 20, 20, 0.34); }
+}
+
+@keyframes launchSmokeAway {
+  0% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+    filter: blur(0) contrast(1);
+  }
+  38% {
+    opacity: 0.72;
+    transform: translate3d(4px, -5px, 0) scale(1.01);
+    filter: blur(3px) contrast(1.4);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(26px, -38px, 0) scale(1.08) skewX(6deg);
+    filter: blur(22px) contrast(2.1);
+  }
+}
+
+@keyframes launchNoiseBurst {
+  0% { opacity: 0.11; transform: scale(1); }
+  45% { opacity: 0.38; }
+  100% { opacity: 0; transform: scale(1.16) translate3d(4%, -5%, 0); }
+}
+
+@media (max-width: 700px) {
+  .launchSequence {
+    align-items: start;
+    padding: 5vh 18px 76px;
+  }
+
+  .launchSequence__kicker {
+    margin-bottom: 14px;
+  }
+
+  .launchSequence__line {
+    font-size: clamp(14px, 3.9vw, 18px);
+    line-height: 1.24;
+    letter-spacing: 0.025em;
+  }
+
+  .launchSequence__tutorial {
+    gap: 4px;
+    margin-top: 9px;
+    padding-top: 8px;
+  }
+
+  .launchSequence__tutorial p {
+    font-size: 13px;
+    line-height: 1.4;
+    letter-spacing: 0.025em;
+  }
+
+  .launchSequence__tutorial .launchSequence__controls {
+    margin-top: 3px;
+  }
+}
+
+@media (max-height: 650px) {
+  .launchSequence {
+    padding-top: 18px;
+  }
+
+  .launchSequence__line {
+    font-size: clamp(13px, 2.8vh, 16px);
+  }
+
+  .launchSequence__story {
+    gap: 4px;
+  }
+
+  .launchSequence__tutorial {
+    margin-top: 6px;
+    padding-top: 6px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .launchSequence::after,
+  .launchSequence__noise,
+  .launchSequence__line,
+  .launchSequence__line::after,
+  .launchSequence__tutorial p,
+  .launchSequence__loading,
+  .launchSequence__continue {
+    animation: none !important;
+  }
+
+  .launchSequence__line::after {
+    display: none;
+  }
+
+  .launchSequence__line,
+  .launchSequence__tutorial p {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+
+  .launchSequence.is-dismissing .launchSequence__copy,
+  .launchSequence.is-dismissing .launchSequence__footer {
+    animation: launchFooterIn 0.2s reverse both;
+  }
+}
+
 .leftRail {
   position: absolute;
   inset: 0 auto 0 0;

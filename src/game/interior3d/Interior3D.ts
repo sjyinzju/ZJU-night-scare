@@ -18,6 +18,8 @@ import { FlashlightSystem } from "./FlashlightSystem";
 import { getInteriorNpcRevealSceneIds } from "../storyEngine";
 import { loadInteriorAsset, type InteriorAssetHandle } from "./InteriorAssetLoader";
 
+export type InteriorAssetState = "loading" | "ready" | "failed";
+
 export interface Interior3DOptions {
   /** Element the WebGL canvas is appended into. Sized to fill it. */
   container: HTMLElement;
@@ -41,6 +43,8 @@ export interface Interior3DOptions {
   setStamina?: (value: number) => void;
   /** Current player inventory for door key checks. */
   getDoorInventory?: () => string[];
+  /** Reports when authored static visuals are safe to reveal. */
+  onAssetStateChange?: (state: InteriorAssetState) => void;
 }
 
 const PLAYER_RADIUS = 0.32;
@@ -95,6 +99,7 @@ export class Interior3D {
   private readonly getInventory?: () => string[];
   private readonly getStamina?: () => number;
   private readonly setStamina?: (value: number) => void;
+  private readonly onAssetStateChange?: (state: InteriorAssetState) => void;
   private lowStaminaWarning = false;
   private bloodLightEnabled = false;
   private bloodLightMaxIntensity = 4.8;
@@ -151,6 +156,7 @@ export class Interior3D {
     this.getInventory = options.getInventory;
     this.getStamina = options.getStamina;
     this.setStamina = options.setStamina;
+    this.onAssetStateChange = options.onAssetStateChange;
 
     // ---- Renderer ----
     this.renderer = new THREE.WebGLRenderer({
@@ -406,13 +412,17 @@ export class Interior3D {
   }
 
   private async loadStaticInteriorAsset(buildingId: string): Promise<void> {
+    this.onAssetStateChange?.("loading");
     try {
       const handle = await loadInteriorAsset({
         buildingId,
         roomKind: this.roomKind,
         isMobile: this.isMobile,
       });
-      if (!handle) return;
+      if (!handle) {
+        if (!this.disposed) this.onAssetStateChange?.("ready");
+        return;
+      }
       if (this.disposed) {
         handle.dispose();
         return;
@@ -422,6 +432,7 @@ export class Interior3D {
       this.scene.add(handle.root);
       this.bindInteriorAssetMetadata(handle);
       this.setProceduralRoomVisualsVisible(false);
+      this.onAssetStateChange?.("ready");
       window.dispatchEvent(new CustomEvent("zju-horror-interior-asset-state", {
         detail: {
           buildingId,
@@ -431,8 +442,10 @@ export class Interior3D {
         },
       }));
     } catch (err) {
+      if (this.disposed) return;
       console.warn("[Interior3D] Failed to load static interior asset, using procedural fallback:", err);
       this.setProceduralRoomVisualsVisible(true);
+      this.onAssetStateChange?.("failed");
       window.dispatchEvent(new CustomEvent("zju-horror-interior-asset-state", {
         detail: { buildingId, roomKind: this.roomKind, loaded: false },
       }));

@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 import { CampusScene, type GameHudEvent, type GameMiniMapEvent } from "./game/CampusScene";
 import InteriorOverlay from "./game/interior3d/InteriorOverlay";
+import type { InteriorAssetState } from "./game/interior3d/Interior3D";
+import LaunchSequence, { type LaunchSequenceMode } from "./LaunchSequence";
 import { campusBuildings, campusRoads, type IsoPoint } from "./game/mapData";
 import {
   getHotspotById,
@@ -280,6 +282,9 @@ function App() {
   const [hud, setHud] = useState<GameHudEvent>(initialHud);
   const [gameSessionId, setGameSessionId] = useState(0);
   const [phaserReady, setPhaserReady] = useState(false);
+  const [launchMode, setLaunchMode] = useState<LaunchSequenceMode | null>(null);
+  const [launchAssetState, setLaunchAssetState] = useState<InteriorAssetState>("loading");
+  const [assetLoadAttempt, setAssetLoadAttempt] = useState(0);
   const isMobile = useIsMobile();
 
   // ── Zustand is the single source of truth for the playable session. ──
@@ -620,23 +625,38 @@ function App() {
 
   const startGame = useCallback(() => {
     setPhaserReady(false); // 不加载 2.5D 地图，直接进入 3D 内景
-    triggerEffect("reveal");
+    setLaunchAssetState("loading");
+    setAssetLoadAttempt((value) => value + 1);
+    setLaunchMode("intro");
     // 使用 storyEngine 统一解析起始建筑（始终从第一个热点开始）
     const startBuilding = resolveGameStartBuilding();
     startSession(startBuilding ?? { id: "medical-library", name: "农医馆", zone: "story" });
-  }, [startSession, triggerEffect]);
+  }, [startSession]);
 
   const restartGame = useCallback(() => {
     setPhaserReady(false);
     resetAll();
     JumpscarePipeline.reset();
     setHud(initialHud);
+    setLaunchAssetState("loading");
+    setAssetLoadAttempt((value) => value + 1);
+    setLaunchMode("restart");
     const startBuilding = resolveGameStartBuilding();
     startSession(startBuilding ?? { id: "medical-library", name: "农医馆", zone: "story" });
     miniMapSnapshotRef.current = { player: { x: 19.4, y: 30.2 }, ghostVisible: false };
     resetAudio();
     setGameSessionId((value) => value + 1);
   }, [resetAll, resetAudio, startSession]);
+
+  const handleLaunchEnter = useCallback(() => {
+    setLaunchMode(null);
+    triggerEffect("reveal");
+  }, [triggerEffect]);
+
+  const handleLaunchRetry = useCallback(() => {
+    setLaunchAssetState("loading");
+    setAssetLoadAttempt((value) => value + 1);
+  }, []);
 
   const reviveGame = useCallback(() => {
     const deathPoint = { ...useGameStore.getState().playerIso };
@@ -1014,6 +1034,7 @@ function App() {
 
       {interiorBuilding && (
         <InteriorOverlay
+          key={`${interiorBuilding.id}:${assetLoadAttempt}`}
           building={interiorBuilding}
           currentSceneId={storyState.currentSceneId}
           inventory={storyState.inventory}
@@ -1021,8 +1042,20 @@ function App() {
           onExit={leaveInteriorFromTrigger}
           onExitTrigger={leaveInteriorFromTrigger}
           canExit={canExitInterior}
+          blockUntilAssetReady={launchMode !== null}
+          onAssetStateChange={setLaunchAssetState}
         />
       )}
+
+      {launchMode ? (
+        <LaunchSequence
+          mode={launchMode}
+          assetState={launchAssetState}
+          isMobile={isMobile}
+          onEnter={handleLaunchEnter}
+          onRetry={handleLaunchRetry}
+        />
+      ) : null}
     </main>
   );
 }
