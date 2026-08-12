@@ -430,6 +430,7 @@ export class Interior3D {
 
       this.assetHandle = handle;
       this.scene.add(handle.root);
+      this.applyAssetPresentation(handle);
       this.bindInteriorAssetMetadata(handle);
       this.setProceduralRoomVisualsVisible(false);
       this.onAssetStateChange?.("ready");
@@ -450,6 +451,22 @@ export class Interior3D {
         detail: { buildingId, roomKind: this.roomKind, loaded: false },
       }));
     }
+  }
+
+  private applyAssetPresentation(handle: InteriorAssetHandle): void {
+    if (!handle.bounds.isEmpty()) {
+      this.bounds.minX = handle.bounds.min.x;
+      this.bounds.maxX = handle.bounds.max.x;
+      this.bounds.minZ = handle.bounds.min.z;
+      this.bounds.maxZ = handle.bounds.max.z;
+    }
+
+    if (!handle.viewpoint) return;
+    this.camera.position.set(handle.viewpoint.position.x, EYE_HEIGHT, handle.viewpoint.position.z);
+    // Saved DCC views often carry a steep presentation tilt. Preserve their
+    // heading while keeping the playable first-person view near eye level.
+    const playablePitch = THREE.MathUtils.clamp(handle.viewpoint.pitch, -0.4, 0.4);
+    this.cameraController.setLook(handle.viewpoint.yaw, playablePitch);
   }
 
   private bindInteriorAssetMetadata(handle: InteriorAssetHandle): void {
@@ -712,17 +729,25 @@ export class Interior3D {
   private syncLightingState(dt: number, t: number): void {
     const hasFlashlight = this.hasInventoryItem("flashlight");
     const libraryProfile = this.roomKind === "library";
-    const targetAmbient = hasFlashlight ? (libraryProfile ? 0.5 : 0.85) : libraryProfile ? 0.1 : 0.22;
-    const targetFill = hasFlashlight ? (libraryProfile ? 0.32 : 0.55) : libraryProfile ? 0.06 : 0.14;
-    const targetNear = hasFlashlight ? (libraryProfile ? 0.5 : 0.85) : libraryProfile ? 0.08 : 0.24;
+    const previewingUnmappedAsset = Boolean(this.assetHandle && !this.assetHandle.meta);
+    const targetAmbient = previewingUnmappedAsset
+      ? 0.32
+      : hasFlashlight ? (libraryProfile ? 0.5 : 0.85) : libraryProfile ? 0.1 : 0.22;
+    const targetFill = previewingUnmappedAsset
+      ? 0.18
+      : hasFlashlight ? (libraryProfile ? 0.32 : 0.55) : libraryProfile ? 0.06 : 0.14;
+    const targetNear = previewingUnmappedAsset
+      ? 0.25
+      : hasFlashlight ? (libraryProfile ? 0.5 : 0.85) : libraryProfile ? 0.08 : 0.24;
     const k = Math.min(1, dt * 6);
 
     this.ambientLight.intensity = THREE.MathUtils.lerp(this.ambientLight.intensity, targetAmbient, k);
     this.fillLight.intensity = THREE.MathUtils.lerp(this.fillLight.intensity, targetFill, k);
     this.nearFillLight.intensity = THREE.MathUtils.lerp(this.nearFillLight.intensity, targetNear, k);
 
-    if (hasFlashlight) {
+    if (hasFlashlight || previewingUnmappedAsset) {
       this.flashlightSys.update(dt, t);
+      if (previewingUnmappedAsset) this.flashlight.intensity *= 8;
     } else {
       this.flashlight.intensity = 0;
     }

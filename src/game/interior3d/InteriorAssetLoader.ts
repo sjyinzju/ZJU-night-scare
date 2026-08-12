@@ -36,6 +36,12 @@ export interface InteriorAssetMeta {
 export interface InteriorAssetHandle {
   root: THREE.Group;
   meta?: InteriorAssetMeta;
+  bounds: THREE.Box3;
+  viewpoint?: {
+    position: THREE.Vector3;
+    yaw: number;
+    pitch: number;
+  };
   dispose: () => void;
 }
 
@@ -45,12 +51,32 @@ export interface InteriorAssetRequest {
   isMobile: boolean;
 }
 
-const ASSET_ROOTS: Record<string, string> = {
-  // The authored model and the current library builder now share the same
-  // coordinates for walls, furniture, spawn and story markers. Keep the
-  // procedural room alive as the collision/interaction authority and swap
-  // only its visuals after the GLB has loaded successfully.
-  "medical-library:library": "models/interiors/medical-library",
+interface InteriorAssetSource {
+  rootPath: string;
+  model: string;
+  lodModel?: string;
+  metaFile?: string;
+  viewpointName?: string;
+  previewViewpoint?: {
+    x: number;
+    y: number;
+    z: number;
+    yaw: number;
+    pitch?: number;
+  };
+}
+
+const ASSET_SOURCES: Record<string, InteriorAssetSource> = {
+  // This pass intentionally swaps only the authored visual. The procedural
+  // room remains the collision/interaction authority, so future story spots,
+  // props and phase visuals can be mapped through metadata without coupling
+  // them to the GLB itself.
+  "medical-library:library": {
+    rootPath: "models/interiors/library",
+    model: "library.glb",
+    viewpointName: "新页面",
+    previewViewpoint: { x: 8.62, y: 1.6, z: 10.53, yaw: Math.PI / 4, pitch: -0.3 },
+  },
 };
 
 let loader: import("three/examples/jsm/loaders/GLTFLoader.js").GLTFLoader | undefined;
@@ -67,14 +93,39 @@ function assetKey(req: InteriorAssetRequest): string {
   return `${req.buildingId}:${req.roomKind}`;
 }
 
-async function loadMeta(rootPath: string): Promise<InteriorAssetMeta | undefined> {
+async function loadMeta(rootPath: string, metaFile: string): Promise<InteriorAssetMeta | undefined> {
   try {
-    const response = await fetch(assetUrl(`${rootPath}/scene.meta.json`));
+    const response = await fetch(assetUrl(`${rootPath}/${metaFile}`));
     if (!response.ok) return undefined;
     return (await response.json()) as InteriorAssetMeta;
   } catch {
     return undefined;
   }
+}
+
+function getAuthoredViewpoint(root: THREE.Group, name?: string): InteriorAssetHandle["viewpoint"] {
+  if (!name) return undefined;
+  root.updateMatrixWorld(true);
+  const node = root.getObjectByName(name);
+  if (!node) return undefined;
+
+  const position = node.getWorldPosition(new THREE.Vector3());
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(node.getWorldQuaternion(new THREE.Quaternion()));
+  const yaw = Math.atan2(-forward.x, -forward.z);
+  const pitch = Math.asin(THREE.MathUtils.clamp(forward.y, -1, 1));
+  return { position, yaw, pitch };
+}
+
+function getPreviewViewpoint(source: InteriorAssetSource, root: THREE.Group): InteriorAssetHandle["viewpoint"] {
+  if (source.previewViewpoint) {
+    const view = source.previewViewpoint;
+    return {
+      position: new THREE.Vector3(view.x, view.y, view.z),
+      yaw: view.yaw,
+      pitch: view.pitch ?? 0,
+    };
+  }
+  return getAuthoredViewpoint(root, source.viewpointName);
 }
 
 function tuneLoadedScene(root: THREE.Group): void {
@@ -121,19 +172,25 @@ function disposeLoadedScene(root: THREE.Object3D): void {
 }
 
 export async function loadInteriorAsset(req: InteriorAssetRequest): Promise<InteriorAssetHandle | null> {
-  const rootPath = ASSET_ROOTS[assetKey(req)];
-  if (!rootPath) return null;
+  const source = ASSET_SOURCES[assetKey(req)];
+  if (!source) return null;
 
-  const meta = await loadMeta(rootPath);
-  const preferredModel = req.isMobile ? (meta?.lodModel ?? "scene.lod.glb") : (meta?.model ?? "scene.glb");
+  const meta = source.metaFile ? await loadMeta(source.rootPath, source.metaFile) : undefined;
+  const preferredModel = req.isMobile
+    ? (source.lodModel ?? meta?.lodModel ?? source.model)
+    : (meta?.model ?? source.model);
   const gltfLoader = await getLoader();
-  const gltf = await gltfLoader.loadAsync(assetUrl(`${rootPath}/${preferredModel}`));
+  const gltf = await gltfLoader.loadAsync(assetUrl(`${source.rootPath}/${preferredModel}`));
   const root = gltf.scene as THREE.Group;
   tuneLoadedScene(root);
+  const bounds = new THREE.Box3().setFromObject(root);
+  const viewpoint = getPreviewViewpoint(source, root);
 
   return {
     root,
     meta,
+    bounds,
+    viewpoint,
     dispose: () => disposeLoadedScene(root),
   };
 }

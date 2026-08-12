@@ -61,6 +61,14 @@ export class CameraController {
     this.applyRotation();
   }
 
+  /** Apply an authored horizontal and vertical view orientation. */
+  setLook(yaw: number, pitch: number): void {
+    this.yaw = yaw;
+    this.pitch = pitch;
+    this.clampPitch();
+    this.applyRotation();
+  }
+
   // ── Per-frame update ──
 
   /**
