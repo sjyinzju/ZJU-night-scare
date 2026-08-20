@@ -1,5 +1,6 @@
 import * as THREE from "three";
-import { buildRoom, classifyRoom, type AABB, type InteriorGuideNode, type RoomBuildResult, type RoomKind } from "./buildRoom";
+import { buildRoom, classifyRoom, type AABB, type InteriorGuideNode, type Pickup, type RoomBuildResult, type RoomKind } from "./buildRoom";
+import { DoorComponent } from "./DoorComponent";
 import { getInteriorBlueprint, type InteriorBlueprint } from "./interiorBlueprints";
 import {
   createMovementContext,
@@ -20,6 +21,11 @@ import { loadInteriorAsset, type InteriorAssetHandle } from "./InteriorAssetLoad
 
 export type InteriorAssetState = "loading" | "ready" | "failed";
 
+export type InteriorInteractHint = {
+  active: boolean;
+  prompt: string;
+};
+
 export interface Interior3DOptions {
   /** Element the WebGL canvas is appended into. Sized to fill it. */
   container: HTMLElement;
@@ -27,7 +33,7 @@ export interface Interior3DOptions {
   zone?: string;
   /** Mobile skips pointer-lock / mouse look; input arrives via methods. */
   isMobile?: boolean;
-  /** Called once when the player walks over a collectable item. */
+  /** Called once when the player confirms a pickup with E / the mobile interact button. */
   onPickup?: (itemId: string, name: string) => void;
   /** Called when the player walks into a story-trigger zone inside the 3D interior. */
   onStoryTrigger?: (sceneId: string) => void;
@@ -50,6 +56,13 @@ export interface Interior3DOptions {
 const PLAYER_RADIUS = 0.32;
 const EYE_HEIGHT = 1.6;
 const GUIDE_MAX_POINTS = 32;
+const INTERACT_RANGE = 2.5;
+/** ~22° cone in front of the camera. */
+const INTERACT_ALIGN = Math.cos(THREE.MathUtils.degToRad(22));
+
+type InteriorFocus =
+  | { kind: "door"; door: DoorComponent }
+  | { kind: "pickup"; item: Pickup };
 
 /**
  * Self-contained first-person interior renderer. Owns its renderer, scene,
@@ -116,6 +129,9 @@ export class Interior3D {
 
   private debugColliders?: THREE.Group;
   private guideLine?: THREE.Line;
+  private readonly lookDir = new THREE.Vector3();
+  private readonly toTarget = new THREE.Vector3();
+  private focus: InteriorFocus | null = null;
 
   private rafId = 0;
   private disposed = false;
@@ -154,6 +170,7 @@ export class Interior3D {
     this.onExitTrigger = options.onExitTrigger;
     this.getStorySceneId = options.getStorySceneId;
     this.getInventory = options.getInventory;
+    this.getDoorInventory = options.getDoorInventory;
     this.getStamina = options.getStamina;
     this.setStamina = options.setStamina;
     this.onAssetStateChange = options.onAssetStateChange;
@@ -309,40 +326,96 @@ export class Interior3D {
     return this.flashlightSys.battery;
   }
 
-  /** Nearest door interaction hint text, or "" when nothing is in range. */
-  get doorHint(): string {
-    const door = this.findNearestDoor();
-    if (!door) return "";
-    return door.interactionLabel + " — 按 E";
-  }
-
-  // ── Door interaction ──
-
-  private ePressed = false;
-
-  private findNearestDoor(): import("./DoorComponent").DoorComponent | null {
-    let best: import("./DoorComponent").DoorComponent | null = null;
-    let bestDist = 2.5;
-    const pos = this.camera.position;
-    for (const door of this.room.doors) {
-      const dist = pos.distanceTo(door.hinge);
-      if (dist < bestDist) { bestDist = dist; best = door; }
+  /** Crosshair prompt for the object currently under aim. */
+  get interactHint(): InteriorInteractHint {
+    this.refreshFocus();
+    if (!this.focus) return { active: false, prompt: "" };
+    if (this.focus.kind === "pickup") {
+      return { active: true, prompt: `拾取${this.focus.item.name}` };
     }
-    return best;
+    const inventory = this.getDoorInventory?.() ?? this.getInventory?.() ?? [];
+    return { active: true, prompt: this.focus.door.interactPrompt(inventory) };
   }
 
-  private handleDoorInteraction(): void {
-    if (!this.ePressed) return;
-    this.ePressed = false;
+  /** @deprecated Use `interactHint`. Kept so older overlay copies still compile. */
+  get doorHint(): string {
+    const hint = this.interactHint;
+    return hint.active ? `按 E · ${hint.prompt}` : "";
+  }
 
-    const door = this.findNearestDoor();
-    if (!door) return;
-
-    const inventory = this.getDoorInventory?.() ?? [];
-    const msg = door.interact(this.camera.position, inventory, 2.5);
+  /**
+   * Confirm the aimed interaction. Desktop binds this to E; mobile calls it
+   * from the on-screen button.
+   */
+  tryInteract(): boolean {
+    this.refreshFocus();
+    const focus = this.focus;
+    if (!focus) return false;
+    if (focus.kind === "pickup") {
+      this.takePickup(focus.item);
+      this.focus = null;
+      return true;
+    }
+    const inventory = this.getDoorInventory?.() ?? this.getInventory?.() ?? [];
+    const msg = focus.door.interact(this.camera.position, inventory, INTERACT_RANGE);
     if (msg) {
       window.dispatchEvent(new CustomEvent("zju-horror-door-message", { detail: { message: msg } }));
     }
+    return true;
+  }
+
+  // ── Aimed interaction ──
+
+  private ePressed = false;
+
+  private refreshFocus(): void {
+    this.camera.getWorldDirection(this.lookDir);
+    const origin = this.camera.position;
+    let best: InteriorFocus | null = null;
+    let bestScore = Number.POSITIVE_INFINITY;
+
+    for (const door of this.room.doors) {
+      const score = this.aimScore(origin, door.hinge.x, door.hinge.y + 1.05, door.hinge.z, -0.12);
+      if (score < bestScore) {
+        bestScore = score;
+        best = { kind: "door", door };
+      }
+    }
+
+    for (const item of this.room.pickups) {
+      if (item.taken || !item.glow.visible) continue;
+      const score = this.aimScore(origin, item.position.x, item.position.y, item.position.z, 0);
+      if (score < bestScore) {
+        bestScore = score;
+        best = { kind: "pickup", item };
+      }
+    }
+
+    this.focus = best;
+  }
+
+  private aimScore(origin: THREE.Vector3, x: number, y: number, z: number, doorBias: number): number {
+    this.toTarget.set(x - origin.x, y - origin.y, z - origin.z);
+    const dist = this.toTarget.length();
+    if (dist > INTERACT_RANGE || dist < 0.04) return Number.POSITIVE_INFINITY;
+    this.toTarget.multiplyScalar(1 / dist);
+    const align = this.toTarget.dot(this.lookDir);
+    if (align < INTERACT_ALIGN) return Number.POSITIVE_INFINITY;
+    return dist - align * 0.45 + doorBias;
+  }
+
+  private handleAimedInteraction(): void {
+    if (!this.ePressed) return;
+    this.ePressed = false;
+    this.tryInteract();
+  }
+
+  private takePickup(item: Pickup): void {
+    if (item.taken) return;
+    item.taken = true;
+    item.glow.visible = false;
+    this.setAssetPickupVisualVisible(item.itemId, false);
+    this.onPickup?.(item.itemId, item.name);
   }
 
   /** Callback to read current story inventory. Set by InteriorOverlay. */
@@ -923,30 +996,13 @@ export class Interior3D {
     // 7b. Story-state machine: only the current narrative phase is interactive.
     this.syncStoryPhase();
 
-    // 8. Collect pickups.
-    this.collectPickups();
-    // 9. Check story triggers.
+    // 8. Story triggers stay walk-in so the main route is unchanged.
     this.collectStoryTriggers();
-    // 10. Door interaction (E key).
-    this.handleDoorInteraction();
+    // 9. Aim-based interact (E / mobile button). Pickups no longer auto-collect.
+    this.refreshFocus();
+    this.handleAimedInteraction();
     // 10. Update guide line to active trigger.
     this.updateGuideLine();
-  }
-
-  /** Auto-collect any glowing item the player has walked onto. */
-  private collectPickups(): void {
-    const p = this.camera.position;
-    for (const item of this.room.pickups) {
-      if (item.taken || !item.glow.visible) continue;
-      const dx = p.x - item.position.x;
-      const dz = p.z - item.position.z;
-      if (dx * dx + dz * dz <= item.radius * item.radius) {
-        item.taken = true;
-        item.glow.visible = false;
-        this.setAssetPickupVisualVisible(item.itemId, false);
-        this.onPickup?.(item.itemId, item.name);
-      }
-    }
   }
 
   /** Fire story popup when the player walks into a red trigger zone. */

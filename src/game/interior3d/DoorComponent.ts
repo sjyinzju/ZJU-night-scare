@@ -147,6 +147,15 @@ export class DoorComponent {
   get isLocked(): boolean { return this._isLocked; }
   get interactionLabel(): string { return this.label; }
 
+  /** Verb shown in the crosshair prompt. */
+  interactPrompt(inventory: string[] = []): string {
+    if (this._isLocked) {
+      if (this.keyItemId && inventory.includes(this.keyItemId)) return "开门";
+      return "需要门禁卡";
+    }
+    return this._isOpen ? "关门" : "开门";
+  }
+
   /**
    * Attempt to open / close / unlock the door.
    * @param playerPos   World position of the player's camera.
@@ -169,12 +178,12 @@ export class DoorComponent {
     if (this._isOpen) {
       this.targetAngle = 0;
       this._isOpen = false;
-      this.label = this.keyItemId ? "门" : "门";
+      this.label = "门";
       return null;
     } else {
       this.targetAngle = this.openAngle;
       this._isOpen = true;
-      this.label = "门（按 E 关上）";
+      this.label = "门";
       return null;
     }
   }

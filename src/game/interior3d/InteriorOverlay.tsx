@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useState, type CSSProperties } from "react";
-import { Interior3D, type InteriorAssetState } from "./Interior3D";
+import { Interior3D, type InteriorAssetState, type InteriorInteractHint } from "./Interior3D";
 import { useGameStore } from "../store";
 
 export interface InteriorOverlayProps {
@@ -47,7 +47,7 @@ export default function InteriorOverlay({
   // 拾取道具时的短暂提示文案。
   const [pickupToast, setPickupToast] = useState<string | null>(null);
   const toastTimer = useRef<number | null>(null);
-  const [doorHint, setDoorHint] = useState("");
+  const [interactHint, setInteractHint] = useState<InteriorInteractHint>({ active: false, prompt: "" });
   const [doorMessage, setDoorMessage] = useState<string | null>(null);
   const doorMessageTimer = useRef<number | null>(null);
 
@@ -150,10 +150,10 @@ export default function InteriorOverlay({
   }, []);
 
   useEffect(() => {
-    const refreshDoorHint = (): void => {
-      setDoorHint(engineRef.current?.doorHint ?? "");
+    const refreshHint = (): void => {
+      setInteractHint(engineRef.current?.interactHint ?? { active: false, prompt: "" });
     };
-    const hintTimer = window.setInterval(refreshDoorHint, 100);
+    const hintTimer = window.setInterval(refreshHint, 50);
     const showDoorMessage = (event: Event): void => {
       const message = (event as CustomEvent<{ message?: string }>).detail?.message;
       if (!message) return;
@@ -166,6 +166,12 @@ export default function InteriorOverlay({
       window.clearInterval(hintTimer);
       window.removeEventListener("zju-horror-door-message", showDoorMessage);
     };
+  }, []);
+
+  const onInteractPress = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    engineRef.current?.tryInteract();
   }, []);
 
   const handleExit = useCallback(() => {
@@ -323,14 +329,40 @@ export default function InteriorOverlay({
       )}
 
       {doorMessage && <div style={styles.doorMessage}>{doorMessage}</div>}
-      {doorHint && <div style={styles.doorHint}>{doorHint}</div>}
+
+      <div
+        style={{
+          ...styles.crosshair,
+          ...(interactHint.active ? styles.crosshairHot : undefined),
+        }}
+        aria-hidden="true"
+      >
+        <span style={styles.crosshairH} />
+        <span style={styles.crosshairV} />
+      </div>
+
+      {interactHint.active && (
+        <div style={styles.doorHint}>
+          {isMobile ? interactHint.prompt : `按 E · ${interactHint.prompt}`}
+        </div>
+      )}
 
       {/* Bottom control hint. */}
       <div style={styles.hint}>
         {isMobile
-          ? "左下摇杆移动 · 右侧拖动看视角 · 右上角离开"
-          : "点击画面锁定鼠标 · WASD/方向键移动 · E 交互 · 移动鼠标转视角 · Esc 释放"}
+          ? "左下摇杆移动 · 右侧拖动视角 · 对准后点交互"
+          : "点击画面锁定鼠标 · WASD 移动 · 准星对准后按 E · Esc 释放"}
       </div>
+
+      {isMobile && interactHint.active && (
+        <button
+          type="button"
+          style={styles.interactBtn}
+          onPointerDown={onInteractPress}
+        >
+          {interactHint.prompt}
+        </button>
+      )}
 
       {/* Mobile virtual joystick, bottom-left. */}
       {isMobile && (
@@ -472,6 +504,59 @@ const styles: Record<string, CSSProperties> = {
     letterSpacing: "0.08em",
     pointerEvents: "none",
     whiteSpace: "nowrap",
+  },
+  crosshair: {
+    position: "absolute",
+    left: "50%",
+    top: "50%",
+    width: 18,
+    height: 18,
+    transform: "translate(-50%, -50%)",
+    zIndex: 6,
+    pointerEvents: "none",
+    opacity: 0.55,
+  },
+  crosshairHot: {
+    width: 22,
+    height: 22,
+    opacity: 1,
+    filter: "drop-shadow(0 0 6px rgba(243,215,154,0.85))",
+  },
+  crosshairH: {
+    position: "absolute",
+    left: "15%",
+    right: "15%",
+    top: "50%",
+    height: 2,
+    marginTop: -1,
+    background: "#f3d79a",
+  },
+  crosshairV: {
+    position: "absolute",
+    top: "15%",
+    bottom: "15%",
+    left: "50%",
+    width: 2,
+    marginLeft: -1,
+    background: "#f3d79a",
+  },
+  interactBtn: {
+    position: "absolute",
+    right: 22,
+    bottom: 44,
+    zIndex: 8,
+    minWidth: 112,
+    padding: "14px 18px",
+    background: "rgba(21,15,15,0.88)",
+    color: "#f3d79a",
+    border: "1px solid rgba(215,183,118,0.7)",
+    borderRadius: 10,
+    fontSize: 16,
+    fontFamily: FONT_STACK,
+    letterSpacing: "0.12em",
+    cursor: "pointer",
+    touchAction: "manipulation",
+    boxShadow: "0 10px 26px rgba(0,0,0,0.45), 0 0 18px rgba(215,183,118,0.22)",
   },
   doorMessage: {
     position: "absolute",
