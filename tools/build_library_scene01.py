@@ -142,6 +142,9 @@ def add_anchor(name: str, three_x: float, three_y: float, three_z: float) -> Non
     bpy.context.collection.objects.link(anchor)
 
 
+EXIT_CENTER_X = 0.15
+
+
 def add_exit_void() -> bpy.types.Object:
     material = bpy.data.materials.new("library_exit_void_material")
     material.diffuse_color = (0.002, 0.001, 0.001, 1.0)
@@ -154,7 +157,7 @@ def add_exit_void() -> bpy.types.Object:
     # The mask sits behind the glass door from the player's approach side.
     # Both are in front of the authored wall so the activated exit is visible
     # before the proximity trigger fades the interior to black.
-    bpy.ops.mesh.primitive_cube_add(location=(8.5, -0.30, 1.35))
+    bpy.ops.mesh.primitive_cube_add(location=(EXIT_CENTER_X, -0.30, 1.35))
     void = bpy.context.object
     void.name = "library_exit_void"
     void.dimensions = (2.12, 0.035, 2.7)
@@ -206,22 +209,24 @@ def main() -> None:
     append_blend(
         ASSETS / "便签（用于借阅小票）" / "office_notepads_2k.blend",
         root_name="pickup_receipt_visual",
-        # Cubicle desk top Z 0.986. Put the ticket on its outer edge, before
-        # the blocking chair, so it is visible and collectable from the door.
-        target_center=(-3.62, -10.63, 1.005),
-        target_dimensions=(0.42, 0.28, 0.05),
+        # The right-hand recessed cubicle is the receipt location. Its outer
+        # standing-desk surface is Z 1.5656; keep the ticket at the reachable
+        # front edge and rest its lower face on the desktop.
+        target_center=(-4.88, -8.18, 1.591),
+        target_dimensions=(0.50, 0.32, 0.05),
     )
     import_fbx(
         ASSETS / "符咒" / "符3+3DMAX2022" / "符3 3DMAX2022" / "符3.fbx",
         root_name="pickup_talisman_visual",
-        # Outer desk top Z 1.5656, left of the cubicle as requested.
-        target_center=(-4.88, -8.18, 1.585),
-        target_dimensions=(0.50, 0.30, 0.05),
+        # The left-hand desk beside the shelves is the talisman location. Its
+        # tabletop is Z 0.986; the model is placed on top rather than inside it.
+        target_center=(-3.62, -10.63, 1.011),
+        target_dimensions=(0.58, 0.34, 0.05),
     )
     door = import_obj(
         ASSETS / "门" / "Glass Door" / "Glass Door.obj",
         root_name="library_exit_door",
-        target_center=(8.5, -0.37, 1.35),
+        target_center=(EXIT_CENTER_X, -0.37, 1.35),
         target_dimensions=(2.06, 0.18, 2.7),
     )
     add_exit_void()
@@ -230,7 +235,7 @@ def main() -> None:
     add_anchor("story_book_anchor_1", -0.45, 1.45, 36.0)
     add_anchor("story_book_anchor_2", -3.15, 1.45, 48.0)
     add_anchor("story_fall_trigger_anchor", 2.2, 0.15, 31.0)
-    add_anchor("story_exit_trigger_anchor", 8.5, 0.15, 0.72)
+    add_anchor("story_exit_trigger_anchor", EXIT_CENTER_X, 0.15, 0.72)
 
     # The existing library stays in its original compact GLB. Export only the
     # scene-one additions so its already-compressed textures are not decoded

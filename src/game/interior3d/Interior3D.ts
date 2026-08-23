@@ -828,15 +828,20 @@ export class Interior3D {
       });
     }
 
-    const emissiveIntensity = itemId === "receipt" || itemId === "talisman" ? 0.72 : 0.18;
+    const isPaperClue = itemId === "receipt" || itemId === "talisman";
+    const emissiveIntensity = isPaperClue ? 1.22 : 0.18;
     for (const mesh of meshes) {
       const source = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       const materials = source.map((material) => {
         const clone = material.clone() as THREE.MeshStandardMaterial;
         if (clone.emissive) {
-          clone.emissive.setHex(itemId === "talisman" ? 0x8e120d : 0x76090d);
+          clone.emissive.setHex(itemId === "talisman" ? 0xd32218 : 0xc71b1d);
           clone.emissiveIntensity = Math.max(clone.emissiveIntensity ?? 0, emissiveIntensity);
         }
+        // Both clue assets are very thin paper meshes. Some source faces have
+        // downward normals, so front-face culling made them vanish from the
+        // player's standing viewpoint even though their GLB nodes were loaded.
+        if (isPaperClue) clone.side = THREE.DoubleSide;
         clone.needsUpdate = true;
         return clone;
       });
@@ -882,8 +887,8 @@ export class Interior3D {
         add(
           `pickup:${pickup.itemId}`,
           pickup.position,
-          pickup.itemId === "flashlight" ? 5.6 : 4.4,
-          pickup.itemId === "flashlight" ? 5.2 : 4.2,
+          pickup.itemId === "flashlight" ? 5.6 : 5.1,
+          pickup.itemId === "flashlight" ? 5.2 : 4.7,
         );
       }
     }

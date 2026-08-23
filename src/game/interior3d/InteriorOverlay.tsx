@@ -18,14 +18,15 @@ export interface InteriorOverlayProps {
 }
 
 const JOYSTICK_RADIUS = 56;
-const LIBRARY_STEPS = ["寻找手电筒", "笔记本", "借阅小票", "书架异响", "灯下的人", "离开图书馆"];
+const LIBRARY_STEPS = ["寻找手电筒", "笔记本", "借阅小票", "拾取符咒", "书架异响", "灯下的人", "离开图书馆"];
 
 function libraryProgressIndex(sceneId: string, inventory: string[]): number {
   if (sceneId === "library_intro") return inventory.includes("flashlight") ? 1 : 0;
-  if (sceneId === "library_receipt" || sceneId === "library_talisman") return 2;
-  if (sceneId === "library_shelf") return 3;
-  if (sceneId === "library_fall") return 4;
-  if (sceneId === "dorm_baiqiu") return 5;
+  if (sceneId === "library_receipt") return 2;
+  if (sceneId === "library_talisman") return 3;
+  if (sceneId === "library_shelf") return 4;
+  if (sceneId === "library_fall") return 5;
+  if (sceneId === "dorm_baiqiu") return 6;
   return 0;
 }
 

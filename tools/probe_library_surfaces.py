@@ -12,8 +12,8 @@ TARGETS = {
     "flashlight_spawn_table_a": (9.45, -8.35),
     "flashlight_spawn_table_b": (9.45, -9.25),
     "flashlight_spawn_table_c": (9.45, -10.15),
-    "receipt_cubicle": (-3.62, -10.63),
-    "talisman_outer_table": (-4.88, -8.18),
+    "receipt_right_cubicle": (-4.88, -8.18),
+    "talisman_left_shelf_table": (-3.62, -10.63),
 }
 
 
@@ -27,6 +27,16 @@ def bounds(obj: bpy.types.Object) -> tuple[Vector, Vector]:
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
 bpy.ops.import_scene.gltf(filepath=str(LIBRARY))
+
+scene_meshes = [obj for obj in bpy.context.scene.objects if obj.type == "MESH"]
+scene_points = [obj.matrix_world @ Vector(corner) for obj in scene_meshes for corner in obj.bound_box]
+scene_lo = Vector((min(p.x for p in scene_points), min(p.y for p in scene_points), min(p.z for p in scene_points)))
+scene_hi = Vector((max(p.x for p in scene_points), max(p.y for p in scene_points), max(p.z for p in scene_points)))
+print(
+    "BASE_WORLD_BOUNDS "
+    f"min={tuple(round(v, 4) for v in scene_lo)} "
+    f"max={tuple(round(v, 4) for v in scene_hi)}"
+)
 
 for label, (x, y) in TARGETS.items():
     hits = []

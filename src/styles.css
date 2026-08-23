@@ -1595,6 +1595,7 @@ button {
   gap: 10px;
   max-width: 900px;
   margin: 0 auto;
+  text-align: left;
 }
 
 .storyText p {
@@ -1638,8 +1639,8 @@ button {
 .storyText p.shock {
   color: var(--red-hot);
   font-weight: 700;
-  text-align: center;
-  text-indent: 0;
+  text-align: left;
+  text-indent: 2em;
   text-shadow: 0 0 24px rgba(227, 92, 77, 0.26);
   animation:
     storyTextFade 0.5s ease-out both,

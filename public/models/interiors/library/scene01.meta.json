@@ -1,5 +1,5 @@
 {
-  "assetVersion": 7,
+  "assetVersion": 9,
   "buildingId": "medical-library",
   "roomKind": "library",
   "model": "library.glb",
@@ -18,8 +18,8 @@
       { "x": 9.45, "y": 1.365, "z": 9.25, "radius": 0.86 },
       { "x": 9.45, "y": 1.365, "z": 10.15, "radius": 0.86 }
     ],
-    "receipt": [{ "x": -3.62, "y": 1.005, "z": 10.63, "radius": 1.1 }],
-    "talisman": [{ "x": -4.88, "y": 1.585, "z": 8.18, "radius": 1.25 }]
+    "receipt": [{ "x": -4.88, "y": 1.591, "z": 8.18, "radius": 1.1 }],
+    "talisman": [{ "x": -3.62, "y": 1.011, "z": 10.63, "radius": 1.25 }]
   },
   "storyVisuals": { "library_intro": ["story_notebook_visual"] },
   "phaseVisuals": [
@@ -28,7 +28,7 @@
   "storySpots": {
     "library_intro": { "x": 7.05, "y": 1.325, "z": 4.5038, "radius": 1.05 },
     "library_fall": { "x": 2.2, "y": 0.15, "z": 31.0, "radius": 1.25 },
-    "library_exit": { "x": 8.5, "y": 0.15, "z": 0.72, "radius": 1.0 }
+    "library_exit": { "x": 0.15, "y": 0.15, "z": 0.72, "radius": 1.0 }
   },
   "navigationClearZones": [
     { "minX": -5.0, "maxX": -2.55, "minZ": 9.82, "maxZ": 11.35, "kind": "furniture" },
@@ -51,7 +51,7 @@
     "approachMinX": 4.4,
     "mapBounds": { "minX": 4.85, "maxX": 8.9, "minZ": 35.1, "maxZ": 39.55 }
   },
-  "exitSegment": { "minX": 7.42, "maxX": 9.58, "z": 0.08 },
+  "exitSegment": { "minX": -0.93, "maxX": 1.23, "z": 0.08 },
   "notes": [
     "P4 is a proximity trigger and intentionally has no minimap objective dot.",
     "The exit door and dark opening mask remain hidden until P4 completes.",

@@ -27,7 +27,7 @@ const RESTART_LINES = [
   "你没有逃出去，只是重新回到了故事开头。",
 ];
 
-const INTRO_MIN_DURATION = 8200;
+const INTRO_MIN_DURATION = 8800;
 const RESTART_MIN_DURATION = 2300;
 const DISMISS_DURATION = 900;
 
@@ -113,15 +113,18 @@ export default function LaunchSequence({
               跟随红色指引，依次调查校园 8 个地点，收集关键道具与线索。
             </p>
             <p style={{ "--launch-delay": "4.25s" } as CSSProperties}>
-              红鬼贴身会造成致命伤害（护身符可抵挡一次）；理智降到 0 也会死亡。
+              进入室内后，请跟随右上角小地图中的红点，寻找当前剧情点或道具。
             </p>
             <p style={{ "--launch-delay": "4.85s" } as CSSProperties}>
-              每次离开室内，你有 5 秒安全时间拉开距离；随后红鬼会从远处沿道路追来。
+              红鬼贴身会造成致命伤害（护身符可抵挡一次）；理智降到 0 也会死亡。
             </p>
             <p style={{ "--launch-delay": "5.45s" } as CSSProperties}>
+              每次离开室内，你有 5 秒安全时间拉开距离；随后红鬼会从远处沿道路追来。
+            </p>
+            <p style={{ "--launch-delay": "6.05s" } as CSSProperties}>
               守住理智，在小剧场阻止仪式并作出最终选择，才能通关。
             </p>
-            <p className="launchSequence__controls" style={{ "--launch-delay": "6.05s" } as CSSProperties}>
+            <p className="launchSequence__controls" style={{ "--launch-delay": "6.65s" } as CSSProperties}>
               {controls}
             </p>
           </div>
