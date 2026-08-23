@@ -19,7 +19,7 @@ export interface AABB {
   isActive?: () => boolean;
 }
 
-/** A glowing item collected by automatic proximity or the wider E-key interaction range. */
+/** A glowing item collected at its authored radius or through the wider E-key interaction range. */
 export interface Pickup {
   id: string;
   itemId: string;
@@ -31,7 +31,7 @@ export interface Pickup {
   taken: boolean;
 }
 
-/** A red-glowing story zone triggered by proximity or the wider E-key interaction range. */
+/** A red-glowing story zone triggered with a small proximity margin or the wider E-key range. */
 export interface StoryTrigger {
   id: string;
   sceneId: string;

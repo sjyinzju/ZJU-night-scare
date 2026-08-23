@@ -64,8 +64,10 @@ const EYE_HEIGHT = 1.6;
 const GUIDE_MAX_POINTS = 32;
 const EMPTY_INVENTORY: string[] = [];
 const STAMINA_STORE_SYNC_INTERVAL = 0.1;
-/** Auto proximity keeps the authored radius as its source of truth, with a forgiving 15% margin. */
-const AUTO_INTERACTION_RADIUS_SCALE = 1.15;
+/** Pickups retain their authored automatic proximity radius. */
+const PICKUP_AUTO_RADIUS_SCALE = 1;
+/** Story and exit triggers receive a restrained 10% automatic proximity margin. */
+const STORY_AUTO_RADIUS_SCALE = 1.1;
 /** Pressing E grants a wider margin without changing the authored radius stored in scene metadata. */
 const MANUAL_INTERACTION_RADIUS_SCALE = 1.25;
 
@@ -1614,11 +1616,11 @@ export class Interior3D {
 
   /**
    * Shared interaction rule for current and future pickups/story points.
-   * The stored radius remains the authored baseline: proximity uses 115%, while
-   * an E press is accepted within 125%.
+   * The stored radius remains the authored baseline; each interaction type
+   * supplies its automatic scale, while an E press is accepted within 125%.
    */
-  private isInteractionInRange(distanceSquared: number, baseRadius: number): boolean {
-    const scale = this.ePressed ? MANUAL_INTERACTION_RADIUS_SCALE : AUTO_INTERACTION_RADIUS_SCALE;
+  private isInteractionInRange(distanceSquared: number, baseRadius: number, automaticScale: number): boolean {
+    const scale = this.ePressed ? MANUAL_INTERACTION_RADIUS_SCALE : automaticScale;
     const effectiveRadius = baseRadius * scale;
     return distanceSquared <= effectiveRadius * effectiveRadius;
   }
@@ -1630,7 +1632,7 @@ export class Interior3D {
       if (item.taken || !item.glow.visible) continue;
       const dx = p.x - item.position.x;
       const dz = p.z - item.position.z;
-      if (this.isInteractionInRange(dx * dx + dz * dz, item.radius)) {
+      if (this.isInteractionInRange(dx * dx + dz * dz, item.radius, PICKUP_AUTO_RADIUS_SCALE)) {
         item.taken = true;
         item.glow.visible = false;
         this.setAssetPickupVisualVisible(item.itemId, false);
@@ -1656,7 +1658,7 @@ export class Interior3D {
       const activationRadius = fallReveal?.triggerDistance ?? trigger.radius;
       const dx = p.x - targetX;
       const dz = p.z - targetZ;
-      if (this.isInteractionInRange(dx * dx + dz * dz, activationRadius)) {
+      if (this.isInteractionInRange(dx * dx + dz * dz, activationRadius, STORY_AUTO_RADIUS_SCALE)) {
         trigger.triggered = true;
         trigger.glow.visible = false;
         // A successful story interaction owns this key press; doors must not also receive it.
