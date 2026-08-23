@@ -19,7 +19,7 @@ export interface AABB {
   isActive?: () => boolean;
 }
 
-/** A glowing, collectable item on the floor. */
+/** A glowing item collected by automatic proximity or the wider E-key interaction range. */
 export interface Pickup {
   id: string;
   itemId: string;
@@ -31,7 +31,7 @@ export interface Pickup {
   taken: boolean;
 }
 
-/** A red-glowing story-trigger zone inside the 3D interior. Walk in → text popup. */
+/** A red-glowing story zone triggered by proximity or the wider E-key interaction range. */
 export interface StoryTrigger {
   id: string;
   sceneId: string;
@@ -225,7 +225,7 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
     colliders.push({ minX: cx - cw / 2, maxX: cx + cw / 2, minZ: cz - cd / 2, maxZ: cz + cd / 2 });
   };
 
-  // A glowing collectable item (floats + bobs, auto-collected on approach).
+  // A glowing collectable item (floats + bobs, collected by proximity or E).
   const addPickup = (
     itemId: string,
     name: string,
@@ -287,7 +287,7 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
     });
   };
 
-  // A red glowing story-trigger zone. Player walks in → text popup in the 3D interior.
+  // A red glowing story-trigger zone. Proximity or E opens the story popup.
   const addStoryTrigger = (
     sceneId: string,
     x: number,

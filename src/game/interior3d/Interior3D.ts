@@ -62,6 +62,10 @@ const DEFAULT_PLAYER_RADIUS = 0.32;
 const AUTHORED_LIBRARY_PLAYER_RADIUS = 0.22;
 const EYE_HEIGHT = 1.6;
 const GUIDE_MAX_POINTS = 32;
+/** Auto proximity keeps the authored radius as its source of truth, with a forgiving 15% margin. */
+const AUTO_INTERACTION_RADIUS_SCALE = 1.15;
+/** Pressing E grants a wider margin without changing the authored radius stored in scene metadata. */
+const MANUAL_INTERACTION_RADIUS_SCALE = 1.25;
 
 /**
  * Self-contained first-person interior renderer. Owns its renderer, scene,
@@ -1514,9 +1518,9 @@ export class Interior3D {
     // 7b. Story-state machine: only the current narrative phase is interactive.
     this.syncStoryPhase();
 
-    // 8. Collect pickups.
+    // 8. Collect pickups (automatic proximity or E within the wider manual range).
     this.collectPickups();
-    // 9. Check story triggers.
+    // 9. Check story triggers with the same shared interaction rule.
     this.collectStoryTriggers();
     // 10. Door interaction (E key).
     this.handleDoorInteraction();
@@ -1524,23 +1528,37 @@ export class Interior3D {
     this.updateGuideLine();
   }
 
-  /** Auto-collect any glowing item the player has walked onto. */
+  /**
+   * Shared interaction rule for current and future pickups/story points.
+   * The stored radius remains the authored baseline: proximity uses 115%, while
+   * an E press is accepted within 125%.
+   */
+  private isInteractionInRange(distanceSquared: number, baseRadius: number): boolean {
+    const scale = this.ePressed ? MANUAL_INTERACTION_RADIUS_SCALE : AUTO_INTERACTION_RADIUS_SCALE;
+    const effectiveRadius = baseRadius * scale;
+    return distanceSquared <= effectiveRadius * effectiveRadius;
+  }
+
+  /** Collect a glowing item by proximity, or by pressing E in the wider manual range. */
   private collectPickups(): void {
     const p = this.camera.position;
     for (const item of this.room.pickups) {
       if (item.taken || !item.glow.visible) continue;
       const dx = p.x - item.position.x;
       const dz = p.z - item.position.z;
-      if (dx * dx + dz * dz <= item.radius * item.radius) {
+      if (this.isInteractionInRange(dx * dx + dz * dz, item.radius)) {
         item.taken = true;
         item.glow.visible = false;
         this.setAssetPickupVisualVisible(item.itemId, false);
+        // Do not let the same E press interact with a nearby door as well.
+        this.ePressed = false;
         this.onPickup?.(item.itemId, item.name);
+        break;
       }
     }
   }
 
-  /** Fire story popup when the player walks into a red trigger zone. */
+  /** Fire a story/exit trigger by proximity, or by pressing E in the wider manual range. */
   private collectStoryTriggers(): void {
     const p = this.camera.position;
     const triggers = this.room.storyTriggers;
@@ -1554,9 +1572,11 @@ export class Interior3D {
       const activationRadius = fallReveal?.triggerDistance ?? trigger.radius;
       const dx = p.x - targetX;
       const dz = p.z - targetZ;
-      if (dx * dx + dz * dz <= activationRadius * activationRadius) {
+      if (this.isInteractionInRange(dx * dx + dz * dz, activationRadius)) {
         trigger.triggered = true;
         trigger.glow.visible = false;
+        // A successful story interaction owns this key press; doors must not also receive it.
+        this.ePressed = false;
         if (trigger.sceneId === "library_fall") this.revealLibraryFall();
         if (trigger.action === "exit") {
           this.onExitTrigger?.();
