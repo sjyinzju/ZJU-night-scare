@@ -13,6 +13,14 @@ import type { InputSnapshot } from "./stateMachine/MovementContext";
 export class InputManager {
   private readonly held = new Set<string>();
   private readonly justPressedThisFrame = new Set<string>();
+  private readonly snapshot: InputSnapshot = {
+    moveX: 0,
+    moveZ: 0,
+    jumpPressed: false,
+    jumpHeld: false,
+    sprintHeld: false,
+    crouchHeld: false,
+  };
 
   /** Virtual movement intent from touch joystick / external source. */
   private virtualMoveX = 0;
@@ -71,7 +79,13 @@ export class InputManager {
     // Clear edge detectors for the next frame.
     this.justPressedThisFrame.clear();
 
-    return { moveX: mx, moveZ: mz, jumpPressed, jumpHeld, sprintHeld, crouchHeld };
+    this.snapshot.moveX = mx;
+    this.snapshot.moveZ = mz;
+    this.snapshot.jumpPressed = jumpPressed;
+    this.snapshot.jumpHeld = jumpHeld;
+    this.snapshot.sprintHeld = sprintHeld;
+    this.snapshot.crouchHeld = crouchHeld;
+    return this.snapshot;
   }
 
   /** Resets all held keys (useful when the tab loses focus). */

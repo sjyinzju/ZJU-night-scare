@@ -243,6 +243,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   setStoryState: (updater) =>
     set((s) => {
       const storyState = updater(s.storyState);
+      if (storyState === s.storyState) return s;
       return {
         storyState,
         guideHotspotId: getSceneHotspot(storyState.currentSceneId),

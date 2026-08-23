@@ -132,9 +132,11 @@ export default function InteriorOverlay({
         getStamina: () => useGameStore.getState().storyState.stats.stamina,
         setStamina: (v) => {
           const s = useGameStore.getState();
+          const stamina = Math.max(0, Math.min(100, Math.round(v)));
+          if (stamina === s.storyState.stats.stamina) return;
           s.setStoryState((prev) => ({
             ...prev,
-            stats: { ...prev.stats, stamina: Math.max(0, Math.min(100, Math.round(v))) },
+            stats: { ...prev.stats, stamina },
           }));
         },
         onAssetStateChange: reportAssetState,
@@ -188,7 +190,8 @@ export default function InteriorOverlay({
 
   useEffect(() => {
     const refreshDoorHint = (): void => {
-      setDoorHint(engineRef.current?.doorHint ?? "");
+      const nextHint = engineRef.current?.doorHint ?? "";
+      setDoorHint((previousHint) => previousHint === nextHint ? previousHint : nextHint);
     };
     const hintTimer = window.setInterval(refreshDoorHint, 100);
     const showDoorMessage = (event: Event): void => {

@@ -62,6 +62,8 @@ const DEFAULT_PLAYER_RADIUS = 0.32;
 const AUTHORED_LIBRARY_PLAYER_RADIUS = 0.22;
 const EYE_HEIGHT = 1.6;
 const GUIDE_MAX_POINTS = 32;
+const EMPTY_INVENTORY: string[] = [];
+const STAMINA_STORE_SYNC_INTERVAL = 0.1;
 /** Auto proximity keeps the authored radius as its source of truth, with a forgiving 15% margin. */
 const AUTO_INTERACTION_RADIUS_SCALE = 1.15;
 /** Pressing E grants a wider margin without changing the authored radius stored in scene metadata. */
@@ -98,12 +100,15 @@ export class Interior3D {
   private room: RoomBuildResult;
   private readonly roomKind: RoomKind;
   private colliders: AABB[];
+  private staticColliderSet = false;
   private bounds: AABB;
   private playerRadius = DEFAULT_PLAYER_RADIUS;
   private readonly blueprint: InteriorBlueprint;
   private assetHandle?: InteriorAssetHandle;
   private readonly assetPickupVisuals = new Map<string, THREE.Object3D[]>();
   private readonly assetStoryVisuals = new Map<string, THREE.Object3D[]>();
+  private readonly pickupsByItemId = new Map<string, RoomBuildResult["pickups"][number]>();
+  private readonly storyTriggersBySceneId = new Map<string, RoomBuildResult["storyTriggers"][number]>();
   private readonly targetGlowLights = new Map<string, THREE.PointLight>();
   private readonly assetPhaseVisuals: Array<{ objects: THREE.Object3D[]; activeSceneIds: string[] }> = [];
   private readonly assetFlickerLights: Array<{
@@ -113,6 +118,7 @@ export class Interior3D {
     phase: number;
     y: number;
     followPickupId?: string;
+    followPickup?: RoomBuildResult["pickups"][number];
   }> = [];
   private readonly assetCeilingLights: THREE.PointLight[] = [];
   private readonly onPickup?: (itemId: string, name: string) => void;
@@ -123,6 +129,14 @@ export class Interior3D {
   private readonly getStamina?: () => number;
   private readonly setStamina?: (value: number) => void;
   private readonly onAssetStateChange?: (state: InteriorAssetState) => void;
+  private runtimeStamina = 100;
+  private persistedStamina = 100;
+  private staminaStoreSyncElapsed = 0;
+  private storySceneId?: string;
+  private inventorySnapshot: string[] = EMPTY_INVENTORY;
+  private readonly inventoryItems = new Set<string>();
+  private storyPhaseDirty = true;
+  private interiorMapObstacles?: InteriorMapObstacle[];
   private lowStaminaWarning = false;
   private fallenLinwei?: THREE.Object3D;
   private fallSpotlight?: THREE.SpotLight;
@@ -155,6 +169,13 @@ export class Interior3D {
   private rafId = 0;
   private disposed = false;
   private pointerLocked = false;
+  private readonly perfEnabled: boolean;
+  private perfWindowStartedAt = 0;
+  private perfLastFrameAt = 0;
+  private readonly perfFrameTimes: number[] = [];
+  private perfStaminaWrites = 0;
+  private perfCollisionCalls = 0;
+  private perfPenetrationScans = 0;
 
   // Bound handlers (kept so they can be removed on dispose).
   private readonly onResize = () => this.resize();
@@ -192,6 +213,10 @@ export class Interior3D {
     this.getStamina = options.getStamina;
     this.setStamina = options.setStamina;
     this.onAssetStateChange = options.onAssetStateChange;
+    this.perfEnabled = new URLSearchParams(window.location.search).get("perfInterior") === "1";
+    this.runtimeStamina = this.clampStamina(this.getStamina?.() ?? 100);
+    this.persistedStamina = Math.round(this.runtimeStamina);
+    this.refreshSharedState();
 
     // ---- Renderer ----
     this.renderer = new THREE.WebGLRenderer({
@@ -280,6 +305,8 @@ export class Interior3D {
     this.outsideWhiteLight.intensity = this.roomKind === "library" ? 2.8 : 0;
     this.blueprint = getInteriorBlueprint(this.roomKind);
     this.room = buildRoom(this.roomKind);
+    for (const pickup of this.room.pickups) this.pickupsByItemId.set(pickup.itemId, pickup);
+    for (const trigger of this.room.storyTriggers) this.storyTriggersBySceneId.set(trigger.sceneId, trigger);
     this.scene.add(this.room.root);
     this.colliders = this.room.colliders;
     this.bounds = this.room.bounds;
@@ -369,33 +396,24 @@ export class Interior3D {
     let objective: InteriorMapSnapshot["objective"];
     if (sceneId === "library_intro") {
       if (!this.hasInventoryItem("flashlight")) {
-        const flashlight = this.room.pickups.find((item) => item.itemId === "flashlight" && !item.taken);
-        if (flashlight) objective = { x: flashlight.position.x, z: flashlight.position.z };
+        const flashlight = this.pickupsByItemId.get("flashlight");
+        if (flashlight && !flashlight.taken) objective = { x: flashlight.position.x, z: flashlight.position.z };
       } else {
-        const trigger = this.room.storyTriggers.find((item) => item.sceneId === sceneId && !item.triggered);
-        if (trigger) objective = { x: trigger.position.x, z: trigger.position.z };
+        const trigger = this.storyTriggersBySceneId.get(sceneId);
+        if (trigger && !trigger.triggered) objective = { x: trigger.position.x, z: trigger.position.z };
       }
     } else if (sceneId === "library_receipt" || sceneId === "library_talisman") {
       const itemId = sceneId === "library_receipt" ? "receipt" : "talisman";
-      const pickup = this.room.pickups.find((item) => item.itemId === itemId && !item.taken);
-      if (pickup) objective = { x: pickup.position.x, z: pickup.position.z };
+      const pickup = this.pickupsByItemId.get(itemId);
+      if (pickup && !pickup.taken) objective = { x: pickup.position.x, z: pickup.position.z };
     } else if (sceneId === "library_shelf") {
-      const trigger = this.room.storyTriggers.find((item) => item.sceneId === sceneId && !item.triggered);
-      if (trigger) objective = { x: trigger.position.x, z: trigger.position.z };
+      const trigger = this.storyTriggersBySceneId.get(sceneId);
+      if (trigger && !trigger.triggered) objective = { x: trigger.position.x, z: trigger.position.z };
     }
     const fallReveal = this.assetHandle?.meta?.fallReveal;
-    const hiddenBodyBounds = fallReveal?.mapBounds;
-    const obstacles = hiddenBodyBounds
-      ? collisionMap.obstacles.filter((obstacle) => (
-        obstacle.maxX < hiddenBodyBounds.minX
-        || obstacle.minX > hiddenBodyBounds.maxX
-        || obstacle.maxZ < hiddenBodyBounds.minZ
-        || obstacle.minZ > hiddenBodyBounds.maxZ
-      ))
-      : collisionMap.obstacles;
     return {
       bounds: collisionMap.bounds,
-      obstacles,
+      obstacles: this.interiorMapObstacles ?? collisionMap.obstacles,
       player: { x: this.camera.position.x, z: this.camera.position.z },
       objective,
       fallenPerson: this.fallRevealed && fallReveal
@@ -431,14 +449,14 @@ export class Interior3D {
     let lookAtFallBody: { x: number; z: number } | undefined;
 
     if (sceneId === "library_intro" && !this.hasInventoryItem("flashlight")) {
-      const flashlight = this.room.pickups.find((item) => item.itemId === "flashlight" && !item.taken);
-      target = flashlight?.position;
+      const flashlight = this.pickupsByItemId.get("flashlight");
+      target = flashlight && !flashlight.taken ? flashlight.position : undefined;
       activationRadius = flashlight?.radius ?? activationRadius;
       label = "手电筒";
     } else if (sceneId === "library_receipt" || sceneId === "library_talisman") {
       const itemId = sceneId === "library_receipt" ? "receipt" : "talisman";
-      const pickup = this.room.pickups.find((item) => item.itemId === itemId && !item.taken);
-      target = pickup?.position;
+      const pickup = this.pickupsByItemId.get(itemId);
+      target = pickup && !pickup.taken ? pickup.position : undefined;
       activationRadius = pickup?.radius ?? activationRadius;
       label = itemId === "receipt" ? "借阅小票" : "符咒";
     } else if (sceneId === "library_fall" && this.assetHandle?.meta?.fallReveal) {
@@ -671,6 +689,18 @@ export class Interior3D {
         && centerZ <= zone.maxZ
       ));
     });
+    this.staticColliderSet = this.colliders.every((collider) => (
+      !collider.isActive && !collider.activeSceneIds?.length
+    ));
+    const hiddenBodyBounds = handle.meta?.fallReveal?.mapBounds;
+    this.interiorMapObstacles = hiddenBodyBounds
+      ? handle.collisionMap.obstacles.filter((obstacle) => (
+        obstacle.maxX < hiddenBodyBounds.minX
+        || obstacle.minX > hiddenBodyBounds.maxX
+        || obstacle.maxZ < hiddenBodyBounds.minZ
+        || obstacle.minZ > hiddenBodyBounds.maxZ
+      ))
+      : handle.collisionMap.obstacles;
     this.playerRadius = AUTHORED_LIBRARY_PLAYER_RADIUS;
     this.moveCtx.playerRadius = this.playerRadius;
 
@@ -747,7 +777,8 @@ export class Interior3D {
     }
     this.createTargetGlowLights();
     this.bindLibraryFallReveal(handle);
-    this.syncAssetPhaseVisuals(this.getStorySceneId?.());
+    this.storyPhaseDirty = true;
+    this.syncStoryPhase();
   }
 
   private applyAssetPickupSpots(handle: InteriorAssetHandle): void {
@@ -802,6 +833,7 @@ export class Interior3D {
         phase: def.phase ?? Math.random() * Math.PI * 2,
         y: def.y,
         followPickupId: def.followPickupId,
+        followPickup: def.followPickupId ? this.pickupsByItemId.get(def.followPickupId) : undefined,
       });
     }
   }
@@ -864,7 +896,7 @@ export class Interior3D {
     }
 
     for (const [sceneId, candidates] of Object.entries(handle.meta?.storySpotCandidates ?? {})) {
-      const trigger = this.room.storyTriggers.find((item) => item.sceneId === sceneId);
+      const trigger = this.storyTriggersBySceneId.get(sceneId);
       if (!trigger || candidates.length === 0) continue;
       const candidate = candidates[Math.floor(Math.random() * candidates.length)];
       trigger.position.set(candidate.x, candidate.y, candidate.z);
@@ -904,16 +936,16 @@ export class Interior3D {
   }
 
   private updateTargetGlowLights(t: number): void {
-    const sceneId = this.getStorySceneId?.();
+    const sceneId = this.storySceneId;
     for (const [key, light] of this.targetGlowLights) {
       let active = false;
       if (key.startsWith("pickup:")) {
         const itemId = key.slice("pickup:".length);
-        const pickup = this.room.pickups.find((item) => item.itemId === itemId);
+        const pickup = this.pickupsByItemId.get(itemId);
         active = !!pickup && !pickup.taken && pickup.glow.visible && !this.hasInventoryItem(itemId);
       } else {
         const targetSceneId = key.slice("story:".length);
-        const trigger = this.room.storyTriggers.find((item) => item.sceneId === targetSceneId);
+        const trigger = this.storyTriggersBySceneId.get(targetSceneId);
         active = sceneId === targetSceneId && !!trigger && !trigger.triggered && trigger.glow.visible;
       }
       light.visible = active;
@@ -1129,6 +1161,7 @@ export class Interior3D {
   }
 
   private collides(x: number, z: number): boolean {
+    if (this.perfEnabled) this.perfCollisionCalls++;
     for (const c of this.colliders) {
       if (!this.isColliderActive(c)) continue;
       if (
@@ -1193,6 +1226,7 @@ export class Interior3D {
   private resolvePenetration(): void {
     const pos = this.camera.position;
     for (let pass = 0; pass < 8; pass++) {
+      if (this.perfEnabled) this.perfPenetrationScans++;
       let moved = false;
       for (const collider of this.colliders) {
         if (!this.isColliderActive(collider)) continue;
@@ -1232,7 +1266,52 @@ export class Interior3D {
   }
 
   private hasInventoryItem(itemId: string): boolean {
-    return this.getInventory?.().includes(itemId) ?? false;
+    return this.inventoryItems.has(itemId);
+  }
+
+  private clampStamina(value: number): number {
+    return Math.max(0, Math.min(100, value));
+  }
+
+  /**
+   * Snapshot shared story inputs once per frame. React/Zustand replace the
+   * inventory array when it changes, so rebuilding the Set is an event-time
+   * cost rather than repeated linear scans throughout the frame.
+   */
+  private refreshSharedState(): void {
+    const sceneId = this.getStorySceneId?.();
+    const inventory = this.getInventory?.() ?? EMPTY_INVENTORY;
+    if (sceneId !== this.storySceneId) {
+      this.storySceneId = sceneId;
+      this.storyPhaseDirty = true;
+    }
+    if (inventory !== this.inventorySnapshot || inventory.length !== this.inventoryItems.size) {
+      this.inventorySnapshot = inventory;
+      this.inventoryItems.clear();
+      for (const itemId of inventory) this.inventoryItems.add(itemId);
+      this.storyPhaseDirty = true;
+    }
+  }
+
+  /** Accept genuine story-system stamina changes without resetting local float progress. */
+  private syncExternalStamina(): void {
+    if (!this.getStamina) return;
+    const externalStamina = Math.round(this.clampStamina(this.getStamina()));
+    if (externalStamina === this.persistedStamina) return;
+    this.persistedStamina = externalStamina;
+    this.runtimeStamina = externalStamina;
+    this.staminaStoreSyncElapsed = 0;
+  }
+
+  /** Persist changed integer UI state at no more than 10 Hz. */
+  private syncStaminaToStore(): void {
+    if (!this.setStamina || this.staminaStoreSyncElapsed < STAMINA_STORE_SYNC_INTERVAL) return;
+    const nextStamina = Math.round(this.runtimeStamina);
+    if (nextStamina === this.persistedStamina) return;
+    this.persistedStamina = nextStamina;
+    this.staminaStoreSyncElapsed = 0;
+    if (this.perfEnabled) this.perfStaminaWrites++;
+    this.setStamina(nextStamina);
   }
 
   private syncLightingState(dt: number, t: number): void {
@@ -1279,7 +1358,7 @@ export class Interior3D {
 
   private updateLibraryStorm(t: number): void {
     if (this.roomKind !== "library") return;
-    const sceneId = this.getStorySceneId?.();
+    const sceneId = this.storySceneId;
     const storyAllowsStorm = sceneId === "library_fall" || sceneId === "dorm_baiqiu";
     const exterior = storyAllowsStorm && this.isInLibraryExterior();
 
@@ -1354,7 +1433,7 @@ export class Interior3D {
   private updateAssetFlickerLights(t: number): void {
     for (const entry of this.assetFlickerLights) {
       if (entry.followPickupId) {
-        const pickup = this.room.pickups.find((p) => p.itemId === entry.followPickupId);
+        const pickup = entry.followPickup;
         const visible = !!pickup && !pickup.taken && pickup.glow.visible && !this.hasInventoryItem(entry.followPickupId);
         entry.light.visible = visible;
         if (!visible || !pickup) {
@@ -1414,9 +1493,15 @@ export class Interior3D {
 
   private update(dt: number): void {
     const ctx = this.moveCtx;
+    this.syncExternalStamina();
+    this.staminaStoreSyncElapsed = Math.min(
+      STAMINA_STORE_SYNC_INTERVAL,
+      this.staminaStoreSyncElapsed + dt,
+    );
 
     // 1. Feed the latest input snapshot into the context.
     const snap = this.inputManager.pollInput();
+    if (this.runtimeStamina <= 0) snap.sprintHeld = false;
     ctx.input = snap;
     if (snap.moveX === 0 && snap.moveZ === 0) {
       // Horror exploration needs deterministic stops, not FPS-style inertia:
@@ -1448,19 +1533,17 @@ export class Interior3D {
     this.stateMachine.update(dt, ctx);
 
     // 4b. Stamina management: sprinting costs stamina; walking/idle regains.
-    const currentStamina = this.getStamina?.() ?? 100;
+    const currentStamina = this.runtimeStamina;
     if (this.stateMachine.currentName === "run" && currentStamina > 0) {
       // Sprinting burns ~12 stamina per second → ~8 s full sprint.
-      const newStamina = Math.max(0, currentStamina - 12 * dt);
-      this.setStamina?.(newStamina);
+      this.runtimeStamina = Math.max(0, currentStamina - 12 * dt);
       // Prevent sprinting when exhausted.
-      if (newStamina <= 0) {
-        ctx.input = { ...ctx.input, sprintHeld: false };
-      }
+      if (this.runtimeStamina <= 0) ctx.input.sprintHeld = false;
     } else if (this.stateMachine.currentName === "walk" || this.stateMachine.currentName === "idle") {
       // Walking / idle recovers ~6 stamina per second.
-      this.setStamina?.(Math.min(100, currentStamina + 6 * dt));
+      this.runtimeStamina = Math.min(100, currentStamina + 6 * dt);
     }
+    this.syncStaminaToStore();
 
     // 4c. Low-stamina visibility effects: thicken fog, desaturate scene.
     const lowStamina = currentStamina <= 25;
@@ -1475,10 +1558,11 @@ export class Interior3D {
       }
     }
 
-    this.resolvePenetration();
+    const hasHorizontalMotion = ctx.velocity.x !== 0 || ctx.velocity.y !== 0;
+    if (!this.staticColliderSet || hasHorizontalMotion) this.resolvePenetration();
 
     // 5. Resolve horizontal collision (per-axis wall sliding), preserved from the old code.
-    if (ctx.velocity.x !== 0 || ctx.velocity.y !== 0) {
+    if (hasHorizontalMotion) {
       const pos = this.camera.position;
       const dx = ctx.velocity.x * dt;
       const dz = ctx.velocity.y * dt;
@@ -1496,7 +1580,7 @@ export class Interior3D {
       pos.z = nz;
     }
 
-    this.resolvePenetration();
+    if (!this.staticColliderSet || hasHorizontalMotion) this.resolvePenetration();
 
     // 6. Resolve vertical movement (gravity + floor snap).
     if (!ctx.isOnGround) {
@@ -1632,7 +1716,9 @@ export class Interior3D {
   }
 
   private syncStoryPhase(): void {
-    const sceneId = this.getStorySceneId?.();
+    if (!this.storyPhaseDirty) return;
+    this.storyPhaseDirty = false;
+    const sceneId = this.storySceneId;
 
     for (const trigger of this.room.storyTriggers) {
       const isActive = !trigger.triggered && this.isTriggerAvailable(trigger, sceneId);
@@ -1807,16 +1893,52 @@ export class Interior3D {
   private isColliderActive(collider: AABB): boolean {
     if (collider.isActive && !collider.isActive()) return false;
     if (!collider.activeSceneIds?.length) return true;
-    const sceneId = this.getStorySceneId?.();
+    const sceneId = this.storySceneId;
     return Boolean(sceneId && collider.activeSceneIds.includes(sceneId));
+  }
+
+  private reportPerformance(frameStartedAt: number): void {
+    if (this.perfWindowStartedAt === 0) this.perfWindowStartedAt = frameStartedAt;
+    if (this.perfLastFrameAt > 0) this.perfFrameTimes.push(frameStartedAt - this.perfLastFrameAt);
+    this.perfLastFrameAt = frameStartedAt;
+
+    const elapsed = frameStartedAt - this.perfWindowStartedAt;
+    if (elapsed < 1000 || this.perfFrameTimes.length === 0) return;
+
+    let frameTimeTotal = 0;
+    for (const frameTime of this.perfFrameTimes) frameTimeTotal += frameTime;
+    const sortedFrameTimes = [...this.perfFrameTimes].sort((a, b) => a - b);
+    const p95Index = Math.min(sortedFrameTimes.length - 1, Math.ceil(sortedFrameTimes.length * 0.95) - 1);
+    const seconds = elapsed / 1000;
+    const renderInfo = this.renderer.info;
+    console.info([
+      "[InteriorPerf]",
+      `FPS: ${(this.perfFrameTimes.length / seconds).toFixed(1)}`,
+      `Frame: ${(frameTimeTotal / this.perfFrameTimes.length).toFixed(2)} ms avg / ${sortedFrameTimes[p95Index].toFixed(2)} ms p95`,
+      `Draw calls: ${renderInfo.render.calls}`,
+      `Triangles: ${renderInfo.render.triangles}`,
+      `Memory: ${renderInfo.memory.geometries} geometries / ${renderInfo.memory.textures} textures`,
+      `Colliders: ${this.colliders.length}`,
+      `Collision calls/s: ${(this.perfCollisionCalls / seconds).toFixed(1)}`,
+      `Penetration scans/s: ${(this.perfPenetrationScans / seconds).toFixed(1)}`,
+      `Stamina writes/s: ${(this.perfStaminaWrites / seconds).toFixed(1)}`,
+    ].join("\n"));
+
+    this.perfWindowStartedAt = frameStartedAt;
+    this.perfFrameTimes.length = 0;
+    this.perfCollisionCalls = 0;
+    this.perfPenetrationScans = 0;
+    this.perfStaminaWrites = 0;
   }
 
   private loop = (): void => {
     if (this.disposed) return;
     this.rafId = requestAnimationFrame(this.loop);
+    const frameStartedAt = this.perfEnabled ? performance.now() : 0;
     const dt = Math.min(this.clock.getDelta(), 0.1);
     const t = this.clock.elapsedTime;
 
+    this.refreshSharedState();
     this.update(dt);
     this.room.update(t, this.camera.position);
     // Update door rotation animations.
@@ -1825,5 +1947,6 @@ export class Interior3D {
     this.syncLightingState(dt, t);
 
     this.renderer.render(this.scene, this.camera);
+    if (this.perfEnabled) this.reportPerformance(frameStartedAt);
   };
 }
