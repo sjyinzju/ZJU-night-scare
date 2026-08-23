@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import Phaser from "phaser";
 import {
   Backpack,
@@ -33,6 +33,8 @@ import {
   type StorySceneId,
 } from "./game/storyData";
 import { useGameAudio } from "./game/audio/useGameAudio";
+import { playImpactBang } from "./game/audio/proceduralAudio";
+import { assetUrl } from "./game/assetPath";
 import { INITIAL_REVIVES, REVIVE_SANITY, useGameStore } from "./game/store";
 import { pickJumpscareText, contextForHotspot, textVariantClass, type JumpscareContext } from "./game/jumpscareTexts";
 import { JumpscarePipeline } from "./game/JumpscarePipeline";
@@ -64,6 +66,9 @@ type MiniMapSnapshot = {
   ghost?: IsoPoint;
   ghostVisible: boolean;
 };
+
+type JumpscareSpriteId = "library-shelf" | "library-fall";
+type DocumentView = { title: string; lines: string[] };
 
 /** 同步判定是否为触摸/移动设备:窄屏 + 触摸能力任一满足即视为移动端。 */
 function detectMobile(): boolean {
@@ -273,19 +278,37 @@ function drawMiniMap(canvas: HTMLCanvasElement, snapshot: MiniMapSnapshot) {
 }
 
 function App() {
+  const scene01Debug = new URLSearchParams(window.location.search).get("debugScene01") === "1";
   const gameRef = useRef<Phaser.Game | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const particleCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const miniMapCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const miniMapSnapshotRef = useRef<MiniMapSnapshot>({ player: { x: 19.4, y: 30.2 }, ghostVisible: false });
   const miniMapFrameRef = useRef<number | null>(null);
+  const choiceTimerRef = useRef<number | null>(null);
+  const receiptRevealTimerRef = useRef<number | null>(null);
   const [hud, setHud] = useState<GameHudEvent>(initialHud);
   const [gameSessionId, setGameSessionId] = useState(0);
   const [phaserReady, setPhaserReady] = useState(false);
   const [launchMode, setLaunchMode] = useState<LaunchSequenceMode | null>(null);
   const [launchAssetState, setLaunchAssetState] = useState<InteriorAssetState>("loading");
   const [assetLoadAttempt, setAssetLoadAttempt] = useState(0);
+  const [documentView, setDocumentView] = useState<DocumentView | null>(null);
+  const [selectedChoiceId, setSelectedChoiceId] = useState<string | null>(null);
+  const [storyClosing, setStoryClosing] = useState(false);
+  const [jumpscareSprite, setJumpscareSprite] = useState<JumpscareSpriteId | null>(null);
+  const [exitBlackout, setExitBlackout] = useState(false);
   const isMobile = useIsMobile();
+
+  useEffect(() => {
+    // Both story scares must be decoded before their one-shot state-machine
+    // events fire; otherwise a cold browser can spend most of the 900 ms beat
+    // downloading the transparent PNG.
+    for (const file of ["library-shelf-ghost.png", "library-fall-ghost.png"]) {
+      const preload = new Image();
+      preload.src = assetUrl(`images/jumpscares/${file}`);
+    }
+  }, []);
 
   // ── Zustand is the single source of truth for the playable session. ──
   const storyState = useGameStore((s) => s.storyState);
@@ -349,8 +372,9 @@ function App() {
   // ── 统一的恐怖效果触发器（音频 + CSS 叠加层 + 惊吓文字 + 相机抖动）──
   // 被 handleOpenStory / handleInteriorStory / choose / ghost-hit 等所有路径复用。
   const triggerEffect = useCallback(
-    (effect?: HorrorEffect, context?: JumpscareContext) => {
+    (effect?: HorrorEffect, context?: JumpscareContext, spriteId?: JumpscareSpriteId) => {
       if (!effect) return;
+      if (effect === "jumpscare") setJumpscareSprite(spriteId ?? null);
       setScreenEffect(effect);
       playEffect(effect);
       if (effect === "jumpscare" || effect === "shake") {
@@ -359,7 +383,10 @@ function App() {
         useGameStore.getState().setJumpscareText(text);
       }
       window.dispatchEvent(new CustomEvent("zju-horror-effect", { detail: { effect } }));
-      window.setTimeout(() => setScreenEffect(""), effect === "jumpscare" ? 760 : 520);
+      window.setTimeout(() => {
+        setScreenEffect("");
+        if (effect === "jumpscare") setJumpscareSprite(null);
+      }, effect === "jumpscare" ? 1300 : 520);
     },
     [playEffect, storyState.stats.sanity, targetHotspotId],
   );
@@ -471,8 +498,14 @@ function App() {
       if (!storyScenes[sid]) return;
       const scene = storyScenes[sid];
       setStoryState((previous) => visitStoryHotspot(previous, scene));
+      if (sid === "library_fall") {
+        playImpactBang();
+        const text = pickJumpscareText("library_fall", useGameStore.getState().storyState.stats.sanity);
+        JumpscarePipeline.executeStoryEffect("library_fall", 0.92, text, "library-fall", 0);
+        window.setTimeout(() => setActiveSceneId(sid), 1420);
+        return;
+      }
       setActiveSceneId(sid);
-      // 统一走 triggerEffect：音频 + CSS 叠加层 + 惊吓文字 + 相机抖动全部到位
       triggerNarrativeEffect(scene.effect, contextForHotspot(scene.locationId));
     };
     window.addEventListener("zju-horror-interior-story", handleInteriorStory);
@@ -572,10 +605,50 @@ function App() {
   useEffect(() => {
     const onPickup = (event: Event) => {
       const { itemId, name } = (event as CustomEvent<{ itemId: string; name: string }>).detail;
-      setStoryState((prev) => collectStoryItem(prev, itemId, name).nextState);
+      setStoryState((prev) => {
+        const collected = collectStoryItem(prev, itemId, name).nextState;
+        if (itemId === "talisman" && prev.currentSceneId === "library_talisman") {
+          return {
+            ...collected,
+            currentSceneId: "library_shelf",
+            flags: { ...collected.flags, talisman_collected: true },
+          };
+        }
+        return collected;
+      });
+      if (itemId === "receipt") {
+        const text = pickJumpscareText(
+          "library_receipt",
+          useGameStore.getState().storyState.stats.sanity,
+        );
+        JumpscarePipeline.executeStoryEffect("library_receipt", 0.84, text, "library-shelf", 0);
+        if (receiptRevealTimerRef.current !== null) {
+          window.clearTimeout(receiptRevealTimerRef.current);
+        }
+        receiptRevealTimerRef.current = window.setTimeout(() => {
+          receiptRevealTimerRef.current = null;
+          setDocumentView({
+            title: "借阅终端最后一条记录",
+            lines: [
+              "借阅人：　　　　",
+              "索书号：R-1953 / 戏曲病理档案",
+              "借出地点：医学院图书馆一层",
+              "归还地点：医学院地下仓库",
+              "打印时间：23:47",
+              "备注：湖边不要回头。",
+              "纸背压痕：听见唱名时，不要回答。",
+            ],
+          });
+        }, 1480);
+      }
     };
     window.addEventListener("zju-horror-pickup", onPickup);
-    return () => window.removeEventListener("zju-horror-pickup", onPickup);
+    return () => {
+      window.removeEventListener("zju-horror-pickup", onPickup);
+      if (receiptRevealTimerRef.current !== null) {
+        window.clearTimeout(receiptRevealTimerRef.current);
+      }
+    };
   }, []);
 
   // 虚拟摇杆把移动向量注入到 Phaser 的 CampusScene。
@@ -607,16 +680,21 @@ function App() {
   }, [closeInterior, interiorBuilding?.id, placePlayerAtInteriorExit]);
 
   const leaveInteriorFromTrigger = useCallback(() => {
-    const nextActiveSceneId = resolveInteriorExitTrigger(storyState);
-    // Make the pending outdoor scene visible before mounting Phaser.  This
-    // prevents a newly-created map from immediately retargeting the player
-    // back into the library to discover the same scene again.
-    if (nextActiveSceneId) setActiveSceneId(nextActiveSceneId);
-    if (!placePlayerAtInteriorExit(interiorBuilding?.id) && storyState.currentSceneId === "library_police") {
-      setPlayerIso({ x: 19.4, y: 30.2 });
-    }
-    closeInterior();
-    setPhaserReady(true);
+    const nextOutdoorSceneId = resolveInteriorExitTrigger(storyState);
+    if (!nextOutdoorSceneId) return;
+    // The next outdoor scene remains the map objective in storyState. Leaving
+    // the glass door must first return control to the 2.5D campus; its story
+    // popup opens only when the player reaches that outdoor hotspot.
+    setExitBlackout(true);
+    window.setTimeout(() => {
+      setActiveSceneId(null);
+      if (!placePlayerAtInteriorExit(interiorBuilding?.id) && storyState.currentSceneId === "library_police") {
+        setPlayerIso({ x: 19.4, y: 30.2 });
+      }
+      closeInterior();
+      setPhaserReady(true);
+    }, 460);
+    window.setTimeout(() => setExitBlackout(false), 980);
   }, [closeInterior, interiorBuilding?.id, placePlayerAtInteriorExit, setPlayerIso, setActiveSceneId, storyState]);
 
   // Story interiors cannot be abandoned through the top-right button.  The
@@ -627,11 +705,11 @@ function App() {
     setPhaserReady(false); // 不加载 2.5D 地图，直接进入 3D 内景
     setLaunchAssetState("loading");
     setAssetLoadAttempt((value) => value + 1);
-    setLaunchMode("intro");
+    setLaunchMode(scene01Debug ? null : "intro");
     // 使用 storyEngine 统一解析起始建筑（始终从第一个热点开始）
     const startBuilding = resolveGameStartBuilding();
     startSession(startBuilding ?? { id: "medical-library", name: "农医馆", zone: "story" });
-  }, [startSession]);
+  }, [scene01Debug, startSession]);
 
   const restartGame = useCallback(() => {
     setPhaserReady(false);
@@ -657,6 +735,24 @@ function App() {
     setLaunchAssetState("loading");
     setAssetLoadAttempt((value) => value + 1);
   }, []);
+
+  const dismissDocument = useCallback(() => {
+    if (!documentView) return;
+    setDocumentView(null);
+    if (useGameStore.getState().storyState.currentSceneId === "library_receipt") {
+      setActiveSceneId("library_receipt");
+    }
+  }, [documentView, setActiveSceneId]);
+
+  useEffect(() => {
+    if (!documentView) return;
+    const dismiss = (event: KeyboardEvent) => {
+      event.preventDefault();
+      dismissDocument();
+    };
+    window.addEventListener("keydown", dismiss, { once: true });
+    return () => window.removeEventListener("keydown", dismiss);
+  }, [dismissDocument, documentView]);
 
   const reviveGame = useCallback(() => {
     const deathPoint = { ...useGameStore.getState().playerIso };
@@ -710,13 +806,13 @@ function App() {
     const handleJumpscare = (event: Event) => {
       const detail = (event as CustomEvent<{
         context: string; intensity: number;
-        sanityCost: number; customMessage?: string;
+        sanityCost: number; customMessage?: string; spriteId?: JumpscareSpriteId;
       }>).detail;
       const text = detail.customMessage ?? pickJumpscareText(
         detail.context as JumpscareContext, storyState.stats.sanity,
       );
       useGameStore.getState().setJumpscareText(text);
-      triggerEffect("jumpscare", detail.context as JumpscareContext);
+      triggerEffect("jumpscare", detail.context as JumpscareContext, detail.spriteId);
     };
     const handleSanityHit = (event: Event) => {
       const detail = (event as CustomEvent<{ amount: number; source: string }>).detail;
@@ -757,10 +853,9 @@ function App() {
     [playItem, triggerEffect],
   );
 
-  const choose = useCallback(
+  const commitChoice = useCallback(
     (choice: StoryChoice) => {
       if (!activeScene || isChoiceLocked(choice, storyState)) return;
-      playChoice();
 
       const transition = advanceStory(storyState, activeScene, choice);
       if (!transition) return;
@@ -791,9 +886,28 @@ function App() {
           setActiveSceneId(command.sceneId);
         }
       }
+
     },
-    [activeScene, closeInterior, interiorBuilding, openInterior, placePlayerAtInteriorExit, playChoice, setActiveSceneId, setPlayerIso, storyState, triggerNarrativeEffect],
+    [activeScene, closeInterior, interiorBuilding, openInterior, placePlayerAtInteriorExit, setActiveSceneId, setPlayerIso, storyState, triggerNarrativeEffect],
   );
+
+  const choose = useCallback((choice: StoryChoice) => {
+    if (selectedChoiceId || !activeScene || isChoiceLocked(choice, storyState)) return;
+    playChoice();
+    setSelectedChoiceId(choice.id);
+    window.setTimeout(() => setStoryClosing(true), 210);
+    if (choiceTimerRef.current !== null) window.clearTimeout(choiceTimerRef.current);
+    choiceTimerRef.current = window.setTimeout(() => {
+      choiceTimerRef.current = null;
+      commitChoice(choice);
+      setSelectedChoiceId(null);
+      setStoryClosing(false);
+    }, 680);
+  }, [activeScene, commitChoice, playChoice, selectedChoiceId, storyState]);
+
+  useEffect(() => () => {
+    if (choiceTimerRef.current !== null) window.clearTimeout(choiceTimerRef.current);
+  }, []);
 
   const usableItems = useMemo<Set<ItemId>>(
     () => new Set(storyState.inventory.filter((id) => id === "medicine" || id === "energy")),
@@ -802,7 +916,9 @@ function App() {
 
   const rootClass = ["appShell", !gameStarted ? "titleMode" : "", screenEffect ? `fx-${screenEffect}` : ""].filter(Boolean).join(" ");
   const completedCount = storyState.completedHotspots.length;
-  const livesAvailable = revivesRemaining + (world === "dead" ? 0 : 1);
+  const talismanShield = storyState.inventory.includes("talisman") ? 1 : 0;
+  const livesAvailable = revivesRemaining + (world === "dead" ? 0 : 1) + talismanShield;
+  const maxLives = INITIAL_REVIVES + 1 + talismanShield;
 
   return (
     <main className={rootClass}>
@@ -818,10 +934,10 @@ function App() {
         <section className="railSection lifeStrip" aria-label={`剩余生命 ${livesAvailable}`}>
           <div>
             <span>生命</span>
-            <b>{livesAvailable}/{INITIAL_REVIVES + 1}</b>
+            <b>{livesAvailable}/{maxLives}</b>
           </div>
           <div className="lifeHearts" aria-hidden="true">
-            {Array.from({ length: INITIAL_REVIVES + 1 }, (_, index) => (
+            {Array.from({ length: maxLives }, (_, index) => (
               <Heart key={index} size={18} fill={index < livesAvailable ? "currentColor" : "none"} />
             ))}
           </div>
@@ -930,10 +1046,22 @@ function App() {
         <div className={screenEffect === "low-sanity" ? "sanityEdgePulse active" : "sanityEdgePulse"} />
         <div className="lensDirt" />
         <div className={screenEffect === "jumpscare" ? "jumpscareOverlay active" : "jumpscareOverlay"} />
-        <div className={screenEffect === "jumpscare" ? "jumpscareFace active" : "jumpscareFace"} aria-hidden="true">
-          <span className="faceEye left" />
-          <span className="faceEye right" />
-          <span className="faceMouth" />
+        {jumpscareSprite ? (
+          <img
+            className={`jumpscareSprite jumpscareSprite--${jumpscareSprite} ${screenEffect === "jumpscare" ? "active" : ""}`}
+            src={assetUrl(`images/jumpscares/${jumpscareSprite === "library-shelf" ? "library-shelf-ghost.png" : "library-fall-ghost.png"}`)}
+            alt=""
+            aria-hidden="true"
+          />
+        ) : (
+          <div className={screenEffect === "jumpscare" ? "jumpscareFace active" : "jumpscareFace"} aria-hidden="true">
+            <span className="faceEye left" />
+            <span className="faceEye right" />
+            <span className="faceMouth" />
+          </div>
+        )}
+        <div className={screenEffect === "jumpscare" ? "bloodDripOverlay active" : "bloodDripOverlay"} aria-hidden="true">
+          <i /><i /><i /><i /><i />
         </div>
         <div className={["jumpscareText", screenEffect === "jumpscare" ? "active" : "", jumpscareVariant].join(" ")}>{jumpscareText}</div>
 
@@ -955,9 +1083,40 @@ function App() {
         {/* 摇杆对所有设备可见:桌面可用鼠标拖动移动(键盘焦点/占用异常时的兜底),移动端为主控。 */}
         {gameStarted && !activeScene && !interiorBuilding && <MapJoystick onMove={handleJoystick} />}
 
+        {documentView && (
+          <section
+            className="documentReading"
+            style={interiorBuilding ? { zIndex: 2010 } : undefined}
+            onClick={dismissDocument}
+            role="button"
+            tabIndex={0}
+            aria-label="借阅小票内容，按任意键继续"
+          >
+            <div className="documentReading__paper">
+              <span>医学院图书馆 / 借阅终端</span>
+              <h1>{documentView.title}</h1>
+              {documentView.lines.map((line, index) => (
+                <p
+                  key={`${line}-${index}`}
+                  style={{ "--document-line-delay": `${160 + index * 260}ms` } as CSSProperties}
+                >
+                  {line}
+                </p>
+              ))}
+              <em>点击或按任意键继续</em>
+            </div>
+          </section>
+        )}
+
+        {activeScene && <div
+          className={`storyGlassBackdrop ${activeScene.strongBlur ? "strong" : ""} ${storyClosing ? "closing" : ""}`}
+          style={interiorBuilding ? { zIndex: 1999 } : undefined}
+          aria-hidden="true"
+        />}
+
         {activeScene && (
           <section
-            className={activeScene.ending ? "storyModal ending" : "storyModal"}
+            className={`${activeScene.ending ? "storyModal ending" : "storyModal"} ${storyClosing ? "closing" : ""}`}
             style={interiorBuilding ? { zIndex: 2000 } : undefined}
             aria-live="polite"
           >
@@ -967,8 +1126,13 @@ function App() {
             </div>
             <h1>{activeScene.title}</h1>
             <div className="storyText">
-              {activeScene.body.map((paragraph) => (
-                <p className={storyTone(paragraph)} key={paragraph}>
+              {activeScene.body.map((paragraph, index) => (
+                <p
+                  className={storyTone(paragraph)}
+                  data-text={paragraph}
+                  key={paragraph}
+                  style={{ "--story-line-delay": `${180 + index * 260}ms` } as CSSProperties}
+                >
                   {paragraph}
                 </p>
               ))}
@@ -990,16 +1154,20 @@ function App() {
                 </button>
               </div>
             ) : (
-              <div className="choiceList">
-                {activeScene.choices.map((choice) => {
+              <div
+                className="choiceList"
+                style={{ "--choice-list-delay": `${260 + activeScene.body.length * 260}ms` } as CSSProperties}
+              >
+                {activeScene.choices.map((choice, choiceIndex) => {
                   const locked = isChoiceLocked(choice, storyState);
                   const delta = statDeltaText(choice.statChanges);
                   const required = choice.requireItem ? `需要：${itemCatalog[choice.requireItem].name}` : "";
                   return (
                     <button
-                      className={locked ? "choiceButton locked" : "choiceButton"}
-                      disabled={locked}
+                      className={`${locked ? "choiceButton locked" : "choiceButton"} ${selectedChoiceId === choice.id ? "selected" : ""}`}
+                      disabled={locked || selectedChoiceId !== null}
                       key={choice.id}
+                      style={{ "--choice-delay": `${choiceIndex * 100}ms` } as CSSProperties}
                       onClick={() => choose(choice)}
                       onFocus={() => !locked && playHover()}
                       onMouseEnter={() => !locked && playHover()}
@@ -1046,6 +1214,30 @@ function App() {
           onAssetStateChange={setLaunchAssetState}
         />
       )}
+
+      {/* Interior3D is its own high stacking layer. Mirror the central scare
+          state above it so story-driven sprites can never be hidden behind
+          the WebGL overlay. */}
+      {interiorBuilding && (
+        <div className="interiorScareLayer" aria-hidden="true">
+          <div className={screenEffect === "jumpscare" ? "jumpscareOverlay active" : "jumpscareOverlay"} />
+          {jumpscareSprite ? (
+            <img
+              className={`jumpscareSprite jumpscareSprite--${jumpscareSprite} ${screenEffect === "jumpscare" ? "active" : ""}`}
+              src={assetUrl(`images/jumpscares/${jumpscareSprite === "library-shelf" ? "library-shelf-ghost.png" : "library-fall-ghost.png"}`)}
+              alt=""
+            />
+          ) : null}
+          <div className={screenEffect === "jumpscare" ? "bloodDripOverlay active" : "bloodDripOverlay"}>
+            <i /><i /><i /><i /><i />
+          </div>
+          <div className={["jumpscareText", screenEffect === "jumpscare" ? "active" : "", jumpscareVariant].join(" ")}>
+            {jumpscareText}
+          </div>
+        </div>
+      )}
+
+      <div className={exitBlackout ? "exitBlackout active" : "exitBlackout"} aria-hidden="true" />
 
       {launchMode ? (
         <LaunchSequence

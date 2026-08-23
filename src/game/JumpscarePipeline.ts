@@ -11,12 +11,14 @@ export interface JumpscareEvent {
   context: JumpscareContext;
   /** 0-1 intensity — controls shake magnitude, overlay opacity, etc. */
   intensity: number;
-  /** How long the overlay / text stays visible (ms).  Default ~800. */
+  /** How long the overlay / text stays visible (ms).  Default ~1200. */
   duration?: number;
   /** Sanity cost of this jumpscare.  Default scales with intensity. */
   sanityCost?: number;
   /** Optional custom message (overrides the pool lookup). */
   customMessage?: string;
+  /** Optional visual sprite selected by the same central state-machine event. */
+  spriteId?: "library-shelf" | "library-fall";
 }
 
 /**
@@ -44,11 +46,17 @@ export class JumpscarePipeline {
    * Execute a story-driven effect (no cooldown — story beats must always fire).
    * Used by App.tsx when `advanceStory` returns an `effect`.
    */
-  static executeStoryEffect(context: JumpscareContext, intensity = 0.5, customMessage?: string): void {
+  static executeStoryEffect(
+    context: JumpscareContext,
+    intensity = 0.5,
+    customMessage?: string,
+    spriteId?: JumpscareEvent["spriteId"],
+    sanityCostOverride?: number,
+  ): void {
     JumpscarePipeline.recent.push(context);
     if (JumpscarePipeline.recent.length > 5) JumpscarePipeline.recent.shift();
 
-    const sanityCost = Math.round(intensity * 6);
+    const sanityCost = sanityCostOverride ?? Math.round(intensity * 6);
 
     window.dispatchEvent(new CustomEvent("zju-horror-effect", {
       detail: { effect: "jumpscare" },
@@ -58,9 +66,10 @@ export class JumpscarePipeline {
       detail: {
         context,
         intensity,
-        duration: 600 + Math.round(intensity * 500),
+        duration: 900 + Math.round(intensity * 500),
         sanityCost,
         customMessage,
+        spriteId,
         recent: [...JumpscarePipeline.recent],
         storyDriven: true,
       },
@@ -95,7 +104,7 @@ export class JumpscarePipeline {
     JumpscarePipeline.recent.push(event.context);
     if (JumpscarePipeline.recent.length > 5) JumpscarePipeline.recent.shift();
 
-    const duration = event.duration ?? Math.round(600 + event.intensity * 500);
+    const duration = event.duration ?? Math.round(900 + event.intensity * 500);
     const sanityCost = event.sanityCost ?? Math.round(event.intensity * 6);
 
     // Dispatch the jumpscare through the existing event bus.
@@ -113,6 +122,7 @@ export class JumpscarePipeline {
         duration,
         sanityCost,
         customMessage: event.customMessage,
+        spriteId: event.spriteId,
         recent: [...JumpscarePipeline.recent],
       },
     }));

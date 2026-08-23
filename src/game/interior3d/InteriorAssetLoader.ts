@@ -1,12 +1,14 @@
 import * as THREE from "three";
 import type { RoomKind } from "./buildRoom";
 import { assetUrl } from "../assetPath";
+import { buildInteriorCollisionMap, type InteriorCollisionMap } from "./InteriorCollisionMap";
 
 export interface InteriorAssetMeta {
   assetVersion: number;
   buildingId: string;
   roomKind: RoomKind;
   model: string;
+  additionalModels?: string[];
   lodModel?: string;
   qualityProfile?: string;
   sourceAssets?: string[];
@@ -27,9 +29,29 @@ export interface InteriorAssetMeta {
     followPickupId?: string;
   }>;
   pickupVisuals?: Record<string, string[]>;
+  storyVisuals?: Record<string, string[]>;
   phaseVisuals?: Array<{ names: string[]; activeSceneIds: string[] }>;
   storySpots?: Record<string, { x: number; y: number; z: number; radius?: number }>;
-  pickupSpots?: Record<string, Array<{ x: number; y?: number; z: number }>>;
+  storySpotCandidates?: Record<string, Array<{ x: number; y: number; z: number; radius?: number }>>;
+  pickupSpots?: Record<string, Array<{ x: number; y?: number; z: number; radius?: number }>>;
+  fallReveal?: {
+    triggerSceneId: string;
+    fallenName: string;
+    streetlampName: string;
+    lamp: { x: number; y: number; z: number };
+    body: { x: number; y: number; z: number };
+    triggerDistance?: number;
+    approachMinX?: number;
+    mapBounds?: { minX: number; maxX: number; minZ: number; maxZ: number };
+  };
+  exitSegment?: { minX: number; maxX: number; z: number };
+  navigationClearZones?: Array<{
+    minX: number;
+    maxX: number;
+    minZ: number;
+    maxZ: number;
+    kind?: "wall" | "shelf" | "furniture";
+  }>;
   notes?: string[];
 }
 
@@ -37,6 +59,7 @@ export interface InteriorAssetHandle {
   root: THREE.Group;
   meta?: InteriorAssetMeta;
   bounds: THREE.Box3;
+  collisionMap: InteriorCollisionMap;
   viewpoint?: {
     position: THREE.Vector3;
     yaw: number;
@@ -55,6 +78,7 @@ interface InteriorAssetSource {
   rootPath: string;
   model: string;
   lodModel?: string;
+  additionalModels?: string[];
   metaFile?: string;
   viewpointName?: string;
   previewViewpoint?: {
@@ -74,6 +98,8 @@ const ASSET_SOURCES: Record<string, InteriorAssetSource> = {
   "medical-library:library": {
     rootPath: "models/interiors/library",
     model: "library.glb",
+    additionalModels: ["library-scene01-props.glb"],
+    metaFile: "scene01.meta.json",
     viewpointName: "新页面",
     previewViewpoint: { x: 8.62, y: 1.6, z: 10.53, yaw: Math.PI / 4, pitch: -0.3 },
   },
@@ -180,16 +206,30 @@ export async function loadInteriorAsset(req: InteriorAssetRequest): Promise<Inte
     ? (source.lodModel ?? meta?.lodModel ?? source.model)
     : (meta?.model ?? source.model);
   const gltfLoader = await getLoader();
-  const gltf = await gltfLoader.loadAsync(assetUrl(`${source.rootPath}/${preferredModel}`));
-  const root = gltf.scene as THREE.Group;
-  tuneLoadedScene(root);
-  const bounds = new THREE.Box3().setFromObject(root);
+  const extraModels = meta?.additionalModels ?? source.additionalModels ?? [];
+  const [gltf, ...extras] = await Promise.all([
+    gltfLoader.loadAsync(assetUrl(`${source.rootPath}/${preferredModel}`)),
+    ...extraModels.map((model) => gltfLoader.loadAsync(assetUrl(`${source.rootPath}/${model}`))),
+  ]);
+  const baseRoot = gltf.scene as THREE.Group;
+  tuneLoadedScene(baseRoot);
+  const bounds = new THREE.Box3().setFromObject(baseRoot);
+  const collisionMap = buildInteriorCollisionMap(baseRoot, bounds);
+  const root = new THREE.Group();
+  root.name = "medical-library-asset";
+  root.add(baseRoot);
+  for (const extra of extras) {
+    const extraRoot = extra.scene as THREE.Group;
+    tuneLoadedScene(extraRoot);
+    root.add(extraRoot);
+  }
   const viewpoint = getPreviewViewpoint(source, root);
 
   return {
     root,
     meta,
     bounds,
+    collisionMap,
     viewpoint,
     dispose: () => disposeLoadedScene(root),
   };

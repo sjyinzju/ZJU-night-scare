@@ -14,8 +14,8 @@ export class FlashlightSystem {
   /** Battery level 0…1.  1 = full, 0 = dead. */
   battery = 1.0;
 
-  /** Decay per second while the light is on.  Full battery lasts ~180 s. */
-  private readonly decayRate = 1.0 / 180;
+  /** Scene one has no replacement battery; a full charge lasts ~15 minutes. */
+  private readonly decayRate = 1.0 / 900;
 
   // Saved reference values (full-charge state).
   private readonly maxIntensity: number;
@@ -61,7 +61,7 @@ export class FlashlightSystem {
     const b = this.battery;
 
     // Intensity: full at high battery, drops sharply below 30 %.
-    const intensityMul = b > 0.3 ? 0.7 + 0.3 * b : 0.3 * (b / 0.3);
+    const intensityMul = b > 0.2 ? 0.85 + 0.15 * b : 0.42 * (b / 0.2);
     const baseIntensity = this.maxIntensity * intensityMul;
 
     // Spot angle: narrows as battery drains (min ~40 % of original).

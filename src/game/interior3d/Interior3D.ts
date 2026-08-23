@@ -17,8 +17,19 @@ import { CameraController } from "./CameraController";
 import { FlashlightSystem } from "./FlashlightSystem";
 import { getInteriorNpcRevealSceneIds } from "../storyEngine";
 import { loadInteriorAsset, type InteriorAssetHandle } from "./InteriorAssetLoader";
+import type { InteriorCollisionMap, InteriorMapObstacle } from "./InteriorCollisionMap";
+import { playLibraryThunder, startLibraryStorm, stopLibraryStorm } from "../audio/proceduralAudio";
 
 export type InteriorAssetState = "loading" | "ready" | "failed";
+
+export interface InteriorMapSnapshot {
+  bounds: InteriorCollisionMap["bounds"];
+  obstacles: InteriorMapObstacle[];
+  player: { x: number; z: number };
+  objective?: { x: number; z: number };
+  fallenPerson?: { x: number; z: number };
+  exitSegment?: { minX: number; maxX: number; z: number };
+}
 
 export interface Interior3DOptions {
   /** Element the WebGL canvas is appended into. Sized to fill it. */
@@ -47,7 +58,8 @@ export interface Interior3DOptions {
   onAssetStateChange?: (state: InteriorAssetState) => void;
 }
 
-const PLAYER_RADIUS = 0.32;
+const DEFAULT_PLAYER_RADIUS = 0.32;
+const AUTHORED_LIBRARY_PLAYER_RADIUS = 0.22;
 const EYE_HEIGHT = 1.6;
 const GUIDE_MAX_POINTS = 32;
 
@@ -75,14 +87,20 @@ export class Interior3D {
   private readonly fillLight: THREE.HemisphereLight;
   private readonly nearFillLight: THREE.PointLight;
   private readonly bloodLight: THREE.PointLight;
+  private readonly outsideRedLight: THREE.PointLight;
+  private readonly outsideWhiteLight: THREE.PointLight;
+  private readonly outsideCeilingLight: THREE.RectAreaLight;
 
   private room: RoomBuildResult;
   private readonly roomKind: RoomKind;
   private colliders: AABB[];
   private bounds: AABB;
+  private playerRadius = DEFAULT_PLAYER_RADIUS;
   private readonly blueprint: InteriorBlueprint;
   private assetHandle?: InteriorAssetHandle;
   private readonly assetPickupVisuals = new Map<string, THREE.Object3D[]>();
+  private readonly assetStoryVisuals = new Map<string, THREE.Object3D[]>();
+  private readonly targetGlowLights = new Map<string, THREE.PointLight>();
   private readonly assetPhaseVisuals: Array<{ objects: THREE.Object3D[]; activeSceneIds: string[] }> = [];
   private readonly assetFlickerLights: Array<{
     light: THREE.PointLight;
@@ -92,6 +110,7 @@ export class Interior3D {
     y: number;
     followPickupId?: string;
   }> = [];
+  private readonly assetCeilingLights: THREE.PointLight[] = [];
   private readonly onPickup?: (itemId: string, name: string) => void;
   private readonly onStoryTrigger?: (sceneId: string) => void;
   private readonly onExitTrigger?: () => void;
@@ -101,10 +120,21 @@ export class Interior3D {
   private readonly setStamina?: (value: number) => void;
   private readonly onAssetStateChange?: (state: InteriorAssetState) => void;
   private lowStaminaWarning = false;
+  private fallenLinwei?: THREE.Object3D;
+  private fallSpotlight?: THREE.SpotLight;
+  private fallBodyFill?: THREE.PointLight;
+  private fallSpotlightTarget?: THREE.Object3D;
+  private fallRevealed = false;
+  private hasLeftShelfAfterFall = false;
+  private libraryReturnFlicker = false;
+  private debugFallStaged = false;
   private bloodLightEnabled = false;
   private bloodLightMaxIntensity = 4.8;
   private nextBloodFlashAt = 0;
   private bloodFlashUntil = 0;
+  private libraryStormActive = false;
+  private nextLightningAt = Number.POSITIVE_INFINITY;
+  private lightningFlashUntil = 0;
 
   // ── New movement architecture ──
   private readonly inputManager: InputManager;
@@ -116,6 +146,7 @@ export class Interior3D {
 
   private debugColliders?: THREE.Group;
   private guideLine?: THREE.Line;
+  private suppressLegacyGuidance = false;
 
   private rafId = 0;
   private disposed = false;
@@ -204,9 +235,24 @@ export class Interior3D {
     this.bloodLight.position.set(-1.25, 3.05, -4.75);
     this.scene.add(this.bloodLight);
     this.scheduleBloodFlash(0);
+    this.outsideRedLight = new THREE.PointLight(0x71030a, 0, 20, 1.55);
+    this.outsideRedLight.position.set(2.4, 1.25, 34.5);
+    this.scene.add(this.outsideRedLight);
+
+    // A dim, cold wash keeps the exterior yard navigable before the fall
+    // reveal without exposing the hidden body or competing with the red lamp.
+    this.outsideWhiteLight = new THREE.PointLight(0xdbe5f2, 0, 29, 1.45);
+    this.outsideWhiteLight.position.set(1.8, 4.2, 32.5);
+    this.scene.add(this.outsideWhiteLight);
+    // Invisible ceiling-sized source: reads as storm light leaking down from
+    // above, without adding a visible lamp model to the authored courtyard.
+    this.outsideCeilingLight = new THREE.RectAreaLight(0xe7efff, 0, 17, 43);
+    this.outsideCeilingLight.position.set(4.3, 8.2, 36.5);
+    this.outsideCeilingLight.lookAt(4.3, 0, 36.5);
+    this.scene.add(this.outsideCeilingLight);
 
     // Flashlight follows the camera.
-    this.flashlight = new THREE.SpotLight(0xfff2d0, 6.0, 20, Math.PI / 6, 0.4, 1.4);
+    this.flashlight = new THREE.SpotLight(0xfff2d0, 8.6, 23, Math.PI / 5.6, 0.42, 1.35);
     this.flashlight.position.set(0, 0, 0);
     if (!this.isMobile) {
       this.flashlight.castShadow = true;
@@ -226,6 +272,8 @@ export class Interior3D {
     // ---- Room ----
     this.roomKind = classifyRoom(options.buildingId, options.zone);
     this.bloodLightEnabled = this.roomKind === "library";
+    this.outsideRedLight.intensity = 0;
+    this.outsideWhiteLight.intensity = this.roomKind === "library" ? 2.8 : 0;
     this.blueprint = getInteriorBlueprint(this.roomKind);
     this.room = buildRoom(this.roomKind);
     this.scene.add(this.room.root);
@@ -244,7 +292,7 @@ export class Interior3D {
     this.moveCtx = createMovementContext(this.camera, this.blueprint.movement, {
       collidesAt: (x, _y, z) => this.collides(x, z),
       bounds: this.bounds,
-      playerRadius: PLAYER_RADIUS,
+      playerRadius: this.playerRadius,
       floorHeightAt: (x, z) => this.room.floorHeightAt(x, z),
     });
 
@@ -307,6 +355,135 @@ export class Interior3D {
   /** Current flashlight battery level 0…1. */
   get flashlightBattery(): number {
     return this.flashlightSys.battery;
+  }
+
+  /** Live position plus the authored model's floor-plan obstacles. */
+  getInteriorMapSnapshot(): InteriorMapSnapshot | null {
+    const collisionMap = this.assetHandle?.collisionMap;
+    if (!collisionMap || this.roomKind !== "library") return null;
+    const sceneId = this.getStorySceneId?.();
+    let objective: InteriorMapSnapshot["objective"];
+    if (sceneId === "library_intro") {
+      if (!this.hasInventoryItem("flashlight")) {
+        const flashlight = this.room.pickups.find((item) => item.itemId === "flashlight" && !item.taken);
+        if (flashlight) objective = { x: flashlight.position.x, z: flashlight.position.z };
+      } else {
+        const trigger = this.room.storyTriggers.find((item) => item.sceneId === sceneId && !item.triggered);
+        if (trigger) objective = { x: trigger.position.x, z: trigger.position.z };
+      }
+    } else if (sceneId === "library_receipt" || sceneId === "library_talisman") {
+      const itemId = sceneId === "library_receipt" ? "receipt" : "talisman";
+      const pickup = this.room.pickups.find((item) => item.itemId === itemId && !item.taken);
+      if (pickup) objective = { x: pickup.position.x, z: pickup.position.z };
+    } else if (sceneId === "library_shelf") {
+      const trigger = this.room.storyTriggers.find((item) => item.sceneId === sceneId && !item.triggered);
+      if (trigger) objective = { x: trigger.position.x, z: trigger.position.z };
+    }
+    const fallReveal = this.assetHandle?.meta?.fallReveal;
+    const hiddenBodyBounds = fallReveal?.mapBounds;
+    const obstacles = hiddenBodyBounds
+      ? collisionMap.obstacles.filter((obstacle) => (
+        obstacle.maxX < hiddenBodyBounds.minX
+        || obstacle.minX > hiddenBodyBounds.maxX
+        || obstacle.maxZ < hiddenBodyBounds.minZ
+        || obstacle.minZ > hiddenBodyBounds.maxZ
+      ))
+      : collisionMap.obstacles;
+    return {
+      bounds: collisionMap.bounds,
+      obstacles,
+      player: { x: this.camera.position.x, z: this.camera.position.z },
+      objective,
+      fallenPerson: this.fallRevealed && fallReveal
+        ? { x: fallReveal.body.x, z: fallReveal.body.z }
+        : undefined,
+      exitSegment: sceneId === "dorm_baiqiu" ? this.assetHandle?.meta?.exitSegment : undefined,
+    };
+  }
+
+  /**
+   * Development-only QA helper. The React overlay exposes this only when the
+   * page is opened with ?debugScene01=1, so normal players never see it.
+   * It still uses the real proximity collectors on the next animation frame.
+   */
+  debugTeleportToActiveTarget(): string {
+    if (this.roomKind !== "library") return "当前场景没有调试目标";
+    const sceneId = this.getStorySceneId?.();
+    if (this.fallRevealed && sceneId === "library_fall" && this.assetHandle?.meta?.fallReveal) {
+      const bodyBox = this.fallenLinwei ? new THREE.Box3().setFromObject(this.fallenLinwei) : null;
+      const center = bodyBox && !bodyBox.isEmpty()
+        ? bodyBox.getCenter(new THREE.Vector3())
+        : new THREE.Vector3(
+          this.assetHandle.meta.fallReveal.body.x,
+          this.assetHandle.meta.fallReveal.body.y,
+          this.assetHandle.meta.fallReveal.body.z,
+        );
+      const forward = this.camera.getWorldDirection(new THREE.Vector3());
+      return `坠楼调试：镜头(${this.camera.position.x.toFixed(2)},${this.camera.position.y.toFixed(2)},${this.camera.position.z.toFixed(2)}) 人体(${center.x.toFixed(2)},${center.y.toFixed(2)},${center.z.toFixed(2)}) 朝向(${forward.x.toFixed(2)},${forward.y.toFixed(2)},${forward.z.toFixed(2)})`;
+    }
+    let target: THREE.Vector3 | undefined;
+    let activationRadius = 1.2;
+    let label = "当前目标";
+    let lookAtFallBody: { x: number; z: number } | undefined;
+
+    if (sceneId === "library_intro" && !this.hasInventoryItem("flashlight")) {
+      const flashlight = this.room.pickups.find((item) => item.itemId === "flashlight" && !item.taken);
+      target = flashlight?.position;
+      activationRadius = flashlight?.radius ?? activationRadius;
+      label = "手电筒";
+    } else if (sceneId === "library_receipt" || sceneId === "library_talisman") {
+      const itemId = sceneId === "library_receipt" ? "receipt" : "talisman";
+      const pickup = this.room.pickups.find((item) => item.itemId === itemId && !item.taken);
+      target = pickup?.position;
+      activationRadius = pickup?.radius ?? activationRadius;
+      label = itemId === "receipt" ? "借阅小票" : "符咒";
+    } else if (sceneId === "library_fall" && this.assetHandle?.meta?.fallReveal) {
+      const reveal = this.assetHandle.meta.fallReveal;
+      const stagingDistance = (reveal.triggerDistance ?? 8.75) + 1.35;
+      const targetDistance = this.debugFallStaged ? (reveal.triggerDistance ?? 8.75) - 0.45 : stagingDistance;
+      const approachX = Math.max(reveal.approachMinX ?? 0, reveal.body.x - 2.05) + 0.35;
+      const dx = approachX - reveal.body.x;
+      const dz = Math.sqrt(Math.max(0.5, targetDistance * targetDistance - dx * dx));
+      target = new THREE.Vector3(approachX, reveal.body.y, reveal.body.z - dz);
+      activationRadius = 0.45;
+      label = this.debugFallStaged ? "跨入坠楼触发距离" : "坠楼触发距离外";
+      this.debugFallStaged = !this.debugFallStaged;
+      lookAtFallBody = reveal.body;
+    } else {
+      const trigger = this.room.storyTriggers.find(
+        (item) => !item.triggered && this.isTriggerAvailable(item, sceneId),
+      );
+      target = trigger?.position;
+      activationRadius = trigger?.radius ?? activationRadius;
+      label = trigger?.action === "exit" ? "出口" : trigger?.sceneId ?? label;
+    }
+
+    if (!target) return "当前目标尚未激活";
+    let safe: THREE.Vector3 | undefined;
+    const radii = [0, activationRadius * 0.35, activationRadius * 0.62, activationRadius * 0.84];
+    for (const radius of radii) {
+      const steps = radius === 0 ? 1 : 24;
+      for (let step = 0; step < steps; step++) {
+        const angle = (Math.PI * 2 * step) / steps;
+        const x = this.clampToBounds(target.x + Math.cos(angle) * radius, this.bounds.minX, this.bounds.maxX);
+        const z = this.clampToBounds(target.z + Math.sin(angle) * radius, this.bounds.minZ, this.bounds.maxZ);
+        if (!this.collides(x, z)) {
+          safe = new THREE.Vector3(x, target.y, z);
+          break;
+        }
+      }
+      if (safe) break;
+    }
+    safe ??= this.findNearestClearPoint(target) ?? this.findNearestAssetClearPoint(target);
+    const floor = this.room.floorHeightAt(safe.x, safe.z);
+    this.camera.position.set(safe.x, floor + this.crouchState.eyeHeight, safe.z);
+    this.resolvePenetration();
+    if (lookAtFallBody) {
+      const dx = lookAtFallBody.x - this.camera.position.x;
+      const dz = lookAtFallBody.z - this.camera.position.z;
+      this.cameraController.setLook(Math.atan2(-dx, -dz), -0.08);
+    }
+    return `已前往：${label}`;
   }
 
   /** Nearest door interaction hint text, or "" when nothing is in range. */
@@ -384,8 +561,16 @@ export class Interior3D {
     this.assetHandle?.dispose();
     this.assetHandle = undefined;
     this.assetPickupVisuals.clear();
+    this.assetStoryVisuals.clear();
     this.assetPhaseVisuals.length = 0;
+    for (const light of this.targetGlowLights.values()) this.scene.remove(light);
+    this.targetGlowLights.clear();
+    if (this.fallSpotlight) this.scene.remove(this.fallSpotlight);
+    if (this.fallSpotlightTarget) this.scene.remove(this.fallSpotlightTarget);
+    stopLibraryStorm();
+    window.dispatchEvent(new CustomEvent("zju-horror-library-lightning", { detail: { active: false } }));
     this.clearAssetFlickerLights();
+    this.clearAssetCeilingLights();
     this.room.dispose();
     this.scene.clear();
 
@@ -432,6 +617,15 @@ export class Interior3D {
       this.scene.add(handle.root);
       this.applyAssetPresentation(handle);
       this.bindInteriorAssetMetadata(handle);
+      this.addAssetCeilingLights(handle);
+      this.suppressLegacyGuidance = this.roomKind === "library" || !handle.meta;
+      if (this.suppressLegacyGuidance) {
+        this.bloodLightEnabled = false;
+        this.bloodLight.intensity = 0;
+        this.setProceduralStoryTriggerMarkersVisible(false);
+        this.setProceduralPickupGuideLightsVisible(false);
+        if (this.guideLine) this.guideLine.visible = false;
+      }
       this.setProceduralRoomVisualsVisible(false);
       this.onAssetStateChange?.("ready");
       window.dispatchEvent(new CustomEvent("zju-horror-interior-asset-state", {
@@ -454,15 +648,31 @@ export class Interior3D {
   }
 
   private applyAssetPresentation(handle: InteriorAssetHandle): void {
-    if (!handle.bounds.isEmpty()) {
-      this.bounds.minX = handle.bounds.min.x;
-      this.bounds.maxX = handle.bounds.max.x;
-      this.bounds.minZ = handle.bounds.min.z;
-      this.bounds.maxZ = handle.bounds.max.z;
-    }
+    const assetBounds = handle.collisionMap.bounds;
+    this.bounds.minX = assetBounds.minX;
+    this.bounds.maxX = assetBounds.maxX;
+    this.bounds.minZ = assetBounds.minZ;
+    this.bounds.maxZ = assetBounds.maxZ;
+    // The procedural room uses a different coordinate system. Once an
+    // authored GLB is present, its projected meshes become collision truth.
+    const clearZones = handle.meta?.navigationClearZones ?? [];
+    this.colliders = handle.collisionMap.obstacles.filter((obstacle) => {
+      const centerX = (obstacle.minX + obstacle.maxX) * 0.5;
+      const centerZ = (obstacle.minZ + obstacle.maxZ) * 0.5;
+      return !clearZones.some((zone) => (
+        (!zone.kind || zone.kind === obstacle.kind)
+        && centerX >= zone.minX
+        && centerX <= zone.maxX
+        && centerZ >= zone.minZ
+        && centerZ <= zone.maxZ
+      ));
+    });
+    this.playerRadius = AUTHORED_LIBRARY_PLAYER_RADIUS;
+    this.moveCtx.playerRadius = this.playerRadius;
 
     if (!handle.viewpoint) return;
-    this.camera.position.set(handle.viewpoint.position.x, EYE_HEIGHT, handle.viewpoint.position.z);
+    const requestedSpawn = new THREE.Vector3(handle.viewpoint.position.x, EYE_HEIGHT, handle.viewpoint.position.z);
+    this.camera.position.copy(this.findNearestAssetClearPoint(requestedSpawn));
     // Saved DCC views often carry a steep presentation tilt. Preserve their
     // heading while keeping the playable first-person view near eye level.
     const playablePitch = THREE.MathUtils.clamp(handle.viewpoint.pitch, -0.4, 0.4);
@@ -479,17 +689,24 @@ export class Interior3D {
     }
 
     this.assetPickupVisuals.clear();
+    this.assetStoryVisuals.clear();
     this.assetPhaseVisuals.length = 0;
     this.clearAssetFlickerLights();
     this.applyAssetPickupSpots(handle);
+    this.applyAssetStorySpots(handle);
     this.createAssetFlickerLights(handle);
     const pickupVisuals = handle.meta?.pickupVisuals ?? {};
+    const storyVisuals = handle.meta?.storyVisuals ?? {};
     const phaseVisuals = handle.meta?.phaseVisuals ?? [];
     const visualNames = new Set([
       ...Object.values(pickupVisuals).flat(),
+      ...Object.values(storyVisuals).flat(),
       ...phaseVisuals.flatMap((phaseVisual) => phaseVisual.names),
     ]);
-    this.setProceduralStoryTriggerMarkersVisible(true);
+    // Authored assets use light cast onto real props/books. The old floating
+    // icosahedron/ring markers stay hidden while their parent zones continue
+    // to drive proximity checks.
+    this.setProceduralStoryTriggerMarkersVisible(!handle.meta);
     if (visualNames.size === 0) return;
 
     const matched = new Map<string, THREE.Object3D[]>();
@@ -508,8 +725,15 @@ export class Interior3D {
       if (objects.length === 0) continue;
       this.assetPickupVisuals.set(itemId, objects);
       this.placeAssetPickupVisuals(itemId, objects);
+      this.prepareAssetPickupVisuals(itemId, objects);
       this.setProceduralPickupMarkerVisible(itemId, false);
       this.setAssetPickupVisualVisible(itemId, !this.hasInventoryItem(itemId));
+    }
+
+    for (const [sceneId, names] of Object.entries(storyVisuals)) {
+      const objects = names.flatMap((name) => matched.get(name) ?? []);
+      if (objects.length === 0) continue;
+      this.assetStoryVisuals.set(sceneId, objects);
     }
 
     for (const phaseVisual of phaseVisuals) {
@@ -517,6 +741,8 @@ export class Interior3D {
       if (objects.length === 0) continue;
       this.assetPhaseVisuals.push({ objects, activeSceneIds: phaseVisual.activeSceneIds });
     }
+    this.createTargetGlowLights();
+    this.bindLibraryFallReveal(handle);
     this.syncAssetPhaseVisuals(this.getStorySceneId?.());
   }
 
@@ -530,6 +756,7 @@ export class Interior3D {
       const spot = choices[Math.floor(Math.random() * choices.length)];
       pickup.position.set(spot.x, pickup.position.y, spot.z);
       pickup.glow.position.set(spot.x, pickup.glow.position.y, spot.z);
+      if (spot.radius) pickup.radius = spot.radius;
     }
   }
 
@@ -592,6 +819,262 @@ export class Interior3D {
     }
   }
 
+  private prepareAssetPickupVisuals(itemId: string, objects: THREE.Object3D[]): void {
+    const meshes = new Set<THREE.Mesh>();
+    for (const object of objects) {
+      object.traverse((child) => {
+        const mesh = child as THREE.Mesh;
+        if (mesh.isMesh) meshes.add(mesh);
+      });
+    }
+
+    const emissiveIntensity = itemId === "receipt" || itemId === "talisman" ? 0.72 : 0.18;
+    for (const mesh of meshes) {
+      const source = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      const materials = source.map((material) => {
+        const clone = material.clone() as THREE.MeshStandardMaterial;
+        if (clone.emissive) {
+          clone.emissive.setHex(itemId === "talisman" ? 0x8e120d : 0x76090d);
+          clone.emissiveIntensity = Math.max(clone.emissiveIntensity ?? 0, emissiveIntensity);
+        }
+        clone.needsUpdate = true;
+        return clone;
+      });
+      mesh.material = Array.isArray(mesh.material) ? materials : materials[0];
+    }
+  }
+
+  private applyAssetStorySpots(handle: InteriorAssetHandle): void {
+    const spots = handle.meta?.storySpots ?? {};
+    for (const trigger of this.room.storyTriggers) {
+      const spot = spots[trigger.sceneId];
+      if (!spot) continue;
+      trigger.position.set(spot.x, spot.y, spot.z);
+      trigger.glow.position.set(spot.x, spot.y, spot.z);
+      if (spot.radius) trigger.radius = spot.radius;
+    }
+
+    for (const [sceneId, candidates] of Object.entries(handle.meta?.storySpotCandidates ?? {})) {
+      const trigger = this.room.storyTriggers.find((item) => item.sceneId === sceneId);
+      if (!trigger || candidates.length === 0) continue;
+      const candidate = candidates[Math.floor(Math.random() * candidates.length)];
+      trigger.position.set(candidate.x, candidate.y, candidate.z);
+      trigger.glow.position.set(candidate.x, candidate.y, candidate.z);
+      if (candidate.radius) trigger.radius = candidate.radius;
+    }
+  }
+
+  private createTargetGlowLights(): void {
+    for (const light of this.targetGlowLights.values()) this.scene.remove(light);
+    this.targetGlowLights.clear();
+
+    const add = (key: string, position: THREE.Vector3, intensity = 4.2, distance = 4.6): void => {
+      const light = new THREE.PointLight(0xc70b18, 0, distance, 1.8);
+      light.name = `scene01_target_${key.replace(":", "_")}`;
+      light.position.set(position.x, Math.max(0.72, position.y + 0.42), position.z);
+      light.userData.baseIntensity = intensity;
+      this.scene.add(light);
+      this.targetGlowLights.set(key, light);
+    };
+
+    for (const pickup of this.room.pickups) {
+      if (pickup.itemId === "flashlight" || pickup.itemId === "receipt" || pickup.itemId === "talisman") {
+        add(
+          `pickup:${pickup.itemId}`,
+          pickup.position,
+          pickup.itemId === "flashlight" ? 5.6 : 4.4,
+          pickup.itemId === "flashlight" ? 5.2 : 4.2,
+        );
+      }
+    }
+    for (const trigger of this.room.storyTriggers) {
+      if (trigger.sceneId === "library_intro" || trigger.sceneId === "library_shelf") {
+        add(`story:${trigger.sceneId}`, trigger.position, trigger.sceneId === "library_shelf" ? 5.2 : 4.6, 4.8);
+      }
+    }
+  }
+
+  private updateTargetGlowLights(t: number): void {
+    const sceneId = this.getStorySceneId?.();
+    for (const [key, light] of this.targetGlowLights) {
+      let active = false;
+      if (key.startsWith("pickup:")) {
+        const itemId = key.slice("pickup:".length);
+        const pickup = this.room.pickups.find((item) => item.itemId === itemId);
+        active = !!pickup && !pickup.taken && pickup.glow.visible && !this.hasInventoryItem(itemId);
+      } else {
+        const targetSceneId = key.slice("story:".length);
+        const trigger = this.room.storyTriggers.find((item) => item.sceneId === targetSceneId);
+        active = sceneId === targetSceneId && !!trigger && !trigger.triggered && trigger.glow.visible;
+      }
+      light.visible = active;
+      light.intensity = active
+        ? light.userData.baseIntensity * (0.82 + 0.18 * Math.sin(t * 3.7 + light.position.z * 0.2))
+        : 0;
+    }
+  }
+
+  private bindLibraryFallReveal(handle: InteriorAssetHandle): void {
+    const reveal = handle.meta?.fallReveal;
+    if (!reveal || this.roomKind !== "library") return;
+    this.fallenLinwei = handle.root.getObjectByName(reveal.fallenName)
+      ?? handle.root.getObjectByName(THREE.PropertyBinding.sanitizeNodeName(reveal.fallenName));
+    if (this.fallenLinwei) {
+      this.fallenLinwei.traverse((object) => {
+        const mesh = object as THREE.Mesh;
+        if (!mesh.isMesh || !mesh.material) return;
+        const source = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        const cloned = source.map((material) => material.clone());
+        mesh.material = Array.isArray(mesh.material) ? cloned : cloned[0];
+      });
+      this.setFallenLinweiAppearance(this.fallRevealed);
+    }
+    const revealTarget = new THREE.Vector3(reveal.body.x, reveal.body.y, reveal.body.z);
+    if (this.fallenLinwei) {
+      const box = new THREE.Box3().setFromObject(this.fallenLinwei);
+      if (!box.isEmpty()) box.getCenter(revealTarget);
+    }
+
+    // Bind the actual authored streetlamp. Its saved metadata is only a
+    // fallback; the live mesh bounds keep the crimson cone attached if the
+    // underlying model is re-exported with a changed pivot.
+    const authoredStreetlamp = handle.root.getObjectByName(reveal.streetlampName)
+      ?? handle.root.getObjectByName(THREE.PropertyBinding.sanitizeNodeName(reveal.streetlampName));
+    const lampPosition = new THREE.Vector3(reveal.lamp.x, reveal.lamp.y, reveal.lamp.z);
+    if (authoredStreetlamp) {
+      const lampBox = new THREE.Box3().setFromObject(authoredStreetlamp);
+      if (!lampBox.isEmpty()) {
+        const lampCenter = lampBox.getCenter(new THREE.Vector3());
+        lampPosition.set(lampCenter.x, lampBox.max.y - 0.72, lampCenter.z);
+      }
+    }
+
+    // The existing streetlamp mesh remains visible but unlit. This spotlight
+    // switches on at impact and throws a narrow crimson cone onto Lin Wei.
+    this.fallSpotlightTarget = new THREE.Object3D();
+    this.fallSpotlightTarget.position.copy(revealTarget);
+    this.scene.add(this.fallSpotlightTarget);
+    this.fallSpotlight = new THREE.SpotLight(0xff101d, this.fallRevealed ? 120 : 0, 21, 0.31, 0.36, 1.38);
+    this.fallSpotlight.name = "library_fall_crimson_spotlight";
+    this.fallSpotlight.position.copy(lampPosition);
+    this.fallSpotlight.target = this.fallSpotlightTarget;
+    if (!this.isMobile) {
+      this.fallSpotlight.castShadow = true;
+      this.fallSpotlight.shadow.mapSize.set(1024, 1024);
+    }
+    this.scene.add(this.fallSpotlight);
+
+    // A tight crimson bounce at ground level keeps the prone mesh readable;
+    // visually it belongs to the streetlamp pool and has no visible fixture.
+    this.fallBodyFill = new THREE.PointLight(0xb90716, this.fallRevealed ? 4.2 : 0, 5.5, 1.9);
+    this.fallBodyFill.name = "library_fall_body_bounce";
+    this.fallBodyFill.position.set(revealTarget.x, revealTarget.y + 0.9, revealTarget.z);
+    this.scene.add(this.fallBodyFill);
+  }
+
+  private revealLibraryFall(): void {
+    if (this.fallRevealed) return;
+    this.fallRevealed = true;
+    this.hasLeftShelfAfterFall = true;
+    this.setFallenLinweiAppearance(true);
+    this.outsideRedLight.intensity = 1.35;
+    // Keep navigational storm light alive; the spotlight supplies the crimson
+    // focus without switching the handheld beam or the courtyard off.
+    this.outsideWhiteLight.intensity = 5.2;
+    if (this.fallSpotlight) this.fallSpotlight.intensity = 120;
+    if (this.fallBodyFill) this.fallBodyFill.intensity = 4.2;
+    const reveal = this.assetHandle?.meta?.fallReveal;
+    if (reveal) {
+      // The root pivot sits near one limb in the authored GLB. Aim at the
+      // visible mesh bounds so the whole prone figure, not the empty pivot, is
+      // centred when the story glass clears.
+      const target = new THREE.Vector3(reveal.body.x, reveal.body.y, reveal.body.z);
+      if (this.fallenLinwei) {
+        const box = new THREE.Box3().setFromObject(this.fallenLinwei);
+        if (!box.isEmpty()) box.getCenter(target);
+      }
+      // The trigger fires before the player reaches the body. During the
+      // full-screen impact frame, advance to a clear courtyard vantage on the
+      // same approach line so the partition cannot occlude the final reveal.
+      const approach = new THREE.Vector3(
+        this.camera.position.x - target.x,
+        0,
+        this.camera.position.z - target.z,
+      );
+      if (approach.lengthSq() > 0.001) {
+        approach.normalize().multiplyScalar(3.8);
+        const desired = new THREE.Vector3(target.x + approach.x, this.camera.position.y, target.z + approach.z);
+        const safe = this.findNearestAssetClearPoint(desired);
+        this.camera.position.set(
+          safe.x,
+          this.room.floorHeightAt(safe.x, safe.z) + this.crouchState.eyeHeight,
+          safe.z,
+        );
+      }
+      const dx = target.x - this.camera.position.x;
+      const dz = target.z - this.camera.position.z;
+      const horizontalDistance = Math.max(0.1, Math.hypot(dx, dz));
+      const pitch = Math.atan2(target.y - this.camera.position.y, horizontalDistance);
+      this.cameraController.setLook(Math.atan2(-dx, -dz), pitch);
+      // `lookAt` is the final visual authority for this one-shot cinematic;
+      // it avoids Euler-order drift between yaw and a steep downward pitch.
+      this.camera.lookAt(target);
+    }
+  }
+
+  private setFallenLinweiAppearance(revealed: boolean): void {
+    if (!this.fallenLinwei) return;
+    this.fallenLinwei.visible = revealed;
+    if (!revealed) return;
+    this.fallenLinwei.traverse((object) => {
+      const mesh = object as THREE.Mesh;
+      if (!mesh.isMesh || !mesh.material) return;
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      for (const material of materials) {
+        const lit = material as THREE.MeshStandardMaterial;
+        if (!lit.emissive) continue;
+        lit.emissive.setHex(0x5c0209);
+        lit.emissiveIntensity = Math.max(lit.emissiveIntensity ?? 0, 1.65);
+        lit.needsUpdate = true;
+      }
+    });
+  }
+
+  private addAssetCeilingLights(handle: InteriorAssetHandle): void {
+    handle.root.updateMatrixWorld(true);
+    handle.root.traverse((object) => {
+      if (!/^legacy_crimson_fluorescent_\d+_tube$/.test(object.name)) return;
+      const mesh = object as THREE.Mesh;
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      for (const material of materials) {
+        const standard = material as THREE.MeshStandardMaterial;
+        if (standard.emissive) {
+          standard.emissive.setHex(0xb20d18);
+          standard.emissiveIntensity = Math.max(standard.emissiveIntensity ?? 0, 4.2);
+        }
+      }
+      const light = new THREE.PointLight(0xa70d18, 4.9, 9.2, 1.65);
+      light.name = `${object.name}_light`;
+      light.position.copy(object.getWorldPosition(new THREE.Vector3()));
+      light.position.y -= 0.12;
+      this.scene.add(light);
+      this.assetCeilingLights.push(light);
+    });
+  }
+
+  private clearAssetCeilingLights(): void {
+    for (const light of this.assetCeilingLights) this.scene.remove(light);
+    this.assetCeilingLights.length = 0;
+  }
+
+  private setProceduralPickupGuideLightsVisible(visible: boolean): void {
+    for (const pickup of this.room.pickups) {
+      pickup.glow.traverse((child) => {
+        if ((child as THREE.Light).isLight) child.visible = visible;
+      });
+    }
+  }
+
   private setAssetPickupVisualVisible(itemId: string, visible: boolean): void {
     const objects = this.assetPickupVisuals.get(itemId);
     if (!objects) return;
@@ -640,10 +1123,10 @@ export class Interior3D {
     for (const c of this.colliders) {
       if (!this.isColliderActive(c)) continue;
       if (
-        x > c.minX - PLAYER_RADIUS &&
-        x < c.maxX + PLAYER_RADIUS &&
-        z > c.minZ - PLAYER_RADIUS &&
-        z < c.maxZ + PLAYER_RADIUS
+        x > c.minX - this.playerRadius &&
+        x < c.maxX + this.playerRadius &&
+        z > c.minZ - this.playerRadius &&
+        z < c.maxZ + this.playerRadius
       ) {
         return true;
       }
@@ -652,11 +1135,28 @@ export class Interior3D {
   }
 
   private clampToBounds(value: number, min: number, max: number): number {
-    return THREE.MathUtils.clamp(value, min + PLAYER_RADIUS, max - PLAYER_RADIUS);
+    return THREE.MathUtils.clamp(value, min + this.playerRadius, max - this.playerRadius);
   }
 
   private findClearSpawn(spawn: THREE.Vector3): THREE.Vector3 {
     return this.findNearestClearPoint(spawn) ?? spawn;
+  }
+
+  private findNearestAssetClearPoint(origin: THREE.Vector3): THREE.Vector3 {
+    const baseX = this.clampToBounds(origin.x, this.bounds.minX, this.bounds.maxX);
+    const baseZ = this.clampToBounds(origin.z, this.bounds.minZ, this.bounds.maxZ);
+    if (!this.collides(baseX, baseZ)) return new THREE.Vector3(baseX, origin.y, baseZ);
+
+    for (let radius = 0.4; radius <= 8; radius += 0.35) {
+      const steps = Math.max(16, Math.ceil(radius * 12));
+      for (let step = 0; step < steps; step++) {
+        const angle = (Math.PI * 2 * step) / steps;
+        const x = this.clampToBounds(origin.x + Math.cos(angle) * radius, this.bounds.minX, this.bounds.maxX);
+        const z = this.clampToBounds(origin.z + Math.sin(angle) * radius, this.bounds.minZ, this.bounds.maxZ);
+        if (!this.collides(x, z)) return new THREE.Vector3(x, origin.y, z);
+      }
+    }
+    return new THREE.Vector3(baseX, origin.y, baseZ);
   }
 
   private findNearestClearPoint(origin: THREE.Vector3): THREE.Vector3 | null {
@@ -703,10 +1203,10 @@ export class Interior3D {
   }
 
   private getPenetrationPush(x: number, z: number, collider: AABB): { x: number; z: number } | null {
-    const minX = collider.minX - PLAYER_RADIUS;
-    const maxX = collider.maxX + PLAYER_RADIUS;
-    const minZ = collider.minZ - PLAYER_RADIUS;
-    const maxZ = collider.maxZ + PLAYER_RADIUS;
+    const minX = collider.minX - this.playerRadius;
+    const maxX = collider.maxX + this.playerRadius;
+    const minZ = collider.minZ - this.playerRadius;
+    const maxZ = collider.maxZ + this.playerRadius;
     if (x <= minX || x >= maxX || z <= minZ || z >= maxZ) return null;
 
     const left = x - minX;
@@ -732,13 +1232,13 @@ export class Interior3D {
     const previewingUnmappedAsset = Boolean(this.assetHandle && !this.assetHandle.meta);
     const targetAmbient = previewingUnmappedAsset
       ? 0.32
-      : hasFlashlight ? (libraryProfile ? 0.5 : 0.85) : libraryProfile ? 0.1 : 0.22;
+      : hasFlashlight ? (libraryProfile ? 0.34 : 0.85) : libraryProfile ? 0.18 : 0.22;
     const targetFill = previewingUnmappedAsset
       ? 0.18
-      : hasFlashlight ? (libraryProfile ? 0.32 : 0.55) : libraryProfile ? 0.06 : 0.14;
+      : hasFlashlight ? (libraryProfile ? 0.22 : 0.55) : libraryProfile ? 0.11 : 0.14;
     const targetNear = previewingUnmappedAsset
       ? 0.25
-      : hasFlashlight ? (libraryProfile ? 0.5 : 0.85) : libraryProfile ? 0.08 : 0.24;
+      : hasFlashlight ? (libraryProfile ? 0.18 : 0.85) : libraryProfile ? 0.24 : 0.24;
     const k = Math.min(1, dt * 6);
 
     this.ambientLight.intensity = THREE.MathUtils.lerp(this.ambientLight.intensity, targetAmbient, k);
@@ -748,12 +1248,73 @@ export class Interior3D {
     if (hasFlashlight || previewingUnmappedAsset) {
       this.flashlightSys.update(dt, t);
       if (previewingUnmappedAsset) this.flashlight.intensity *= 8;
+      if (this.fallRevealed) {
+        // Outside, retain a readable beam while letting the red streetlamp own
+        // the body reveal. Back in the shelf room it returns to full strength.
+        this.flashlight.intensity *= this.isInLibraryExterior() ? 0.82 : 1.18;
+      }
     } else {
       this.flashlight.intensity = 0;
     }
 
     this.updateBloodLight(t);
     this.updateAssetFlickerLights(t);
+    this.updateTargetGlowLights(t);
+    this.updateLibraryStorm(t);
+    this.updateLibraryCeilingLights(t);
+  }
+
+  private isInLibraryExterior(): boolean {
+    return this.roomKind === "library" && this.camera.position.x > 2.35 && this.camera.position.z > 13.5;
+  }
+
+  private updateLibraryStorm(t: number): void {
+    if (this.roomKind !== "library") return;
+    const sceneId = this.getStorySceneId?.();
+    const storyAllowsStorm = sceneId === "library_fall" || sceneId === "dorm_baiqiu";
+    const exterior = storyAllowsStorm && this.isInLibraryExterior();
+
+    if (exterior !== this.libraryStormActive) {
+      this.libraryStormActive = exterior;
+      if (exterior) {
+        startLibraryStorm();
+        this.nextLightningAt = t + 5.5 + Math.random() * 4.5;
+      } else {
+        stopLibraryStorm();
+        this.nextLightningAt = Number.POSITIVE_INFINITY;
+        this.lightningFlashUntil = 0;
+      }
+    }
+
+    if (exterior && t >= this.nextLightningAt) {
+      this.lightningFlashUntil = t + 0.19;
+      this.nextLightningAt = t + 17 + Math.random() * 14;
+      window.dispatchEvent(new CustomEvent("zju-horror-library-lightning", { detail: { active: true } }));
+      playLibraryThunder(0.2 + Math.random() * 0.28);
+    }
+
+    const lightning = exterior && t < this.lightningFlashUntil;
+    const whiteTarget = exterior ? (lightning ? 16 : 5.2) : 2.8;
+    const ceilingTarget = exterior ? (lightning ? 11 : 2.7) : 0;
+    this.outsideWhiteLight.intensity = THREE.MathUtils.lerp(this.outsideWhiteLight.intensity, whiteTarget, 0.18);
+    this.outsideCeilingLight.intensity = THREE.MathUtils.lerp(this.outsideCeilingLight.intensity, ceilingTarget, 0.2);
+  }
+
+  private updateLibraryCeilingLights(t: number): void {
+    if (this.roomKind !== "library") return;
+    if (this.fallRevealed && this.camera.position.z > 32) this.hasLeftShelfAfterFall = true;
+    if (this.hasLeftShelfAfterFall && this.camera.position.z < 29.5) this.libraryReturnFlicker = true;
+
+    for (let index = 0; index < this.assetCeilingLights.length; index++) {
+      const light = this.assetCeilingLights[index];
+      if (!this.libraryReturnFlicker) {
+        light.intensity = 4.75 + Math.sin(t * 1.7 + index * 0.83) * 0.22;
+        continue;
+      }
+      const harsh = Math.sin(t * (13.5 + (index % 4) * 2.1) + index * 1.91);
+      const dropout = harsh > 0.58 || Math.sin(t * 3.3 + index * 2.7) > 0.86;
+      light.intensity = dropout ? 0.16 : 4.9 + Math.max(0, harsh) * 1.7;
+    }
   }
 
   private scheduleBloodFlash(t: number): void {
@@ -981,11 +1542,17 @@ export class Interior3D {
     for (let i = 0; i < triggers.length; i++) {
       const trigger = triggers[i];
       if (trigger.triggered || !trigger.glow.visible) continue;
-      const dx = p.x - trigger.position.x;
-      const dz = p.z - trigger.position.z;
-      if (dx * dx + dz * dz <= trigger.radius * trigger.radius) {
+      const fallReveal = trigger.sceneId === "library_fall" ? this.assetHandle?.meta?.fallReveal : undefined;
+      if (fallReveal?.approachMinX !== undefined && p.x < fallReveal.approachMinX) continue;
+      const targetX = fallReveal?.body.x ?? trigger.position.x;
+      const targetZ = fallReveal?.body.z ?? trigger.position.z;
+      const activationRadius = fallReveal?.triggerDistance ?? trigger.radius;
+      const dx = p.x - targetX;
+      const dz = p.z - targetZ;
+      if (dx * dx + dz * dz <= activationRadius * activationRadius) {
         trigger.triggered = true;
         trigger.glow.visible = false;
+        if (trigger.sceneId === "library_fall") this.revealLibraryFall();
         if (trigger.action === "exit") {
           this.onExitTrigger?.();
         } else {
@@ -1017,6 +1584,10 @@ export class Interior3D {
   /** Point the dashed line from camera to the first non-triggered story trigger. */
   private updateGuideLine(): void {
     if (!this.guideLine) return;
+    if (this.suppressLegacyGuidance) {
+      this.guideLine.visible = false;
+      return;
+    }
     const active = this.room.storyTriggers.find((t) => !t.triggered && t.glow.visible);
     if (!active) {
       this.guideLine.visible = false;
@@ -1182,7 +1753,7 @@ export class Interior3D {
   private isSegmentClear(a: THREE.Vector3, b: THREE.Vector3): boolean {
     for (const collider of this.colliders) {
       if (!this.isColliderActive(collider)) continue;
-      if (this.segmentHitsCollider(a, b, collider, PLAYER_RADIUS * 0.65)) return false;
+      if (this.segmentHitsCollider(a, b, collider, this.playerRadius * 0.65)) return false;
     }
     return true;
   }

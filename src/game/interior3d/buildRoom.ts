@@ -732,6 +732,7 @@ interface LibResult {
   triggers: {
     intro: { x: number; z: number };
     sound: { x: number; z: number };
+    fall: { x: number; z: number };
     exit: { x: number; z: number };
   };
 }
@@ -902,6 +903,10 @@ function buildLibrary(ctx: LibCtx): LibResult {
     triggers: {
       intro: { x: 2.25, z: -2.05 },
       sound: { x: 5.0, z: 3.35 },
+      // The authored scene metadata relocates this to the exterior approach.
+      // Keeping the slot in the procedural blueprint ensures the P4 trigger
+      // exists before metadata binding.
+      fall: { x: 4.6, z: 5.7 },
       exit: { x: 0.0, z: exitZ },
     },
   };

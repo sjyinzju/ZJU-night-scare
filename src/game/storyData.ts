@@ -1,6 +1,6 @@
 export type StatKey = "sanity" | "stamina" | "clues" | "trust" | "affection";
 
-export type ItemId = "talisman" | "flashlight" | "key_card" | "medicine" | "diary" | "photograph" | "cat_hair" | "energy";
+export type ItemId = "talisman" | "flashlight" | "receipt" | "key_card" | "medicine" | "diary" | "photograph" | "cat_hair" | "energy";
 
 export type HotspotId =
   | "library"
@@ -14,6 +14,10 @@ export type HotspotId =
 
 export type StorySceneId =
   | "library_intro"
+  | "library_receipt"
+  | "library_talisman"
+  | "library_shelf"
+  | "library_fall"
   | "library_sound"
   | "library_police"
   | "dorm_baiqiu"
@@ -87,6 +91,10 @@ export interface StoryScene {
   setting: "indoor" | "outdoor";
   /** 0-1 视觉扭曲加成。关键时刻（鬼现形、终章）自动提升后期特效强度。 */
   distortionBoost?: number;
+  /** Keep the scene as progression state but wait for an in-world item/zone before opening its modal. */
+  deferInInterior?: boolean;
+  /** P4 deliberately hides the body behind a stronger glass blur until the choice dissolves. */
+  strongBlur?: boolean;
 }
 
 export interface StoryHotspot {
@@ -106,6 +114,7 @@ export interface StoryHotspot {
 export const itemCatalog: Record<ItemId, { name: string; icon: string; desc: string }> = {
   talisman: { name: "护身符", icon: "符", desc: "旧黄符纸。第一次承受强烈理智伤害时会自动抵挡。" },
   flashlight: { name: "手电筒", icon: "光", desc: "施工队遗落的小手电。黑暗区域调查时降低恐惧。" },
+  receipt: { name: "借阅小票", icon: "票", desc: "23:47 打印的异常借阅记录。借阅人一栏是空白。" },
   key_card: { name: "门禁卡", icon: "卡", desc: "张一诚给你的医学院地下仓库通用卡。" },
   medicine: { name: "镇定药", icon: "药", desc: "杜学民给的白色药瓶。服用后恢复 20 点理智。" },
   diary: { name: "日记残页", icon: "页", desc: "论坛附件里的扫描页，记录了千绳会的旧案。" },
@@ -226,31 +235,170 @@ export const storyHotspots: StoryHotspot[] = [
 export const storyScenes: Record<StorySceneId, StoryScene> = {
   library_intro: {
     id: "library_intro",
-    title: "图书馆闭馆前",
+    title: "十点以后，有人在唱",
     chapter: "第一章",
     locationId: "library",
     setting: "indoor",
     body: [
-      "2008年3月初，深夜。紫金港校区的路灯在雾气里发着模糊的光。你叫张超，计算机系大二，平时只有考试前才会抱佛脚。刚开学，离考试还远，但室友林伟非要拉你来图书馆自习——他说一个人待着心里不踏实。",
-      "农医馆的借阅机还亮着。屏幕右下角停在 23:47，最后一条记录的备注只有一句：湖边不要回头。",
-      "走廊深处传来很轻的歌声。林伟的表情突然变得僵硬，像听见有人贴着耳朵喊他的名字。他猛地转头看你：「你有没有听到有人在唱歌？」你没有。图书馆里只有翻书声和暖气的低鸣，窗外连虫叫都没有。",
-      "你们原本只是来查一个旧帖子里提到的闭馆时间。帖子说，每年总有一晚，图书馆会在系统里多出一条不存在的借阅记录——借阅人姓名为空，归还地点却写着医学院地下仓库。林伟一开始笑着说这像学长学姐编出来吓新生的故事。",
-      "可是当借阅机吐出那张热乎乎的小票时，他没有再笑。小票背面有一行被热敏纸烫出来的浅字：不要让白秋靠近小剧场。窗外的启真湖安静得过分。湖面没有风，水纹却一圈圈往外扩，像有人在水下慢慢敲玻璃。",
+      "深夜的农医馆只剩稀疏的翻书声。林伟忽然停下笔，侧着头问你：“你有没有听见？有个女人在唱歌。”你什么也没听见，只觉得他的脸色白得反常。他又听了几秒，匆匆离开座位，临走前让你不要碰桌上的东西。",
+      "你循着红光找到他留下的笔记本。封皮被潮气泡得发软，金属搭扣没有扣紧。第一页只写着林伟的名字，名字后面原本还有一行字，却被同一支笔反复划穿；纸纤维已经破了，露出桌面暗红色的反光。",
+      "3 月 7 日，22:16。林伟写道，十点以后书架后面一直有人唱戏，管理员却确认馆内没有广播。下一页是一条潦草的路线：阅览桌、借阅终端、小隔间、最里面第三排书架。每个地点旁边，都画着同一双绣花鞋。",
+      "3 月 8 日，23:47。最后一段字迹几乎划破纸背：借阅终端会吐出一张借阅人姓名空白的小票，机器明明断着电，票纸却带着刚打印出来的温度。小票上的归还地点不属于这座图书馆，背面还会多出原本没有的字。林伟只留下了一句警告：找到那张票以后，不要看窗外，也不要回答歌声。",
     ],
     choices: [
       {
-        id: "listen",
-        text: "仔细听听歌声从哪里来",
-        next: "library_sound",
-        statChanges: { sanity: -2, stamina: -1, clues: 4 },
+        id: "check-names",
+        text: "逐行检查日期和被划掉的名字",
+        next: "library_receipt",
+        statChanges: { sanity: -2, clues: 5 },
+        setFlag: "notebook_checked",
         effect: "whisper",
       },
       {
-        id: "leave",
-        text: "提议现在就离开图书馆",
-        next: "library_sound",
-        statChanges: { sanity: -4, stamina: -3, clues: 2 },
-        effect: "shake",
+        id: "photograph-page",
+        text: "用手机记下最后一页，再寻找对应票据",
+        next: "library_receipt",
+        statChanges: { stamina: -1, clues: 4 },
+        setFlag: "notebook_photographed",
+      },
+      {
+        id: "close-notebook",
+        text: "合上笔记本，先离开这张桌子",
+        next: "library_receipt",
+        statChanges: { sanity: 2, clues: 1 },
+      },
+    ],
+  },
+  library_receipt: {
+    id: "library_receipt",
+    title: "不存在的最后一条记录",
+    chapter: "第一章",
+    locationId: "library",
+    setting: "indoor",
+    deferInInterior: true,
+    body: [
+      "跳脸的白影退去后，小隔间里重新只剩红光。打印机滚轴还在缓慢空转，齿轮每咬合一次，桌下就传来一下指甲刮地的轻响。",
+      "小票的纸带着不该存在的余温，可终端屏幕漆黑，电源线也垂在墙边，插头离插座至少还有半米。",
+      "借阅人一栏是空白，索书号却指向一份早已封存的戏曲病理档案。归还地点写着「医学院地下仓库」，打印时间正是 23:47。",
+      "你对照笔记本，两个时间一分不差。林伟不是预言了这张票——更像是他昨夜也站在同一个位置，捡到过同样的东西。",
+      "你把小票翻到背面，斜着迎向手电光。压痕一层叠着一层，最上面一行写着：湖边不要回头。再下面则是：听见有人唱你的名字，不要回答。",
+      "隔板外忽然传来纸页被逐张翻动的声音。每翻一页，声音都向入口挪近一点；可从隔板下方看出去，地上没有脚，也没有影子。",
+      "最后一声翻页停在你背后。你回头时只看见空椅轻轻转了半圈，扶手上多出一道湿漉漉的五指印。",
+    ],
+    choices: [
+      {
+        id: "compare-time",
+        text: "把小票与笔记本时间逐项比对",
+        next: "library_talisman",
+        statChanges: { sanity: -2, clues: 7 },
+        setFlag: "timeline_linked",
+      },
+      {
+        id: "inspect-imprint",
+        text: "用手电查看纸背和压痕",
+        next: "library_talisman",
+        requireItem: "flashlight",
+        statChanges: { sanity: -3, clues: 9 },
+        setFlag: "receipt_imprint_found",
+      },
+      {
+        id: "pocket-receipt",
+        text: "先收进口袋，不在隔间久留",
+        next: "library_talisman",
+        statChanges: { sanity: 2, clues: 4 },
+      },
+    ],
+  },
+  library_talisman: {
+    id: "library_talisman",
+    title: "桌上的旧符",
+    chapter: "第一章",
+    locationId: "library",
+    setting: "indoor",
+    deferInInterior: true,
+    body: [],
+    choices: [],
+  },
+  library_shelf: {
+    id: "library_shelf",
+    title: "没有影子的脚步",
+    chapter: "第一章",
+    locationId: "library",
+    setting: "indoor",
+    distortionBoost: 0.18,
+    body: [
+      "发出红光的书并不固定。你沿着书架走到它面前时，才发现这次亮起的是一本没有馆藏标签的旧书。它的书脊在发热，封面却凝着一层细密的水珠。",
+      "你刚靠近，整排书架后的脚步声便停了。不是渐渐停下，而是在同一瞬间消失，仿佛那个人一直隔着一层木板跟你并肩走。",
+      "头顶的红灯从远处开始，一盏接一盏熄灭。黑暗沿着狭长通道爬过来，只剩你面前这本书还泛着猩红的光。",
+      "戏腔从书架缝隙里贴出来。起初只是含混的拖腔，随后每个音节都变得清楚——她唱的不是戏词，而是你的名字。",
+      "缝隙另一侧有一小片白色衣角，正违背重力缓慢向上升。更高的位置露出半只眼睛，眼白浑浊，瞳孔却始终追着手电光移动。",
+      "护身符在口袋里突然发烫。书架深处传来三下敲击声，像有人在提醒你：抽出这本书，或者立刻后退；无论选哪一个，她都已经知道你来了。",
+      "就在这时，林伟的声音从书架房间外面传来。他像是站在很远的空地上，语气却近得贴着你的耳朵：“歌声跑到外面去了。跟我来，我们去找她。”",
+      "你绕出最后一排书架，房间外只有一片被夜色吞没的空地。林伟没有等在门边，歌声却正从远处路灯的方向断断续续传来。接下来必须离开书架房间，到外面的空地寻找他。",
+    ],
+    choices: [
+      {
+        id: "pull-book",
+        text: "抽出这本书，检查书后传来的声音",
+        next: "library_fall",
+        statChanges: { sanity: -4, stamina: -2, clues: 6 },
+        setFlag: "pulled_story_book",
+      },
+      {
+        id: "light-gap",
+        text: "用手电照进书架缝隙",
+        next: "library_fall",
+        requireItem: "flashlight",
+        statChanges: { sanity: -3, clues: 8 },
+        setFlag: "saw_ghost_direction",
+      },
+      {
+        id: "listen-back",
+        text: "后退一步，只听声音从哪边移动",
+        next: "library_fall",
+        statChanges: { sanity: -2, stamina: -1, clues: 4 },
+      },
+    ],
+  },
+  library_fall: {
+    id: "library_fall",
+    title: "灯下的人",
+    chapter: "第一章",
+    locationId: "library",
+    setting: "indoor",
+    distortionBoost: 0.34,
+    strongBlur: true,
+    body: [
+      "砰。",
+      "巨响和白影同时撞上视野。等刺耳的余音退开，远处那盏原本熄灭的路灯骤然亮起，血红的光束直直落向地面。",
+      "血光里凭空多出一个扭曲的人形，刚才那里明明什么都没有。林伟仰面躺着，身体像被一只看不见的手拧过半圈，后脑下的暗色正沿地砖缝一格一格爬开。",
+      "他穿着今晚那件外套，手臂以不可能的角度压在身体下面，颈侧却留着五道朝上的乌青指痕，像坠落之前仍有人悬在窗外抓着他。鞋底沾着阅览室地板上的灰，摊开的手边落着一页从笔记本上撕下来的纸。",
+      "纸上只写了两句话：我没有跳。她在窗外叫我。",
+      "灯光之外，有什么穿白衣的东西慢慢收回指向他的手。你看不清她的脸，只看见裙摆下那双绣花鞋没有碰到地面。",
+      "戏腔停了。风、灯管和远处的机器声也一起消失，整栋图书馆只剩你的呼吸，和林伟身下某种液体向外漫开的细响。",
+    ],
+    choices: [
+      {
+        id: "approach-fallen",
+        text: "立刻靠近确认那个人是否还有反应",
+        next: "dorm_baiqiu",
+        statChanges: { sanity: -7, stamina: -6, clues: 5 },
+        setFlag: "approached_fallen_person",
+      },
+      {
+        id: "call-help",
+        text: "先拨 120 和保卫处，报清当前位置",
+        next: "dorm_baiqiu",
+        statChanges: { sanity: -4, stamina: -2, clues: 6 },
+        setFlag: "called_help_early",
+      },
+      {
+        id: "observe-edge",
+        text: "留在光线边缘，用手电观察周围",
+        next: "dorm_baiqiu",
+        requireItem: "flashlight",
+        statChanges: { sanity: -5, stamina: -1, clues: 8 },
+        setFlag: "observed_fall_scene",
       },
     ],
   },

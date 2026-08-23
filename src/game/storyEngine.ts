@@ -53,7 +53,9 @@ export type InteriorStoryTriggerDefinition = {
 
 const INTERIOR_STORY_ITEMS: Record<string, InteriorStoryItemDefinition[]> = {
   library: [
-    { itemId: "flashlight", placement: "flashlight", activeSceneIds: ["library_intro", "library_sound"], color: 0xfff1a8 },
+    { itemId: "flashlight", placement: "flashlight", activeSceneIds: ["library_intro", "library_receipt", "library_talisman", "library_shelf", "library_fall"], color: 0xfff1a8 },
+    { itemId: "receipt", placement: "receipt", activeSceneIds: ["library_receipt"], color: 0xb80f19 },
+    { itemId: "talisman", placement: "talisman", activeSceneIds: ["library_talisman"], color: 0xb80f19 },
   ],
   medical: [
     // The key card is already awarded by Zhang Yicheng before this chapter.
@@ -69,10 +71,11 @@ const INTERIOR_STORY_ITEMS: Record<string, InteriorStoryItemDefinition[]> = {
 const INTERIOR_STORY_TRIGGERS: Record<string, InteriorStoryTriggerDefinition[]> = {
   library: [
     { sceneId: "library_intro", position: "intro", action: "story", activeSceneIds: ["library_intro"], radius: 0.85 },
-    { sceneId: "library_sound", position: "sound", action: "story", activeSceneIds: ["library_sound"] },
-    // The police beat is the third in-library red point.  The actual world
-    // exit happens only after its final choice sends the player to Baisha.
-    { sceneId: "library_police", position: "exit", action: "story", activeSceneIds: ["library_police"] },
+    { sceneId: "library_shelf", position: "sound", action: "story", activeSceneIds: ["library_shelf"], radius: 0.95 },
+    // P4 is a hidden proximity trigger: the renderer suppresses its glow and
+    // minimap point even while the zone is active.
+    { sceneId: "library_fall", position: "fall", action: "story", activeSceneIds: ["library_fall"], radius: 1.25 },
+    { sceneId: "library_exit", position: "exit", action: "exit", activeSceneIds: ["dorm_baiqiu"], radius: 1.0 },
   ],
   dorm: [{ sceneId: "dorm_forum", position: "forum", action: "story", activeSceneIds: ["dorm_forum"] }],
   hall: [{ sceneId: "final_plan", position: "stage", action: "story", activeSceneIds: ["final_plan"] }],
@@ -94,7 +97,9 @@ export function getInteriorNpcRevealSceneIds(roomKind: string): StorySceneId[] {
   return INTERIOR_NPC_REVEAL_SCENE_IDS[roomKind] ?? [];
 }
 
-const INTERIOR_EXIT_TRIGGER_AFTER: Partial<Record<StorySceneId, StorySceneId[]>> = {};
+const INTERIOR_EXIT_TRIGGER_AFTER: Partial<Record<StorySceneId, StorySceneId[]>> = {
+  library_fall: ["dorm_baiqiu"],
+};
 
 // ── StoryStage ↔ StorySceneId 联动 ──
 
@@ -163,7 +168,7 @@ export type GhostDamageResult = {
  * 复用 applyStatChanges 确保护身符格挡、日志记录等逻辑一致。
  */
 export function applyGhostDamage(state: StoryState, amount: number): GhostDamageResult {
-  const applied = applyStatChanges(state, { sanity: amount });
+  const applied = applyStatChanges(state, { sanity: amount }, true);
   const dead = applied.stats.sanity <= 0;
   return {
     nextState: {
@@ -351,6 +356,10 @@ export function resolvePostChoiceCommands(args: {
   } else if (nextScene.ending) {
     commands.push({ kind: "set-active-scene", sceneId: nextScene.id });
   } else if (inInterior && nextScene.setting === "indoor") {
+    if (nextScene.deferInInterior) {
+      commands.push({ kind: "set-active-scene", sceneId: null });
+      return commands;
+    }
     // Same building & same locationId? Check if the next scene has a trigger in this room.
     // If yes → wait for the player to walk to the red dot.
     // If no  → show the next scene as a popup immediately (no trigger to walk to).
@@ -385,13 +394,17 @@ export function isChoiceLocked(choice: StoryChoice, state: StoryState) {
   return false;
 }
 
-function applyStatChanges(state: StoryState, changes?: Partial<Record<StatKey, number>>) {
+function applyStatChanges(
+  state: StoryState,
+  changes?: Partial<Record<StatKey, number>>,
+  allowTalismanBlock = false,
+) {
   const nextStats = { ...state.stats };
   const nextInventory = [...state.inventory];
   let blockedByTalisman = false;
 
   (Object.entries(changes ?? {}) as Array<[StatKey, number]>).forEach(([key, value]) => {
-    if (key === "sanity" && value < -5 && nextInventory.includes("talisman")) {
+    if (allowTalismanBlock && key === "sanity" && value < -5 && nextInventory.includes("talisman")) {
       nextInventory.splice(nextInventory.indexOf("talisman"), 1);
       blockedByTalisman = true;
       return;

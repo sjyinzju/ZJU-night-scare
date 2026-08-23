@@ -273,6 +273,159 @@ export function playJumpscareScream(intensity: "mild" | "medium" | "extreme" = "
   noiseSrc.stop(now + noiseDur);
 }
 
+/** P4 坠落冲击：低频重击 + 短噪声 + 极短金属尾音，并通过压缩器限制峰值。 */
+export function playImpactBang(): void {
+  const audioCtx = getCtx();
+  const now = audioCtx.currentTime;
+  const compressor = audioCtx.createDynamicsCompressor();
+  compressor.threshold.setValueAtTime(-14, now);
+  compressor.knee.setValueAtTime(10, now);
+  compressor.ratio.setValueAtTime(8, now);
+  compressor.attack.setValueAtTime(0.002, now);
+  compressor.release.setValueAtTime(0.18, now);
+  compressor.connect(audioCtx.destination);
+
+  const impact = audioCtx.createOscillator();
+  impact.type = "sine";
+  impact.frequency.setValueAtTime(82, now);
+  impact.frequency.exponentialRampToValueAtTime(26, now + 0.38);
+  const impactGain = audioCtx.createGain();
+  impactGain.gain.setValueAtTime(0.46, now);
+  impactGain.gain.exponentialRampToValueAtTime(0.001, now + 0.46);
+  impact.connect(impactGain).connect(compressor);
+
+  const noiseBuffer = audioCtx.createBuffer(1, Math.floor(audioCtx.sampleRate * 0.24), audioCtx.sampleRate);
+  const noise = noiseBuffer.getChannelData(0);
+  for (let index = 0; index < noise.length; index++) {
+    noise[index] = (Math.random() * 2 - 1) * Math.exp(-index / (audioCtx.sampleRate * 0.035));
+  }
+  const noiseSource = audioCtx.createBufferSource();
+  noiseSource.buffer = noiseBuffer;
+  const lowpass = audioCtx.createBiquadFilter();
+  lowpass.type = "lowpass";
+  lowpass.frequency.value = 760;
+  const noiseGain = audioCtx.createGain();
+  noiseGain.gain.setValueAtTime(0.28, now);
+  noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
+  noiseSource.connect(lowpass).connect(noiseGain).connect(compressor);
+
+  const metal = audioCtx.createOscillator();
+  metal.type = "triangle";
+  metal.frequency.setValueAtTime(1180, now + 0.035);
+  metal.frequency.exponentialRampToValueAtTime(420, now + 0.25);
+  const metalGain = audioCtx.createGain();
+  metalGain.gain.setValueAtTime(0.001, now);
+  metalGain.gain.setValueAtTime(0.07, now + 0.035);
+  metalGain.gain.exponentialRampToValueAtTime(0.001, now + 0.27);
+  metal.connect(metalGain).connect(compressor);
+
+  impact.start(now);
+  noiseSource.start(now);
+  metal.start(now);
+  impact.stop(now + 0.48);
+  noiseSource.stop(now + 0.25);
+  metal.stop(now + 0.28);
+}
+
+// ══════════════════════════════════════════════════
+// 图书馆室外暴雨 — 持续风雨 + 稀疏雷声
+// ══════════════════════════════════════════════════
+let stormSources: AudioBufferSourceNode[] = [];
+let stormMaster: GainNode | null = null;
+
+function createLoopingNoiseBuffer(audioCtx: AudioContext, seconds: number, brown: boolean): AudioBuffer {
+  const buffer = audioCtx.createBuffer(1, Math.floor(audioCtx.sampleRate * seconds), audioCtx.sampleRate);
+  const data = buffer.getChannelData(0);
+  let last = 0;
+  for (let index = 0; index < data.length; index++) {
+    const white = Math.random() * 2 - 1;
+    last = brown ? (last + 0.018 * white) / 1.018 : white;
+    data[index] = brown ? last * 3.2 : white;
+  }
+  return buffer;
+}
+
+/** Start a restrained exterior-only wind/rain bed. Idempotent. */
+export function startLibraryStorm(): void {
+  if (stormMaster) return;
+  const audioCtx = getCtx();
+  const now = audioCtx.currentTime;
+  stormMaster = audioCtx.createGain();
+  stormMaster.gain.setValueAtTime(0.001, now);
+  stormMaster.gain.linearRampToValueAtTime(0.18, now + 1.4);
+  stormMaster.connect(audioCtx.destination);
+
+  const rain = audioCtx.createBufferSource();
+  rain.buffer = createLoopingNoiseBuffer(audioCtx, 3.7, false);
+  rain.loop = true;
+  const rainHigh = audioCtx.createBiquadFilter();
+  rainHigh.type = "highpass";
+  rainHigh.frequency.value = 950;
+  const rainLow = audioCtx.createBiquadFilter();
+  rainLow.type = "lowpass";
+  rainLow.frequency.value = 5200;
+  const rainGain = audioCtx.createGain();
+  rainGain.gain.value = 0.28;
+  rain.connect(rainHigh).connect(rainLow).connect(rainGain).connect(stormMaster);
+
+  const wind = audioCtx.createBufferSource();
+  wind.buffer = createLoopingNoiseBuffer(audioCtx, 4.9, true);
+  wind.loop = true;
+  const windBand = audioCtx.createBiquadFilter();
+  windBand.type = "bandpass";
+  windBand.frequency.value = 185;
+  windBand.Q.value = 0.42;
+  const windGain = audioCtx.createGain();
+  windGain.gain.value = 0.52;
+  wind.connect(windBand).connect(windGain).connect(stormMaster);
+
+  rain.start(now);
+  wind.start(now);
+  stormSources = [rain, wind];
+}
+
+export function stopLibraryStorm(): void {
+  if (!stormMaster) return;
+  const audioCtx = getCtx();
+  const master = stormMaster;
+  const sources = stormSources;
+  stormMaster = null;
+  stormSources = [];
+  master.gain.cancelScheduledValues(audioCtx.currentTime);
+  master.gain.setValueAtTime(Math.max(0.001, master.gain.value), audioCtx.currentTime);
+  master.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.55);
+  window.setTimeout(() => {
+    for (const source of sources) {
+      try { source.stop(); } catch { /* source may already have ended */ }
+    }
+    master.disconnect();
+  }, 620);
+}
+
+/** A delayed rolling thunder crack, paired with the full-screen lightning pulse. */
+export function playLibraryThunder(delaySeconds = 0.22): void {
+  const audioCtx = getCtx();
+  const now = audioCtx.currentTime + Math.max(0, delaySeconds);
+  const compressor = audioCtx.createDynamicsCompressor();
+  compressor.threshold.value = -16;
+  compressor.ratio.value = 7;
+  compressor.connect(audioCtx.destination);
+
+  const rumble = audioCtx.createBufferSource();
+  rumble.buffer = createLoopingNoiseBuffer(audioCtx, 2.6, true);
+  const lowpass = audioCtx.createBiquadFilter();
+  lowpass.type = "lowpass";
+  lowpass.frequency.setValueAtTime(520, now);
+  lowpass.frequency.exponentialRampToValueAtTime(70, now + 2.4);
+  const gain = audioCtx.createGain();
+  gain.gain.setValueAtTime(0.001, now);
+  gain.gain.linearRampToValueAtTime(0.42, now + 0.035);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 2.5);
+  rumble.connect(lowpass).connect(gain).connect(compressor);
+  rumble.start(now);
+  rumble.stop(now + 2.6);
+}
+
 // ══════════════════════════════════════════════════
 // 鬼接近呼吸/低吼
 // ══════════════════════════════════════════════════
@@ -328,6 +481,7 @@ export function unlockProcedural() {
 export function resetProcedural() {
   stopHeartbeat();
   stopGhostBreath();
+  stopLibraryStorm();
   lastFootstepTime = 0;
   lastTextAppear = 0;
 }

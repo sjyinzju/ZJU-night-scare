@@ -18,6 +18,16 @@ export interface InteriorOverlayProps {
 }
 
 const JOYSTICK_RADIUS = 56;
+const LIBRARY_STEPS = ["寻找手电筒", "笔记本", "借阅小票", "书架异响", "灯下的人", "离开图书馆"];
+
+function libraryProgressIndex(sceneId: string, inventory: string[]): number {
+  if (sceneId === "library_intro") return inventory.includes("flashlight") ? 1 : 0;
+  if (sceneId === "library_receipt" || sceneId === "library_talisman") return 2;
+  if (sceneId === "library_shelf") return 3;
+  if (sceneId === "library_fall") return 4;
+  if (sceneId === "dorm_baiqiu") return 5;
+  return 0;
+}
 
 /**
  * Full-screen overlay hosting a first-person interior exploration scene.
@@ -35,6 +45,7 @@ export default function InteriorOverlay({
   onAssetStateChange,
 }: InteriorOverlayProps): React.ReactElement {
   const hostRef = useRef<HTMLDivElement>(null);
+  const floorPlanRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Interior3D | null>(null);
   const currentSceneIdRef = useRef(currentSceneId);
   const inventoryRef = useRef(inventory);
@@ -50,6 +61,11 @@ export default function InteriorOverlay({
   const [doorHint, setDoorHint] = useState("");
   const [doorMessage, setDoorMessage] = useState<string | null>(null);
   const doorMessageTimer = useRef<number | null>(null);
+  const [debugMessage, setDebugMessage] = useState("");
+  const [lightningFlash, setLightningFlash] = useState(false);
+  const lightningTimer = useRef<number | null>(null);
+  const scene01Debug = building.id === "medical-library"
+    && new URLSearchParams(window.location.search).get("debugScene01") === "1";
 
   // Joystick state.
   const joyRef = useRef<HTMLDivElement>(null);
@@ -147,7 +163,27 @@ export default function InteriorOverlay({
   useEffect(() => () => {
     if (toastTimer.current !== null) window.clearTimeout(toastTimer.current);
     if (doorMessageTimer.current !== null) window.clearTimeout(doorMessageTimer.current);
+    if (lightningTimer.current !== null) window.clearTimeout(lightningTimer.current);
   }, []);
+
+  useEffect(() => {
+    if (building.id !== "medical-library") return;
+    const handleLightning = (event: Event): void => {
+      const active = (event as CustomEvent<{ active?: boolean }>).detail?.active;
+      if (!active) {
+        setLightningFlash(false);
+        return;
+      }
+      setLightningFlash(true);
+      if (lightningTimer.current !== null) window.clearTimeout(lightningTimer.current);
+      lightningTimer.current = window.setTimeout(() => {
+        lightningTimer.current = null;
+        setLightningFlash(false);
+      }, 190);
+    };
+    window.addEventListener("zju-horror-library-lightning", handleLightning);
+    return () => window.removeEventListener("zju-horror-library-lightning", handleLightning);
+  }, [building.id]);
 
   useEffect(() => {
     const refreshDoorHint = (): void => {
@@ -167,6 +203,126 @@ export default function InteriorOverlay({
       window.removeEventListener("zju-horror-door-message", showDoorMessage);
     };
   }, []);
+
+  useEffect(() => {
+    if (building.id !== "medical-library") return;
+    let frame = 0;
+    let lastDraw = 0;
+    const draw = (time: number): void => {
+      frame = window.requestAnimationFrame(draw);
+      if (time - lastDraw < 80) return;
+      lastDraw = time;
+      const canvas = floorPlanRef.current;
+      const snapshot = engineRef.current?.getInteriorMapSnapshot();
+      if (!canvas) return;
+      const width = 154;
+      const height = 250;
+      const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+      if (canvas.width !== width * pixelRatio || canvas.height !== height * pixelRatio) {
+        canvas.width = width * pixelRatio;
+        canvas.height = height * pixelRatio;
+      }
+      const context = canvas.getContext("2d");
+      if (!context) return;
+      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+      context.clearRect(0, 0, width, height);
+      if (!snapshot) return;
+
+      const pad = 8;
+      const spanX = snapshot.bounds.maxX - snapshot.bounds.minX;
+      const spanZ = snapshot.bounds.maxZ - snapshot.bounds.minZ;
+      const scale = Math.min((width - pad * 2) / spanX, (height - pad * 2) / spanZ);
+      const mapWidth = spanX * scale;
+      const mapHeight = spanZ * scale;
+      const offsetX = (width - mapWidth) / 2;
+      const offsetY = (height - mapHeight) / 2;
+      const mapX = (x: number) => offsetX + (x - snapshot.bounds.minX) * scale;
+      const mapY = (z: number) => offsetY + (snapshot.bounds.maxZ - z) * scale;
+
+      context.fillStyle = "rgba(4, 7, 10, 0.82)";
+      context.fillRect(offsetX, offsetY, mapWidth, mapHeight);
+      for (const obstacle of snapshot.obstacles) {
+        context.fillStyle = obstacle.kind === "wall"
+          ? "rgba(210, 220, 224, 0.86)"
+          : obstacle.kind === "shelf"
+            ? "rgba(166, 139, 90, 0.9)"
+            : "rgba(111, 125, 128, 0.48)";
+        context.fillRect(
+          mapX(obstacle.minX),
+          mapY(obstacle.maxZ),
+          Math.max(1, (obstacle.maxX - obstacle.minX) * scale),
+          Math.max(1, (obstacle.maxZ - obstacle.minZ) * scale),
+        );
+      }
+      context.strokeStyle = "rgba(215, 225, 228, 0.65)";
+      context.lineWidth = 1;
+      context.strokeRect(offsetX + 0.5, offsetY + 0.5, mapWidth - 1, mapHeight - 1);
+
+      if (snapshot.exitSegment) {
+        context.beginPath();
+        context.moveTo(mapX(snapshot.exitSegment.minX), mapY(snapshot.exitSegment.z));
+        context.lineTo(mapX(snapshot.exitSegment.maxX), mapY(snapshot.exitSegment.z));
+        context.strokeStyle = "#f01824";
+        context.shadowColor = "rgba(240,24,36,0.95)";
+        context.shadowBlur = 8;
+        context.lineWidth = 3;
+        context.stroke();
+        context.shadowBlur = 0;
+      }
+
+      if (snapshot.objective) {
+        const objectiveX = mapX(snapshot.objective.x);
+        const objectiveY = mapY(snapshot.objective.z);
+        context.beginPath();
+        context.arc(objectiveX, objectiveY, 3.7, 0, Math.PI * 2);
+        context.fillStyle = "#ed111f";
+        context.shadowColor = "rgba(255,17,31,1)";
+        context.shadowBlur = 10;
+        context.fill();
+        context.shadowBlur = 0;
+      }
+
+      if (snapshot.fallenPerson) {
+        const bodyX = mapX(snapshot.fallenPerson.x);
+        const bodyY = mapY(snapshot.fallenPerson.z);
+        context.save();
+        context.translate(bodyX, bodyY);
+        context.rotate(-0.72);
+        context.strokeStyle = "#f4f4f1";
+        context.fillStyle = "#f4f4f1";
+        context.shadowColor = "rgba(255,255,255,0.95)";
+        context.shadowBlur = 7;
+        context.lineWidth = 2.2;
+        context.beginPath();
+        context.arc(-4.8, 0, 2.5, 0, Math.PI * 2);
+        context.fill();
+        context.beginPath();
+        context.moveTo(-1.8, 0);
+        context.lineTo(5.2, 0);
+        context.lineTo(9.2, 3.8);
+        context.moveTo(2.2, 0);
+        context.lineTo(5.8, -4.1);
+        context.stroke();
+        context.restore();
+      }
+
+      const playerX = mapX(snapshot.player.x);
+      const playerY = mapY(snapshot.player.z);
+      context.beginPath();
+      context.arc(playerX, playerY, 4.5, 0, Math.PI * 2);
+      context.fillStyle = "rgba(255, 255, 255, 0.2)";
+      context.fill();
+      context.beginPath();
+      context.arc(playerX, playerY, 2.25, 0, Math.PI * 2);
+      context.fillStyle = "#ffffff";
+      context.shadowColor = "rgba(255,255,255,0.95)";
+      context.shadowBlur = 6;
+      context.fill();
+      context.shadowBlur = 0;
+    };
+    frame = window.requestAnimationFrame(draw);
+    return () => window.cancelAnimationFrame(frame);
+  }, [building.id]);
 
   const handleExit = useCallback(() => {
     if (!canExit) return;
@@ -290,6 +446,10 @@ export default function InteriorOverlay({
       {/* 氛围叠层：暗角 + 轻微冷调，与外层地图的恐怖质感统一。 */}
       <div style={styles.vignette} aria-hidden="true" />
       <div style={styles.scanline} aria-hidden="true" />
+      <div
+        aria-hidden="true"
+        style={{ ...styles.lightningFlash, opacity: lightningFlash ? 0.78 : 0 }}
+      />
 
       {/* Mobile look surface covers the right half of the screen. */}
       {isMobile && (
@@ -303,16 +463,85 @@ export default function InteriorOverlay({
       )}
 
       {/* Top-right: leave the building. */}
-      <button
-        style={{ ...styles.exitBtn, ...(canExit ? undefined : styles.exitBtnDisabled) }}
-        onClick={handleExit}
-        disabled={!canExit}
-      >
-        {canExit ? "离开建筑" : "跟随红色指引"}
-      </button>
+      {building.id === "medical-library" && (
+        <div style={styles.floorPlan} aria-label="医学院图书馆平面图">
+          <div style={styles.floorPlanTitle}>
+            <strong>医学院图书馆</strong>
+            <span>平面图</span>
+          </div>
+          <canvas ref={floorPlanRef} style={styles.floorPlanCanvas} />
+          <div style={styles.floorPlanLegend}>
+            <span><i style={{ ...styles.legendSwatch, background: "#d2dce0" }} />墙体</span>
+            <span><i style={{ ...styles.legendSwatch, background: "#a68b5a" }} />书架</span>
+            <span><i style={styles.legendDot} />你</span>
+          </div>
+        </div>
+      )}
+      {building.id === "medical-library" && (
+        <>
+          <aside style={styles.inventoryRail} aria-label="场景道具栏">
+            <strong style={styles.sideRailTitle}>道具</strong>
+            {([
+              ["flashlight", "手电筒", "光"],
+              ["receipt", "借阅小票", "票"],
+              ["talisman", "符咒", "符"],
+            ] as const).map(([id, label, icon]) => {
+              const owned = inventory.includes(id);
+              return (
+                <div key={id} style={{ ...styles.inventorySlot, ...(owned ? styles.inventorySlotOwned : undefined) }}>
+                  <i style={styles.inventoryIcon}>{owned ? icon : "·"}</i>
+                  <span>{label}</span>
+                </div>
+              );
+            })}
+          </aside>
+          <aside style={styles.storyChain} aria-label="剧情链">
+            <strong style={styles.sideRailTitle}>剧情链</strong>
+            {LIBRARY_STEPS.map((label, index) => {
+              const progress = libraryProgressIndex(currentSceneId, inventory);
+              const complete = index < progress;
+              const active = index === progress;
+              return (
+                <div
+                  key={label}
+                  style={{
+                    ...styles.storyStep,
+                    ...(complete ? styles.storyStepComplete : undefined),
+                    ...(active ? styles.storyStepActive : undefined),
+                  }}
+                >
+                  <i style={styles.storyStepDot} />
+                  <span>{label}</span>
+                </div>
+              );
+            })}
+          </aside>
+        </>
+      )}
+      {building.id !== "medical-library" && (
+        <button
+          style={{ ...styles.exitBtn, ...(canExit ? undefined : styles.exitBtnDisabled) }}
+          onClick={handleExit}
+          disabled={!canExit}
+        >
+          {canExit ? "离开建筑" : "寻找出口"}
+        </button>
+      )}
+
+      {scene01Debug && (
+        <button
+          type="button"
+          style={styles.debugTargetButton}
+          aria-label="调试前往当前目标"
+          onClick={() => setDebugMessage(engineRef.current?.debugTeleportToActiveTarget() ?? "场景仍在加载")}
+        >
+          调试：前往当前目标
+          {debugMessage && <small style={styles.debugTargetMessage}>{debugMessage}</small>}
+        </button>
+      )}
 
       {/* Building label. */}
-      <div style={styles.title}>{building.name}</div>
+      <div style={styles.title}>{building.id === "medical-library" ? "医学院图书馆" : building.name}</div>
 
       {/* Pickup toast. */}
       {pickupToast && (
@@ -427,17 +656,188 @@ const styles: Record<string, CSSProperties> = {
     cursor: "not-allowed",
     opacity: 0.52,
   },
+  lightningFlash: {
+    position: "absolute",
+    inset: 0,
+    zIndex: 4,
+    pointerEvents: "none",
+    background: "rgba(236, 244, 255, 0.94)",
+    mixBlendMode: "screen",
+    transition: "opacity 32ms linear",
+  },
+  exitBtnBelowMap: {
+    top: 344,
+  },
+  floorPlan: {
+    position: "absolute",
+    top: 14,
+    right: 14,
+    zIndex: 5,
+    width: 178,
+    height: 312,
+    boxSizing: "border-box",
+    padding: "10px 11px 9px",
+    border: "1px solid rgba(196, 207, 210, 0.38)",
+    borderRadius: 10,
+    background: "rgba(5, 8, 11, 0.78)",
+    boxShadow: "0 12px 30px rgba(0,0,0,0.48)",
+    backdropFilter: "blur(7px)",
+    pointerEvents: "none",
+  },
+  floorPlanTitle: {
+    height: 25,
+    display: "flex",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    color: "#d8ddd9",
+    letterSpacing: "0.08em",
+    fontSize: 11,
+  },
+  floorPlanCanvas: {
+    display: "block",
+    width: 154,
+    height: 250,
+  },
+  floorPlanLegend: {
+    height: 17,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    color: "rgba(200, 207, 207, 0.72)",
+    fontSize: 9,
+  },
+  inventoryRail: {
+    position: "absolute",
+    top: 92,
+    left: 20,
+    zIndex: 5,
+    width: 138,
+    display: "grid",
+    gap: 7,
+    padding: "13px 12px",
+    border: "1px solid rgba(182, 24, 33, 0.32)",
+    background: "linear-gradient(180deg, rgba(8,7,9,0.82), rgba(8,6,8,0.58))",
+    boxShadow: "0 14px 34px rgba(0,0,0,0.45)",
+    backdropFilter: "blur(7px)",
+  },
+  sideRailTitle: {
+    display: "block",
+    marginBottom: 4,
+    color: "rgba(221, 197, 158, 0.78)",
+    fontSize: 11,
+    fontWeight: 600,
+    letterSpacing: "0.22em",
+  },
+  inventorySlot: {
+    display: "grid",
+    gridTemplateColumns: "26px 1fr",
+    alignItems: "center",
+    minHeight: 34,
+    color: "rgba(156, 148, 142, 0.35)",
+    fontSize: 11,
+    letterSpacing: "0.05em",
+  },
+  inventorySlotOwned: {
+    color: "rgba(238, 221, 197, 0.9)",
+  },
+  inventoryIcon: {
+    display: "grid",
+    placeItems: "center",
+    width: 22,
+    height: 22,
+    border: "1px solid currentColor",
+    color: "inherit",
+    fontSize: 11,
+    fontStyle: "normal",
+    boxShadow: "0 0 12px rgba(179, 19, 30, 0.16)",
+  },
+  storyChain: {
+    position: "absolute",
+    top: 344,
+    right: 14,
+    zIndex: 5,
+    width: 178,
+    boxSizing: "border-box",
+    display: "grid",
+    gap: 0,
+    padding: "12px 13px 13px",
+    border: "1px solid rgba(196, 207, 210, 0.26)",
+    background: "rgba(5, 8, 11, 0.78)",
+    boxShadow: "0 12px 30px rgba(0,0,0,0.48)",
+    backdropFilter: "blur(7px)",
+  },
+  storyStep: {
+    position: "relative",
+    display: "grid",
+    gridTemplateColumns: "14px 1fr",
+    alignItems: "center",
+    minHeight: 30,
+    color: "rgba(163, 164, 161, 0.3)",
+    fontSize: 10.5,
+    letterSpacing: "0.05em",
+  },
+  storyStepComplete: {
+    color: "rgba(183, 157, 124, 0.62)",
+  },
+  storyStepActive: {
+    color: "#f0d8b4",
+    textShadow: "0 0 11px rgba(213, 20, 31, 0.62)",
+  },
+  storyStepDot: {
+    display: "block",
+    width: 5,
+    height: 5,
+    borderRadius: "50%",
+    background: "currentColor",
+    boxShadow: "0 0 7px currentColor",
+  },
+  legendSwatch: {
+    display: "inline-block",
+    width: 7,
+    height: 7,
+    marginRight: 3,
+  },
+  legendDot: {
+    display: "inline-block",
+    width: 6,
+    height: 6,
+    marginRight: 3,
+    borderRadius: "50%",
+    background: "#fff",
+    boxShadow: "0 0 5px #fff",
+  },
   title: {
     position: "absolute",
     top: 20,
     left: 22,
     zIndex: 5,
     color: "#d7b776",
-    fontSize: 15,
-    fontWeight: 600,
-    letterSpacing: "0.28em",
+    fontSize: 20,
+    fontWeight: 700,
+    letterSpacing: "0.18em",
     textShadow: "0 0 10px rgba(0,0,0,0.95)",
     pointerEvents: "none",
+  },
+  debugTargetButton: {
+    position: "absolute",
+    left: 20,
+    bottom: 56,
+    zIndex: 9,
+    display: "grid",
+    gap: 3,
+    minWidth: 150,
+    padding: "8px 10px",
+    border: "1px solid rgba(230, 45, 56, 0.7)",
+    borderRadius: 0,
+    background: "rgba(24, 5, 8, 0.9)",
+    color: "#f2c3aa",
+    fontFamily: FONT_STACK,
+    fontSize: 11,
+    cursor: "pointer",
+  },
+  debugTargetMessage: {
+    color: "rgba(240, 194, 166, 0.66)",
+    fontSize: 9,
   },
   hint: {
     position: "absolute",

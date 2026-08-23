@@ -591,8 +591,7 @@ button {
 }
 
 .gameBrand,
-.railSection,
-.storyModal {
+.railSection {
   border: 1px solid var(--line);
   background: var(--panel);
   box-shadow: 0 20px 72px rgba(0, 0, 0, 0.34);
@@ -1238,14 +1237,108 @@ button {
 }
 
 /* ── 惊吓闪屏动画增强 ── */
+.interiorScareLayer {
+  position: fixed;
+  inset: 0;
+  z-index: 4200;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.exitBlackout {
+  position: fixed;
+  inset: 0;
+  z-index: 6100;
+  pointer-events: none;
+  background: #000;
+  opacity: 0;
+  transition: opacity 0.34s ease;
+}
+
+.exitBlackout.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .jumpscareOverlay,
 .jumpscareFace,
+.jumpscareSprite,
+.bloodDripOverlay,
 .jumpscareText {
   pointer-events: none;
   position: absolute;
   inset: 0;
   z-index: 3000;
   opacity: 0;
+}
+
+.jumpscareSprite {
+  z-index: 3001;
+  inset: 50% auto auto 50%;
+  width: min(82vw, 920px);
+  height: min(92vh, 920px);
+  object-fit: contain;
+  transform: translate(-50%, -50%) scale(0.18);
+  filter: contrast(1.18) saturate(0.78) drop-shadow(0 0 40px rgba(177, 0, 12, 0.7));
+}
+
+.jumpscareSprite.active {
+  animation: libraryGhostLunge 1.16s cubic-bezier(0.12, 0.8, 0.2, 1) forwards;
+}
+
+.jumpscareSprite--library-fall.active {
+  animation-name: libraryFallGhostLunge;
+}
+
+@keyframes libraryGhostLunge {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.12) rotate(-4deg); filter: blur(8px) contrast(1); }
+  10% { opacity: 1; transform: translate(calc(-50% - 18px), calc(-50% + 5px)) scale(1.05) rotate(-1deg); filter: blur(0) contrast(1.55) saturate(0.72); }
+  22% { transform: translate(calc(-50% + 17px), calc(-50% - 9px)) scale(1.28) rotate(1.2deg); }
+  42% { opacity: 0.95; transform: translate(calc(-50% - 11px), calc(-50% + 4px)) scale(1.5) rotate(-0.8deg); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.9); filter: blur(4px) contrast(1.8); }
+}
+
+@keyframes libraryFallGhostLunge {
+  0% { opacity: 0; transform: translate(-68%, -57%) scale(0.14) rotate(-9deg); filter: blur(9px) contrast(1); }
+  11% { opacity: 1; transform: translate(-51%, -50%) scale(1.12) rotate(2deg); filter: blur(0) contrast(1.65) saturate(0.7); }
+  25% { transform: translate(calc(-50% + 23px), calc(-50% - 5px)) scale(1.34) rotate(-1.5deg); }
+  48% { opacity: 0.9; transform: translate(calc(-50% - 16px), calc(-50% + 8px)) scale(1.57) rotate(1deg); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(2.02); filter: blur(5px) contrast(1.9); }
+}
+
+.bloodDripOverlay {
+  z-index: 3003;
+  overflow: hidden;
+}
+
+.bloodDripOverlay i {
+  position: absolute;
+  top: -25vh;
+  width: clamp(18px, 2vw, 38px);
+  height: 38vh;
+  border-radius: 0 0 55% 48%;
+  background: linear-gradient(180deg, rgba(98, 0, 5, 0.96), rgba(202, 6, 17, 0.8) 72%, rgba(74, 0, 3, 0.1));
+  box-shadow: 0 0 14px rgba(170, 0, 10, 0.58);
+  transform: translateY(-45vh) scaleY(0.4);
+}
+
+.bloodDripOverlay i:nth-child(1) { left: 7%; height: 46vh; }
+.bloodDripOverlay i:nth-child(2) { left: 28%; width: 22px; height: 31vh; }
+.bloodDripOverlay i:nth-child(3) { left: 51%; width: 46px; height: 42vh; }
+.bloodDripOverlay i:nth-child(4) { left: 73%; width: 17px; height: 35vh; }
+.bloodDripOverlay i:nth-child(5) { left: 91%; width: 32px; height: 48vh; }
+.bloodDripOverlay.active { opacity: 1; }
+.bloodDripOverlay.active i { animation: bloodRunDown 1.18s cubic-bezier(0.12, 0.72, 0.2, 1) forwards; }
+.bloodDripOverlay.active i:nth-child(2) { animation-delay: 55ms; }
+.bloodDripOverlay.active i:nth-child(3) { animation-delay: 18ms; }
+.bloodDripOverlay.active i:nth-child(4) { animation-delay: 92ms; }
+.bloodDripOverlay.active i:nth-child(5) { animation-delay: 35ms; }
+
+@keyframes bloodRunDown {
+  0% { transform: translateY(-45vh) scaleY(0.35); opacity: 0; }
+  14% { opacity: 0.92; }
+  72% { transform: translateY(22vh) scaleY(1.15); opacity: 0.75; }
+  100% { transform: translateY(56vh) scaleY(1.45); opacity: 0; }
 }
 
 .jumpscareFace {
@@ -1387,18 +1480,63 @@ button {
   text-shadow: 0 0 20px rgba(200,200,200,0.5);
 }
 
+.storyGlassBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 39;
+  background: rgba(7, 5, 7, 0.48);
+  backdrop-filter: blur(9px) saturate(0.72) brightness(0.62);
+  animation: glassVeilIn 360ms ease-out both;
+}
+
+.storyGlassBackdrop.strong {
+  background: rgba(5, 3, 5, 0.62);
+  backdrop-filter: blur(19px) saturate(0.42) brightness(0.46);
+}
+
+.storyGlassBackdrop.closing {
+  animation: storyVeilDissolve 500ms ease-in forwards;
+}
+
 .storyModal {
-  position: absolute;
+  position: fixed;
   left: 50%;
   top: 52%;
   z-index: 40;
-  width: min(880px, calc(100vw - 340px));
-  max-height: min(82vh, 780px);
+  width: min(980px, calc(100vw - 80px));
+  max-height: min(88vh, 840px);
   overflow: auto;
   transform: translate(-50%, -50%);
-  padding: 28px 32px;
-  border-radius: 8px;
+  padding: 24px 42px 30px;
+  border-radius: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  scrollbar-color: rgba(138, 20, 27, 0.46) transparent;
+  scrollbar-width: thin;
   animation: storyIn 220ms ease-out;
+}
+
+.storyModal.closing {
+  pointer-events: none;
+  animation: storyInkDissolve 520ms ease-in forwards;
+}
+
+@keyframes glassVeilIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes storyVeilDissolve {
+  to { opacity: 0; backdrop-filter: blur(2px) brightness(0.8); }
+}
+
+@keyframes storyInkDissolve {
+  0% { opacity: 1; filter: blur(0); transform: translate(-50%, -50%); }
+  45% { opacity: 0.68; filter: blur(1px) contrast(1.35); transform: translate(-50%, -50%) skewX(-0.4deg); }
+  100% { opacity: 0; filter: blur(14px) contrast(2); transform: translate(-50%, -48%) scale(1.025); }
 }
 
 @keyframes storyIn {
@@ -1415,25 +1553,24 @@ button {
 }
 
 .storyModal::before {
-  content: "";
-  pointer-events: none;
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background:
-    radial-gradient(circle at 12% 0%, rgba(227, 92, 77, 0.18), transparent 28%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 38%);
+  display: none;
 }
 
 .storyKicker {
   position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   gap: 10px;
   color: var(--gold);
   font-size: 12px;
   letter-spacing: 0.08em;
+}
+
+.storyKicker span::after {
+  content: " / ";
+  margin-left: 10px;
+  color: rgba(161, 43, 48, 0.72);
 }
 
 .storyKicker b {
@@ -1443,45 +1580,39 @@ button {
 
 .storyModal h1 {
   position: relative;
-  margin: 10px 0 14px;
+  margin: 12px 0 22px;
   color: #fff2df;
-  font-size: 28px;
+  font-size: clamp(27px, 3.1vw, 40px);
   line-height: 1.25;
   letter-spacing: 0;
+  text-align: center;
+  text-shadow: 0 0 30px rgba(137, 9, 16, 0.26);
 }
 
 .storyText {
   position: relative;
   display: grid;
-  gap: 12px;
+  gap: 10px;
+  max-width: 900px;
+  margin: 0 auto;
 }
 
 .storyText p {
   margin: 0;
   color: #eadcc9;
-  font-size: 16px;
-  line-height: 1.85;
-  animation: storyTextFade 0.5s ease-out both;
-}
-
-.storyText p:nth-child(2) {
-  animation-delay: 70ms;
-}
-
-.storyText p:nth-child(3) {
-  animation-delay: 140ms;
-}
-
-.storyText p:nth-child(4) {
-  animation-delay: 210ms;
-}
-
-.storyText p:nth-child(5) {
-  animation-delay: 280ms;
-}
-
-.storyText p:nth-child(6) {
-  animation-delay: 350ms;
+  font-size: clamp(15px, 1.38vw, 17px);
+  line-height: 1.78;
+  padding-left: 0;
+  font-family: "STKaiti", "KaiTi", "Microsoft YaHei", serif;
+  letter-spacing: 0.035em;
+  text-align: left;
+  text-indent: 2em;
+  text-wrap: pretty;
+  opacity: 0;
+  text-shadow: 0 0 13px rgba(133, 21, 24, 0.22);
+  animation:
+    storyTextFade 0.72s cubic-bezier(0.22, 1, 0.36, 1) var(--story-line-delay, 0ms) both,
+    launchTextFlicker 3.2s steps(1, end) calc(var(--story-line-delay, 0ms) + 0.9s) infinite;
 }
 
 @keyframes storyTextFade {
@@ -1497,16 +1628,18 @@ button {
 
 .storyText p.tense {
   margin: 4px 0;
-  padding-left: 14px;
-  border-left: 2px solid var(--red-hot);
+  padding: 0;
+  border: 0;
   color: #d8caba;
   font-style: italic;
+  text-indent: 2em;
 }
 
 .storyText p.shock {
   color: var(--red-hot);
   font-weight: 700;
   text-align: center;
+  text-indent: 0;
   text-shadow: 0 0 24px rgba(227, 92, 77, 0.26);
   animation:
     storyTextFade 0.5s ease-out both,
@@ -1526,8 +1659,9 @@ button {
 .choiceList {
   position: relative;
   display: grid;
-  gap: 9px;
-  margin-top: 16px;
+  gap: 0;
+  max-width: 880px;
+  margin: 20px auto 0;
 }
 
 .choiceButton {
@@ -1536,25 +1670,34 @@ button {
   grid-template-columns: 1fr auto;
   align-items: center;
   gap: 12px;
-  min-height: 54px;
-  padding: 14px 16px;
-  border: 1px solid rgba(215, 183, 118, 0.28);
-  border-radius: 8px;
-  background: rgba(15, 11, 11, 0.84);
+  min-height: 50px;
+  padding: 12px 8px;
+  border: 0;
+  border-top: 1px solid rgba(215, 183, 118, 0.17);
+  border-radius: 0;
+  background: transparent;
   color: #f0dfca;
   font-size: 15px;
   cursor: pointer;
   text-align: left;
   transition:
     border-color 160ms ease,
-    background 160ms ease,
+    color 160ms ease,
     transform 160ms ease;
+  opacity: 0;
+  animation: storyTextFade 360ms ease-out both;
+  animation-delay: calc(var(--choice-list-delay, 0ms) + var(--choice-delay, 0ms));
+}
+
+.choiceButton:last-child {
+  border-bottom: 1px solid rgba(215, 183, 118, 0.12);
 }
 
 .choiceButton:hover:not(:disabled) {
-  transform: translateY(-1px);
-  border-color: rgba(227, 92, 77, 0.7);
-  background: rgba(78, 22, 20, 0.72);
+  transform: translateX(3px);
+  border-color: rgba(227, 92, 77, 0.62);
+  color: #fff1de;
+  background: linear-gradient(90deg, rgba(104, 8, 14, 0.16), transparent 72%);
   padding-left: 28px;
 }
 
@@ -1587,6 +1730,104 @@ button {
 .choiceButton.locked {
   cursor: not-allowed;
   opacity: 0.42;
+}
+
+.choiceButton.selected {
+  opacity: 1;
+  color: #fff0dc;
+  border-color: rgba(215, 19, 30, 0.64);
+  background: linear-gradient(90deg, rgba(83, 0, 6, 0.24), transparent 78%);
+  box-shadow: none;
+  animation: selectedBloodPulse 620ms ease-out forwards;
+}
+
+.choiceButton.selected::after {
+  content: "";
+  position: absolute;
+  inset: 7px 10% 6px 15%;
+  background:
+    radial-gradient(circle at 13% 40%, rgba(232, 17, 29, 0.76) 0 5%, transparent 7%),
+    radial-gradient(ellipse at 46% 58%, rgba(135, 0, 8, 0.82) 0 12%, transparent 26%),
+    linear-gradient(96deg, transparent 0 8%, rgba(129, 0, 8, 0.7) 11% 44%, transparent 52%);
+  mix-blend-mode: screen;
+  opacity: 0;
+  animation: bloodStainAppear 420ms ease-out forwards;
+  pointer-events: none;
+}
+
+@keyframes selectedBloodPulse {
+  0% { transform: translateX(0); }
+  18% { transform: translateX(-2px); }
+  35% { transform: translateX(2px); }
+  100% { transform: translateX(0); }
+}
+
+@keyframes bloodStainAppear {
+  from { opacity: 0; transform: scaleX(0.12); filter: blur(5px); }
+  to { opacity: 0.9; transform: scaleX(1); filter: blur(0); }
+}
+
+.documentReading {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 6vh 8vw;
+  background: rgba(5, 4, 6, 0.64);
+  backdrop-filter: blur(18px) saturate(0.48) brightness(0.46);
+  cursor: pointer;
+  animation: glassVeilIn 320ms ease-out both;
+}
+
+.documentReading__paper {
+  width: min(760px, 86vw);
+  padding: 30px 24px;
+  border: 0;
+  background: transparent;
+  color: #e6d9c6;
+  font-family: "Noto Serif SC", "Songti SC", SimSun, serif;
+  text-shadow: 0 1px 8px rgba(0,0,0,0.9);
+  text-align: center;
+}
+
+.documentReading__paper > span {
+  color: rgba(197, 163, 116, 0.62);
+  font-size: 11px;
+  letter-spacing: 0.2em;
+}
+
+.documentReading__paper h1 {
+  margin: 14px 0 24px;
+  color: #f0e5d3;
+  font-size: clamp(22px, 3vw, 34px);
+  font-weight: 500;
+  letter-spacing: 0.12em;
+}
+
+.documentReading__paper p {
+  margin: 0;
+  padding: 8px 0;
+  border: 0;
+  font-size: 16px;
+  letter-spacing: 0.1em;
+  line-height: 1.7;
+  opacity: 0;
+  animation: storyTextFade 480ms ease-out forwards;
+  animation-delay: var(--document-line-delay, 0ms);
+}
+
+.documentReading__paper p:nth-of-type(5),
+.documentReading__paper p:nth-of-type(6),
+.documentReading__paper p:nth-of-type(7) { color: #d44a4f; }
+.documentReading__paper em {
+  display: block;
+  margin-top: 24px;
+  color: rgba(196, 173, 143, 0.5);
+  font-size: 11px;
+  font-style: normal;
+  letter-spacing: 0.16em;
+  text-align: center;
 }
 
 .choiceButton.primary {
