@@ -803,7 +803,7 @@ function App() {
       setLaunchMode(null);
       setLaunchAssetState("loading");
       setStoryState(() => createBaishaDevelopmentStoryState());
-      startSession({ id: "medical-library", name: "农医馆", zone: "story" });
+      startSession({ id: "medical-library", name: "医学院图书馆", zone: "story" });
       closeInterior();
       setPlayerIso({ ...BAISHA_DEVELOPMENT_PLAYER });
       setPhaserReady(true);
@@ -815,7 +815,7 @@ function App() {
     setLaunchMode(scene01Debug ? null : "intro");
     // 使用 storyEngine 统一解析起始建筑（始终从第一个热点开始）
     const startBuilding = resolveGameStartBuilding();
-    startSession(startBuilding ?? { id: "medical-library", name: "农医馆", zone: "story" });
+    startSession(startBuilding ?? { id: "medical-library", name: "医学院图书馆", zone: "story" });
   }, [closeInterior, scene01Debug, setPlayerIso, setStoryState, startSession]);
 
   const restartGame = useCallback(() => {
@@ -827,7 +827,7 @@ function App() {
     setPhaserReady(false);
     setLaunchMode("restart");
     const startBuilding = resolveGameStartBuilding();
-    startSession(startBuilding ?? { id: "medical-library", name: "农医馆", zone: "story" });
+    startSession(startBuilding ?? { id: "medical-library", name: "医学院图书馆", zone: "story" });
     miniMapSnapshotRef.current = { player: { x: 19.4, y: 30.2 }, ghostVisible: false };
     resetAudio();
     setGameSessionId((value) => value + 1);
@@ -1005,6 +1005,12 @@ function App() {
 
       setStoryState(() => nextState);
       triggerNarrativeEffect(effect, contextForHotspot(nextScene.locationId));
+      if (activeScene.id === "library_shelf") {
+        window.setTimeout(() => {
+          const text = pickJumpscareText("library_shelf", useGameStore.getState().storyState.stats.sanity);
+          JumpscarePipeline.executeStoryEffect("library_shelf", 0.88, text, "library-shelf");
+        }, 920);
+      }
 
       const commands = resolvePostChoiceCommands({ activeScene, nextScene, nextHotspot, changesLocation, inInterior });
       for (const command of commands) {

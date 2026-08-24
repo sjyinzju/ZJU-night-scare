@@ -24,6 +24,8 @@ import {
 } from "./InteriorAssetLoader";
 import type { InteriorCollisionMap, InteriorMapObstacle } from "./InteriorCollisionMap";
 import { playBaishaThunder, playLibraryThunder, startLibraryStorm, stopLibraryStorm } from "../audio/proceduralAudio";
+import { JumpscarePipeline } from "../JumpscarePipeline";
+import { pickSeeded } from "./seededRandom";
 
 export type InteriorAssetState = "loading" | "ready" | "failed";
 export type BaishaGameplayPhase = "photo" | "balcony" | "computer" | "paused" | "complete";
@@ -87,6 +89,8 @@ export interface Interior3DOptions {
   getStamina?: () => number;
   /** Persist stamina back to story state. */
   setStamina?: (value: number) => void;
+  /** Stable per-playthrough seed for scene-one random placements. */
+  getSessionSeed?: () => number;
   /** Current player inventory for door key checks. */
   getDoorInventory?: () => string[];
   /** Reports when authored static visuals are safe to reveal. */
@@ -157,6 +161,7 @@ export class Interior3D {
   private readonly outsideRedLight: THREE.PointLight;
   private readonly outsideWhiteLight: THREE.PointLight;
   private readonly outsideCeilingLight: THREE.RectAreaLight;
+  private readonly libraryPursuitLight: THREE.PointLight;
 
   private room: RoomBuildResult;
   private readonly roomKind: RoomKind;
@@ -189,6 +194,7 @@ export class Interior3D {
   private readonly getInventory?: () => string[];
   private readonly getStamina?: () => number;
   private readonly setStamina?: (value: number) => void;
+  private readonly getSessionSeed?: () => number;
   private readonly onAssetStateChange?: (state: InteriorAssetState) => void;
   private readonly onBaishaTrigger?: (trigger: BaishaGameplayTrigger) => void;
   private readonly onBaishaChaseStart?: () => void;
@@ -218,6 +224,10 @@ export class Interior3D {
   private libraryStormActive = false;
   private nextLightningAt = Number.POSITIVE_INFINITY;
   private lightningFlashUntil = 0;
+  private lastPursuitZ = 0;
+  private pursuitDistance = 7.2;
+  private nextPursuitWhisperAt = 0;
+  private pursuitHitCooldownUntil = 0;
   private readonly baishaTubes: BaishaTubeRuntime[] = [];
   private readonly baishaLightPool: THREE.PointLight[] = [];
   private baishaTubeGeometry?: THREE.BoxGeometry;
@@ -337,6 +347,8 @@ export class Interior3D {
     this.getInventory = options.getInventory;
     this.getStamina = options.getStamina;
     this.setStamina = options.setStamina;
+    this.getSessionSeed = options.getSessionSeed;
+    this.getDoorInventory = options.getDoorInventory;
     this.onAssetStateChange = options.onAssetStateChange;
     this.onBaishaTrigger = options.onBaishaTrigger;
     this.onBaishaChaseStart = options.onBaishaChaseStart;
@@ -410,6 +422,10 @@ export class Interior3D {
     this.outsideCeilingLight.position.set(4.3, 8.2, 36.5);
     this.outsideCeilingLight.lookAt(4.3, 0, 36.5);
     this.scene.add(this.outsideCeilingLight);
+
+    this.libraryPursuitLight = new THREE.PointLight(0xff1025, 0, 7.5, 1.85);
+    this.libraryPursuitLight.name = "library_return_pursuit_light";
+    this.scene.add(this.libraryPursuitLight);
 
     // Flashlight follows the camera.
     this.flashlight = new THREE.SpotLight(0xfff2d0, 8.6, 23, Math.PI / 5.6, 0.42, 1.35);
@@ -1008,6 +1024,7 @@ export class Interior3D {
     this.targetGlowLights.clear();
     if (this.fallSpotlight) this.scene.remove(this.fallSpotlight);
     if (this.fallSpotlightTarget) this.scene.remove(this.fallSpotlightTarget);
+    this.scene.remove(this.libraryPursuitLight);
     stopLibraryStorm();
     window.dispatchEvent(new CustomEvent("zju-horror-library-lightning", { detail: { active: false } }));
     this.clearAssetFlickerLights();
@@ -1235,7 +1252,7 @@ export class Interior3D {
       if (!pickup || spots.length === 0) continue;
       const clearSpots = spots.filter((spot) => !this.collides(spot.x, spot.z));
       const choices = clearSpots.length > 0 ? clearSpots : spots;
-      const spot = choices[Math.floor(Math.random() * choices.length)];
+      const spot = pickSeeded(this.getSessionSeed?.() ?? 0, `pickup:${itemId}`, choices) ?? choices[0];
       pickup.position.set(spot.x, spot.y ?? pickup.position.y, spot.z);
       pickup.glow.position.set(spot.x, pickup.glow.position.y, spot.z);
       if (spot.radius) pickup.radius = spot.radius;
@@ -1346,7 +1363,7 @@ export class Interior3D {
     for (const [sceneId, candidates] of Object.entries(handle.meta?.storySpotCandidates ?? {})) {
       const trigger = this.storyTriggersBySceneId.get(sceneId);
       if (!trigger || candidates.length === 0) continue;
-      const candidate = candidates[Math.floor(Math.random() * candidates.length)];
+      const candidate = pickSeeded(this.getSessionSeed?.() ?? 0, `story:${sceneId}`, candidates) ?? candidates[0];
       trigger.position.set(candidate.x, candidate.y, candidate.z);
       trigger.glow.position.set(candidate.x, candidate.y, candidate.z);
       if (candidate.radius) trigger.radius = candidate.radius;
@@ -2748,6 +2765,7 @@ export class Interior3D {
     this.updateLibraryStorm(t);
     this.updateLibraryCeilingLights(t);
     this.updateBaishaLighting(t);
+    this.updateLibraryReturnPursuit(dt, t);
   }
 
   private isInLibraryExterior(): boolean {
@@ -2800,6 +2818,62 @@ export class Interior3D {
       const harsh = Math.sin(t * (13.5 + (index % 4) * 2.1) + index * 1.91);
       const dropout = harsh > 0.58 || Math.sin(t * 3.3 + index * 2.7) > 0.86;
       light.intensity = dropout ? 0.16 : 4.9 + Math.max(0, harsh) * 1.7;
+    }
+  }
+
+  private updateLibraryReturnPursuit(dt: number, t: number): void {
+    const active = this.roomKind === "library"
+      && this.fallRevealed
+      && this.libraryReturnFlicker
+      && this.storySceneId === "dorm_baiqiu"
+      && this.camera.position.z > 3.4;
+
+    if (!active) {
+      this.libraryPursuitLight.intensity = THREE.MathUtils.lerp(this.libraryPursuitLight.intensity, 0, 0.18);
+      this.lastPursuitZ = this.camera.position.z;
+      this.pursuitDistance = 7.2;
+      return;
+    }
+
+    const dz = this.camera.position.z - this.lastPursuitZ;
+    this.lastPursuitZ = this.camera.position.z;
+    const movingTowardExit = dz < -0.018;
+    const driftingBack = dz > 0.012;
+    const pressure = driftingBack ? 1.75 : movingTowardExit ? -0.9 : 0.72;
+    this.pursuitDistance = THREE.MathUtils.clamp(this.pursuitDistance - pressure * dt, 1.05, 7.2);
+
+    this.libraryPursuitLight.position.set(
+      this.camera.position.x + Math.sin(t * 2.1) * 0.35,
+      this.camera.position.y - 0.08,
+      Math.min(this.bounds.maxZ - 0.5, this.camera.position.z + this.pursuitDistance),
+    );
+    this.libraryPursuitLight.intensity = 1.4 + (7.2 - this.pursuitDistance) * 1.25;
+
+    if (t >= this.nextPursuitWhisperAt) {
+      this.nextPursuitWhisperAt = t + 5.4 + Math.random() * 2.6;
+      JumpscarePipeline.trigger({
+        context: "ghost_close",
+        intensity: 0.42,
+        duration: 780,
+        sanityCost: 0,
+      });
+    }
+
+    if (this.pursuitDistance <= 1.35 && t >= this.pursuitHitCooldownUntil) {
+      this.pursuitHitCooldownUntil = t + 9.5;
+      this.pursuitDistance = 5.8;
+      const pushed = this.findNearestAssetClearPoint(new THREE.Vector3(
+        this.camera.position.x,
+        this.camera.position.y,
+        Math.max(this.bounds.minZ + 0.8, this.camera.position.z - 2.4),
+      ));
+      this.camera.position.set(pushed.x, this.room.floorHeightAt(pushed.x, pushed.z) + this.crouchState.eyeHeight, pushed.z);
+      window.dispatchEvent(new CustomEvent("zju-horror-ghost-hit", {
+        detail: {
+          type: "sanity",
+          amount: -9,
+        },
+      }));
     }
   }
 

@@ -422,7 +422,7 @@ export const campusBuildings: CampusBuilding[] = [
   {
     id: "medical-library",
     enterable: true,
-    name: "农医馆",
+    name: "医学院图书馆",
     zone: "story",
     x: 17.4,
     y: 28.5,

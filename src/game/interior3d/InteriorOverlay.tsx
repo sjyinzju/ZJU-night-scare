@@ -147,6 +147,7 @@ export default function InteriorOverlay({
         getStorySceneId: () => currentSceneIdRef.current,
         getInventory: () => inventoryRef.current,
         getDoorInventory: () => inventoryRef.current,
+        getSessionSeed: () => useGameStore.getState().sessionSeed,
         onPickup: (itemId, name) => {
           // 通知外层剧情系统把道具加入物品栏，并弹一个短暂提示。
           window.dispatchEvent(new CustomEvent("zju-horror-pickup", { detail: { itemId, name } }));

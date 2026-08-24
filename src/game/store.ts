@@ -61,6 +61,11 @@ export interface GameStore {
   nearBuilding: EnterableBuilding | null;
   // ── 玩家 ──
   playerIso: IsoPoint;
+  /**
+   * 本局的随机种子。场景一的随机书架、手电位置和惊吓点都由它推导，
+   * 保证同一局内重进内景不会重新抽取。
+   */
+  sessionSeed: number;
   /** 初始生命不计在内；2 次复活 = 共 3 条命。 */
   revivesRemaining: number;
   /** 死亡场景会临时覆盖剧情指针，复活时回到最近的安全剧情。 */
@@ -131,8 +136,12 @@ const initialStoryState: GameStore["storyState"] = {
   flags: {},
   visitedHotspots: [],
   completedHotspots: [],
-  log: ["00:47，紫金港的路灯还亮着。先去基础图书馆确认闭馆记录。"],
+  log: ["00:47，紫金港的路灯还亮着。先去医学院图书馆确认闭馆记录。"],
 };
+
+function createSessionSeed(): number {
+  return (Math.floor(Math.random() * 0xffffffff) ^ Date.now()) >>> 0;
+}
 
 const initialGhost: GhostSnapshot = {
   fsm: "hidden",
@@ -151,7 +160,7 @@ const initialAtmosphere: AtmosphereState = {
 };
 
 const initialMiniMap: MiniMapSnapshot = {
-  // 农医馆门外：开场 3D 内景结束后回到这里，而不是默认的医学院入口。
+  // 医学院图书馆门外：开场 3D 内景结束后回到这里，而不是默认的医学院入口。
   player: { x: 19.4, y: 30.2 },
   ghostVisible: false,
 };
@@ -163,6 +172,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   interiorBuilding: null,
   nearBuilding: null,
   playerIso: { x: 19.4, y: 30.2 },
+  sessionSeed: createSessionSeed(),
   revivesRemaining: INITIAL_REVIVES,
   lastSafeSceneId: "library_intro" as StorySceneId,
   storyState: { ...initialStoryState, stats: { ...initialStoryState.stats }, log: [...initialStoryState.log] },
@@ -257,6 +267,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       interiorBuilding: building,
       nearBuilding: null,
       playerIso: { x: 19.4, y: 30.2 },
+      sessionSeed: createSessionSeed(),
     }),
 
   /** Idempotent by design: duplicate proximity/E-key events cannot remount an interior. */
@@ -324,6 +335,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       interiorBuilding: null,
       nearBuilding: null,
       playerIso: { x: 19.4, y: 30.2 },
+      sessionSeed: createSessionSeed(),
       revivesRemaining: INITIAL_REVIVES,
       lastSafeSceneId: "library_intro" as StorySceneId,
       storyState: {

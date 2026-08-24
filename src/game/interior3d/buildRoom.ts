@@ -87,7 +87,7 @@ export interface RoomBuildResult {
 /** Map a building id / zone onto a room archetype. */
 export function classifyRoom(id: string, zone?: string): RoomKind {
   const key = `${id} ${zone ?? ""}`.toLowerCase();
-  // 农医馆开场区域沿用 library 布局，而不是后续医学院的 medical 布局。
+  // 医学院图书馆开场区域沿用 library 布局，而不是后续医学院的 medical 布局。
   if (/medical-library/.test(key)) return "library";
   if (/dorm|hostel|宿舍|寝|baisha|白沙/.test(key)) return "dorm";
   if (/medical|med|hospital|clinic|医|health|病/.test(key)) return "medical";
