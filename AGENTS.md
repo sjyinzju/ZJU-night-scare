@@ -195,6 +195,14 @@ public/images/jumpscares/library-fall-ghost.png
 
 仓库可能包含用户未提交的 Blender 文件、模型和生成结果。不要清理、移动、覆盖或重建不在当前任务范围内的资产。
 
+## 3D 内景视觉无损性能约定
+
+- 优先减少 CPU、JS、React 和 Zustand 浪费；未明确进入画质调优阶段时，不得降低 DPR、抗锯齿、阴影、灯光、材质、纹理、雾、FOV 或模型质量。
+- stamina 由 `Interior3D` 内部 float 作为运行时权威值，只在整数变化且不超过 10 Hz 时同步 Store，并必须接收剧情系统的外部真实修改；相同值不得触发 Store 写入。
+- 帧循环中复用输入快照，缓存稳定的 inventory、剧情阶段、道具/触发点引用和小地图静态数据；React state 与剧情可见性仅在值真正变化时更新。
+- 静态 collider 可在玩家未发生 XZ 移动时跳过无意义 penetration 扫描；移动时必须保留原碰撞算法和结果。更复杂的碰撞索引需先有 profiler 证据。
+- 使用 `?perfInterior=1` 开启开发专用的每秒性能日志；正常模式不显示且应保持近零额外开销。性能报告不得虚构无法可靠测量的 FPS。
+
 ## 开发与验证
 
 安装与运行：
