@@ -1494,8 +1494,521 @@ button {
   backdrop-filter: blur(19px) saturate(0.42) brightness(0.46);
 }
 
+/* ── Baisha dorm authored sequence ─────────────────────────────────────── */
+.baishaExperience {
+  position: fixed;
+  inset: 0;
+  z-index: 1130;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: rgba(5, 0, 2, 0.62);
+  backdrop-filter: blur(15px) saturate(0.72);
+  -webkit-backdrop-filter: blur(15px) saturate(0.72);
+}
+
+.baishaContinue {
+  margin: 2.2em 0 0 !important;
+  color: rgba(236, 203, 185, 0.78);
+  font-size: 12px;
+  letter-spacing: 0.26em;
+  text-align: center;
+  animation: baishaPromptPulse 1.8s ease-in-out infinite;
+}
+
+.baishaContinue--bottom {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  z-index: 2;
+  transform: translateX(-50%);
+  margin: 0 !important;
+  padding: 10px 18px;
+  border: 1px solid rgba(224, 195, 182, 0.24);
+  background: rgba(7, 2, 3, 0.58);
+  white-space: nowrap;
+}
+
+.baishaExperience--photo {
+  background: rgba(3, 0, 1, 0.82);
+  cursor: default;
+}
+
+.baishaPhoto {
+  display: block;
+  width: min(86vw, calc(82vh * 4 / 3));
+  max-height: 82vh;
+  object-fit: contain;
+  filter: drop-shadow(0 28px 72px rgba(0,0,0,0.9));
+  animation: baishaPhotoDevelop 1.25s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.baishaExperience.is-dissolving,
+.baishaForumShell.is-dissolving {
+  pointer-events: none;
+  animation: baishaContentDissolve 820ms cubic-bezier(0.4, 0, 0.8, 0.2) both;
+}
+
+.baishaFullFlash,
+.baishaBalconyFlash {
+  position: fixed;
+  inset: 0;
+  z-index: 1160;
+  pointer-events: none;
+}
+
+.baishaFullFlash.is-white {
+  background: #fff;
+  animation: baishaFlashWhite 120ms linear both;
+}
+
+.baishaFullFlash.is-red {
+  background: #a8000b;
+  mix-blend-mode: screen;
+  animation: baishaFlashRed 110ms linear both;
+}
+
+.baishaBalconyFlash {
+  overflow: hidden;
+  background: #fff;
+  animation: baishaBalconyWhite 185ms linear both;
+}
+
+.baishaBalconyShadow {
+  position: absolute;
+  left: 56%;
+  bottom: 2vh;
+  width: min(34vw, 440px);
+  height: min(82vh, 850px);
+  background: rgba(7, 7, 10, 0.5);
+  -webkit-mask-image: var(--baisha-balcony-shadow);
+  mask-image: var(--baisha-balcony-shadow);
+  -webkit-mask-position: center bottom;
+  mask-position: center bottom;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  filter: blur(2px);
+  transform: translateX(-50%);
+  transform-origin: center bottom;
+  animation: baishaSilhouetteOcclusion 185ms linear both;
+}
+
+.baishaComputerWash {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  background: radial-gradient(circle at 28% 52%, rgba(238, 0, 21, 0.28), rgba(112, 0, 10, 0.08) 37%, transparent 68%);
+  mix-blend-mode: screen;
+  animation: baishaComputerPulse 2.4s ease-in-out infinite;
+}
+
+.baishaForumShell {
+  position: fixed;
+  inset: 0;
+  z-index: 1140;
+  box-sizing: border-box;
+  overflow: hidden;
+  background: #100104;
+  animation: baishaForumBackdropIn 760ms ease-out both;
+}
+
+.baishaForumShell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(0deg, rgba(70, 0, 8, 0.03) 0 1px, transparent 1px 4px),
+    radial-gradient(circle at 50% 45%, transparent 55%, rgba(40, 0, 5, 0.28));
+  mix-blend-mode: multiply;
+}
+
+.baishaForumBrowser {
+  position: absolute;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: #dedbd2;
+  color: #181818;
+  font-family: Arial, "Microsoft YaHei", sans-serif;
+  transform-origin: top center;
+  animation: baishaForumUnroll 900ms cubic-bezier(0.2, 0.82, 0.18, 1) both;
+}
+
+.baishaForumChrome {
+  height: 42px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 14px;
+  box-sizing: border-box;
+  padding: 0 13px;
+  border-bottom: 1px solid #777;
+  color: #292929;
+  background: linear-gradient(#f1efe8, #bdbab2);
+  font-size: 12px;
+}
+
+.baishaForumBrand {
+  color: #71111a;
+  font-weight: 700;
+}
+
+.baishaForumAddress {
+  overflow: hidden;
+  padding: 5px 9px;
+  border: 1px solid #999;
+  background: #fff;
+  color: #555;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.baishaForumOffline {
+  color: #8c1219;
+}
+
+.baishaForumPage {
+  height: calc(100% - 42px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background:
+    linear-gradient(90deg, rgba(114, 0, 14, 0.025), transparent 18%, transparent 82%, rgba(114, 0, 14, 0.035)),
+    #e8e4d9;
+  scrollbar-color: #7d7770 #c9c4b9;
+}
+
+.baishaForumHeader {
+  padding: 24px 30px 22px;
+  border-bottom: 4px solid #7c141c;
+  background: #f2eee2;
+}
+
+.baishaForumHeader p,
+.baishaForumHeader small {
+  margin: 0;
+  color: #6b665f;
+  font-size: 12px;
+}
+
+.baishaForumHeader h1 {
+  margin: 14px 0 9px;
+  color: #201c1c;
+  font-size: clamp(20px, 2vw, 29px);
+  letter-spacing: 0.02em;
+}
+
+.baishaForumReply {
+  display: grid;
+  grid-template-columns: 132px 1fr;
+  min-height: 116px;
+  border-bottom: 1px solid #b8b2a7;
+  background: rgba(255,255,255,0.24);
+}
+
+.baishaForumReply aside {
+  display: grid;
+  align-content: start;
+  gap: 9px;
+  padding: 19px 17px;
+  border-right: 1px solid #c0baaf;
+  background: #d8d3c8;
+  color: #49433e;
+  font-size: 12px;
+}
+
+.baishaForumReply aside strong {
+  color: #8c151d;
+}
+
+.baishaForumReply > div {
+  padding: 17px 24px 22px;
+}
+
+.baishaForumReply time {
+  display: block;
+  margin-bottom: 15px;
+  color: #807970;
+  font-size: 11px;
+}
+
+.baishaForumReply p {
+  margin: 0 0 0.72em;
+  color: #26211f;
+  font-size: 14px;
+  line-height: 1.85;
+  white-space: pre-wrap;
+}
+
+.baishaForumReply p:last-child {
+  margin-bottom: 0;
+}
+
+.baishaForumReply:last-of-type {
+  background: rgba(112, 0, 13, 0.11);
+}
+
+.baishaForumReply:last-of-type p {
+  color: #5e0710;
+  font-weight: 700;
+}
+
+.baishaForumEnd {
+  min-height: 150px;
+  display: grid;
+  place-items: center;
+  color: #7c141c;
+  background: #ccc6ba;
+  font-size: 13px;
+  letter-spacing: 0.14em;
+}
+
+.baishaForumReply.is-alarm {
+  position: relative;
+  z-index: 4;
+  background: #160003;
+  box-shadow: 0 0 70px rgba(205, 0, 22, 0.72), inset 0 0 60px rgba(116, 0, 11, 0.72);
+  animation: baishaForumAlarmRow 150ms steps(2, end) 3;
+}
+
+.baishaForumReply.is-alarm aside {
+  border-color: rgba(212, 0, 21, 0.5);
+  color: rgba(255, 206, 201, 0.76);
+  background: #260005;
+}
+
+.baishaForumReply .baishaForumEscape {
+  margin: 0;
+  color: #ff1428;
+  font-family: "STKaiti", "KaiTi", "Microsoft YaHei", serif;
+  font-size: clamp(48px, 8vw, 108px);
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0.28em;
+  text-align: center;
+  text-indent: 0.28em;
+  text-shadow: 0 0 10px #ff0019, 0 0 36px rgba(255, 0, 25, 0.95), 4px 2px 0 #420009;
+  animation: baishaForumEscapeIn 360ms cubic-bezier(0.16, 1, 0.3, 1) both, baishaForumEscapePulse 560ms steps(2, end) 360ms infinite;
+}
+
+.baishaForumShell.is-alarm::after {
+  background:
+    repeating-linear-gradient(0deg, rgba(255, 0, 25, 0.1) 0 2px, transparent 2px 5px),
+    rgba(73, 0, 8, 0.16);
+  mix-blend-mode: multiply;
+}
+
+.baishaForumContinue {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  z-index: 1160;
+  transform: translateX(-50%);
+  padding: 11px 22px;
+  border: 1px solid rgba(238, 216, 200, 0.45);
+  color: #f0ddd0;
+  background: rgba(25, 3, 6, 0.88);
+  font: 12px/1.4 Inter, "Microsoft YaHei", sans-serif;
+  letter-spacing: 0.2em;
+  cursor: pointer;
+  box-shadow: 0 12px 35px rgba(0,0,0,0.6);
+  animation: baishaPromptPulse 1.8s ease-in-out infinite;
+}
+
+@keyframes baishaVeilIn {
+  from { opacity: 0; backdrop-filter: blur(0); }
+  to { opacity: 1; }
+}
+
+@keyframes baishaForumBackdropIn {
+  from { opacity: 0; background: #000; }
+  to { opacity: 1; background: #100104; }
+}
+
+@keyframes baishaForumUnroll {
+  0% { clip-path: inset(0 0 100% 0); filter: brightness(0.2) contrast(1.8); transform: translateY(-12px); }
+  36% { filter: brightness(0.58) contrast(1.35); }
+  100% { clip-path: inset(0); filter: brightness(1) contrast(1); transform: translateY(0); }
+}
+
+@keyframes baishaForumAlarmRow {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(5px); }
+}
+
+@keyframes baishaForumEscapeIn {
+  from { opacity: 0; transform: scale(0.62); filter: blur(12px); }
+  to { opacity: 1; transform: scale(1); filter: blur(0); }
+}
+
+@keyframes baishaForumEscapePulse {
+  0%, 100% { opacity: 1; transform: translateX(0); }
+  50% { opacity: 0.78; transform: translateX(-3px); }
+}
+
+@keyframes baishaPhotoDevelop {
+  0% { opacity: 0; filter: blur(20px) brightness(0.35) grayscale(1); transform: scale(0.975); }
+  55% { opacity: 0.68; filter: blur(5px) brightness(0.78) grayscale(0.35); }
+  100% { opacity: 1; filter: blur(0) brightness(1) grayscale(0); transform: scale(1); }
+}
+
+@keyframes baishaContentDissolve {
+  0% { opacity: 1; filter: blur(0); transform: scale(1); }
+  55% { opacity: 0.55; filter: blur(6px) contrast(1.45); }
+  100% { opacity: 0; filter: blur(22px) contrast(2); transform: scale(1.025); }
+}
+
+@keyframes baishaFlashWhite {
+  from { opacity: 1; }
+  to { opacity: 0.82; }
+}
+
+@keyframes baishaFlashRed {
+  from { opacity: 0.94; }
+  to { opacity: 0.68; }
+}
+
+@keyframes baishaBalconyWhite {
+  0% { opacity: 0; background: #bccce2; }
+  18% { opacity: 1; background: #fff; }
+  72% { opacity: 1; background: #f8fbff; }
+  100% { opacity: 0; background: #dce6f3; }
+}
+
+@keyframes baishaSilhouetteOcclusion {
+  0% { opacity: 0; transform: translateX(-50%); }
+  18% { opacity: 0.38; }
+  72% { opacity: 0.46; transform: translateX(-50%); }
+  100% { opacity: 0; transform: translateX(-50%); }
+}
+
+@keyframes baishaComputerPulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 0.92; }
+}
+
+@keyframes baishaPromptPulse {
+  0%, 100% { opacity: 0.48; }
+  50% { opacity: 1; }
+}
+
+@media (max-width: 720px) {
+  .baishaForumShell {
+    padding: 0;
+  }
+
+  .baishaForumBrowser {
+    width: 100%;
+    height: 100%;
+  }
+
+  .baishaForumChrome {
+    grid-template-columns: auto 1fr;
+  }
+
+  .baishaForumOffline {
+    display: none;
+  }
+
+  .baishaForumReply {
+    grid-template-columns: 84px 1fr;
+  }
+
+  .baishaForumReply aside,
+  .baishaForumReply > div {
+    padding: 13px 11px;
+  }
+}
+
+/* White-sand story points deliberately reuse the frameless scene-one
+   typography and choices. The overlay only supplies the interior blur. */
+.baishaNarrativeOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1130;
+  background: rgba(4, 1, 3, 0.56);
+  backdrop-filter: blur(13px) saturate(0.62) brightness(0.52);
+  -webkit-backdrop-filter: blur(13px) saturate(0.62) brightness(0.52);
+  animation: glassVeilIn 360ms ease-out both;
+}
+
+.storyModal.baishaNarrativeModal {
+  top: 50%;
+  width: min(940px, calc(100vw - 72px));
+  max-height: min(90vh, 850px);
+  padding: 24px 34px 30px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.storyModal.baishaNarrativeModal--untitled {
+  width: min(850px, calc(100vw - 72px));
+}
+
+.baishaNarrativeModal--untitled .storyText {
+  gap: 18px;
+}
+
+.baishaNarrativeModal .baishaContinue {
+  margin-top: 30px !important;
+  color: rgba(226, 207, 187, 0.66);
+}
+
+@media (max-width: 720px) {
+  .storyModal.baishaNarrativeModal,
+  .storyModal.baishaNarrativeModal--untitled {
+    width: calc(100vw - 28px);
+    padding: 18px 12px 24px;
+  }
+}
+
+.storyGlassBackdrop.baishaEntry {
+  background: rgba(2, 0, 1, 0.76);
+  backdrop-filter: blur(22px) saturate(0.34) brightness(0.24);
+  -webkit-backdrop-filter: blur(22px) saturate(0.34) brightness(0.24);
+}
+
 .storyGlassBackdrop.closing {
   animation: storyVeilDissolve 500ms ease-in forwards;
+}
+
+.baishaLoadCurtain {
+  position: fixed;
+  inset: 0;
+  z-index: 1998;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  opacity: 0;
+  background:
+    radial-gradient(circle at 50% 46%, rgba(71, 4, 10, 0.12), transparent 42%),
+    rgba(0, 0, 0, 0.96);
+  backdrop-filter: blur(24px) saturate(0.28) brightness(0.18);
+  -webkit-backdrop-filter: blur(24px) saturate(0.28) brightness(0.18);
+  transition: opacity 520ms ease;
+}
+
+.baishaLoadCurtain.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.baishaLoadCurtain span {
+  color: rgba(223, 202, 192, 0.52);
+  font-size: 12px;
+  letter-spacing: 0.28em;
+  animation: baishaLoadingPulse 1.8s ease-in-out infinite;
+}
+
+@keyframes baishaLoadingPulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.86; }
 }
 
 .storyModal {

@@ -426,6 +426,82 @@ export function playLibraryThunder(delaySeconds = 0.22): void {
   rumble.stop(now + 2.6);
 }
 
+/** White-flash thunder used by Baisha's authored photo and balcony beats. */
+export function playBaishaThunder(): void {
+  const audioCtx = getCtx();
+  const now = audioCtx.currentTime;
+  const compressor = audioCtx.createDynamicsCompressor();
+  compressor.threshold.value = -18;
+  compressor.knee.value = 8;
+  compressor.ratio.value = 9;
+  compressor.attack.value = 0.002;
+  compressor.release.value = 0.32;
+  compressor.connect(audioCtx.destination);
+
+  const crackBuffer = audioCtx.createBuffer(1, Math.floor(audioCtx.sampleRate * 0.42), audioCtx.sampleRate);
+  const crackData = crackBuffer.getChannelData(0);
+  for (let index = 0; index < crackData.length; index++) {
+    crackData[index] = (Math.random() * 2 - 1) * Math.exp(-index / (audioCtx.sampleRate * 0.035));
+  }
+  const crack = audioCtx.createBufferSource();
+  crack.buffer = crackBuffer;
+  const crackFilter = audioCtx.createBiquadFilter();
+  crackFilter.type = "bandpass";
+  crackFilter.frequency.value = 1350;
+  crackFilter.Q.value = 0.5;
+  const crackGain = audioCtx.createGain();
+  crackGain.gain.setValueAtTime(0.68, now);
+  crackGain.gain.exponentialRampToValueAtTime(0.001, now + 0.42);
+  crack.connect(crackFilter).connect(crackGain).connect(compressor);
+
+  const rumble = audioCtx.createBufferSource();
+  rumble.buffer = createLoopingNoiseBuffer(audioCtx, 3.1, true);
+  const rumbleFilter = audioCtx.createBiquadFilter();
+  rumbleFilter.type = "lowpass";
+  rumbleFilter.frequency.setValueAtTime(620, now);
+  rumbleFilter.frequency.exponentialRampToValueAtTime(58, now + 2.9);
+  const rumbleGain = audioCtx.createGain();
+  rumbleGain.gain.setValueAtTime(0.62, now);
+  rumbleGain.gain.exponentialRampToValueAtTime(0.001, now + 3.0);
+  rumble.connect(rumbleFilter).connect(rumbleGain).connect(compressor);
+
+  crack.start(now);
+  crack.stop(now + 0.44);
+  rumble.start(now);
+  rumble.stop(now + 3.1);
+}
+
+/** Three glass knocks: two close taps followed by a slower, heavier third hit. */
+export function playBaishaWindowKnocks(): void {
+  const audioCtx = getCtx();
+  const start = audioCtx.currentTime + 0.08;
+  const offsets = [0, 0.55, 1.45];
+  offsets.forEach((offset, index) => {
+    const when = start + offset;
+    const body = audioCtx.createOscillator();
+    body.type = "sine";
+    body.frequency.setValueAtTime(168 - index * 18, when);
+    body.frequency.exponentialRampToValueAtTime(62, when + 0.16);
+    const bodyGain = audioCtx.createGain();
+    bodyGain.gain.setValueAtTime(0.16 + index * 0.07, when);
+    bodyGain.gain.exponentialRampToValueAtTime(0.001, when + 0.2);
+    body.connect(bodyGain).connect(audioCtx.destination);
+
+    const glass = audioCtx.createOscillator();
+    glass.type = "triangle";
+    glass.frequency.setValueAtTime(1120 - index * 95, when);
+    const glassGain = audioCtx.createGain();
+    glassGain.gain.setValueAtTime(0.055 + index * 0.022, when);
+    glassGain.gain.exponentialRampToValueAtTime(0.001, when + 0.11);
+    glass.connect(glassGain).connect(audioCtx.destination);
+
+    body.start(when);
+    body.stop(when + 0.22);
+    glass.start(when);
+    glass.stop(when + 0.13);
+  });
+}
+
 // ══════════════════════════════════════════════════
 // 鬼接近呼吸/低吼
 // ══════════════════════════════════════════════════

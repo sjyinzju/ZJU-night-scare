@@ -16,19 +16,54 @@ import { InputManager } from "./InputManager";
 import { CameraController } from "./CameraController";
 import { FlashlightSystem } from "./FlashlightSystem";
 import { getInteriorNpcRevealSceneIds } from "../storyEngine";
-import { loadInteriorAsset, type InteriorAssetHandle } from "./InteriorAssetLoader";
+import {
+  getInteriorAssetObject,
+  loadInteriorAsset,
+  type InteriorAssetHandle,
+  type InteriorAssetMeta,
+} from "./InteriorAssetLoader";
 import type { InteriorCollisionMap, InteriorMapObstacle } from "./InteriorCollisionMap";
-import { playLibraryThunder, startLibraryStorm, stopLibraryStorm } from "../audio/proceduralAudio";
+import { playBaishaThunder, playLibraryThunder, startLibraryStorm, stopLibraryStorm } from "../audio/proceduralAudio";
 
 export type InteriorAssetState = "loading" | "ready" | "failed";
+export type BaishaGameplayPhase = "photo" | "balcony" | "computer" | "paused" | "complete";
+export type BaishaGameplayTrigger = "photo" | "balcony" | "computer";
+export type BaishaGhostState = "dormant" | "chase";
+type BaishaChaseBranch = "shortcut" | "pursuit";
+
+type NavigationClearZone = NonNullable<InteriorAssetMeta["navigationClearZones"]>[number];
+
+/** Remove only the authored clear rectangle, preserving the surrounding wall/furniture collision. */
+function cutObstacleByClearZone(obstacle: InteriorMapObstacle, zone: NavigationClearZone): InteriorMapObstacle[] {
+  if (zone.kind && zone.kind !== obstacle.kind) return [obstacle];
+  const cutMinX = Math.max(obstacle.minX, zone.minX);
+  const cutMaxX = Math.min(obstacle.maxX, zone.maxX);
+  const cutMinZ = Math.max(obstacle.minZ, zone.minZ);
+  const cutMaxZ = Math.min(obstacle.maxZ, zone.maxZ);
+  if (cutMinX >= cutMaxX || cutMinZ >= cutMaxZ) return [obstacle];
+
+  const pieces: InteriorMapObstacle[] = [];
+  const add = (minX: number, maxX: number, minZ: number, maxZ: number): void => {
+    if (maxX - minX > 0.001 && maxZ - minZ > 0.001) {
+      pieces.push({ minX, maxX, minZ, maxZ, kind: obstacle.kind });
+    }
+  };
+  add(obstacle.minX, cutMinX, obstacle.minZ, obstacle.maxZ);
+  add(cutMaxX, obstacle.maxX, obstacle.minZ, obstacle.maxZ);
+  add(cutMinX, cutMaxX, obstacle.minZ, cutMinZ);
+  add(cutMinX, cutMaxX, cutMaxZ, obstacle.maxZ);
+  return pieces;
+}
 
 export interface InteriorMapSnapshot {
   bounds: InteriorCollisionMap["bounds"];
   obstacles: InteriorMapObstacle[];
   player: { x: number; z: number };
   objective?: { x: number; z: number };
+  ghost?: { x: number; z: number; state: BaishaGhostState };
   fallenPerson?: { x: number; z: number };
-  exitSegment?: { minX: number; maxX: number; z: number };
+  exitSegment?: { minX: number; maxX: number; z: number; color?: "red" | "green" };
+  layoutPaths?: Array<Array<{ x: number; z: number }>>;
 }
 
 export interface Interior3DOptions {
@@ -56,6 +91,14 @@ export interface Interior3DOptions {
   getDoorInventory?: () => string[];
   /** Reports when authored static visuals are safe to reveal. */
   onAssetStateChange?: (state: InteriorAssetState) => void;
+  /** Reports one-shot proximity beats in the authored Baisha dorm sequence. */
+  onBaishaTrigger?: (trigger: BaishaGameplayTrigger) => void;
+  /** Reports the authored chase hand-off and its opening jumpscare. */
+  onBaishaChaseStart?: () => void;
+  /** Reports that the corridor ghost caught the player. */
+  onBaishaCapture?: () => void;
+  /** Reports that the player crossed the two-door true exit. */
+  onBaishaExit?: () => void;
 }
 
 const DEFAULT_PLAYER_RADIUS = 0.32;
@@ -70,6 +113,16 @@ const PICKUP_AUTO_RADIUS_SCALE = 1;
 const STORY_AUTO_RADIUS_SCALE = 1.1;
 /** Pressing E grants a wider margin without changing the authored radius stored in scene metadata. */
 const MANUAL_INTERACTION_RADIUS_SCALE = 1.25;
+
+type BaishaTubeRuntime = {
+  group: THREE.Group;
+  material: THREE.MeshStandardMaterial;
+  position: THREE.Vector3;
+  zone: "room" | "balcony" | "corridor";
+  corridorIndex: number;
+  active: boolean;
+  intensity: number;
+};
 
 /**
  * Self-contained first-person interior renderer. Owns its renderer, scene,
@@ -131,6 +184,10 @@ export class Interior3D {
   private readonly getStamina?: () => number;
   private readonly setStamina?: (value: number) => void;
   private readonly onAssetStateChange?: (state: InteriorAssetState) => void;
+  private readonly onBaishaTrigger?: (trigger: BaishaGameplayTrigger) => void;
+  private readonly onBaishaChaseStart?: () => void;
+  private readonly onBaishaCapture?: () => void;
+  private readonly onBaishaExit?: () => void;
   private runtimeStamina = 100;
   private persistedStamina = 100;
   private staminaStoreSyncElapsed = 0;
@@ -155,6 +212,62 @@ export class Interior3D {
   private libraryStormActive = false;
   private nextLightningAt = Number.POSITIVE_INFINITY;
   private lightningFlashUntil = 0;
+  private readonly baishaTubes: BaishaTubeRuntime[] = [];
+  private readonly baishaLightPool: THREE.PointLight[] = [];
+  private baishaTubeGeometry?: THREE.BoxGeometry;
+  private baishaHousingGeometry?: THREE.BoxGeometry;
+  private baishaHousingMaterial?: THREE.MeshStandardMaterial;
+  private baishaCorridorProgress = -1;
+  private baishaRevealAhead = 3;
+  private nextBaishaLightingUpdateAt = 0;
+  private baishaLightning?: THREE.SpotLight;
+  private baishaLightningTarget?: THREE.Object3D;
+  private baishaCorridorWindow?: THREE.Group;
+  private baishaCorridorWindowGlass?: THREE.MeshStandardMaterial;
+  private baishaCorridorWindowFlash?: THREE.PointLight;
+  private baishaRaisedCeiling?: THREE.Group;
+  private nextBaishaLightningAt = Number.POSITIVE_INFINITY;
+  private baishaLightningUntil = 0;
+  private baishaGameplayPhase: BaishaGameplayPhase = "photo";
+  private baishaTriggeredPhase?: BaishaGameplayTrigger;
+  private baishaGhostState: BaishaGhostState = "dormant";
+  private baishaChaseArmed = false;
+  private baishaDebugEnergyChecked = false;
+  private baishaDebugDoorChecked = false;
+  private baishaDebugExitChecked = false;
+  private readonly baishaChaseExitOrigin = new THREE.Vector2();
+  private readonly baishaChaseViewPoint = new THREE.Vector3();
+  private baishaDoorCollider?: AABB;
+  private baishaGhostVisual?: THREE.Object3D;
+  private readonly baishaGhostPosition = new THREE.Vector2();
+  private baishaChaseBranch: BaishaChaseBranch = "shortcut";
+  private baishaChasePathIndex = 1;
+  private baishaShortcutPath: Array<{ x: number; z: number }> = [];
+  private baishaPursuitPath: Array<{ x: number; z: number }> = [];
+  private baishaPursuitPathIndex = 1;
+  private baishaNextRepathAt = Number.NEGATIVE_INFINITY;
+  private readonly baishaLastPursuitTarget = new THREE.Vector2(Number.NaN, Number.NaN);
+  private baishaChaseTriggeredAt = Number.POSITIVE_INFINITY;
+  private baishaCaptureDisabledUntil = Number.POSITIVE_INFINITY;
+  private baishaHalfSpeedUntil = Number.NEGATIVE_INFINITY;
+  private baishaTrueExitOpen = false;
+  private baishaPlayerReachedTriangle = false;
+  private baishaCaptureReported = false;
+  private baishaExitReported = false;
+  private baishaEnergyActive = false;
+  private baishaPreExitColliders?: AABB[];
+  private baishaPreExitMapObstacles?: InteriorMapObstacle[];
+  private baishaComputerLight?: THREE.PointLight;
+  private readonly baishaComputerMaterials: Array<{
+    material: THREE.MeshStandardMaterial;
+    emissive: THREE.Color;
+    emissiveIntensity: number;
+    color: THREE.Color;
+  }> = [];
+  private baishaShadowCacheEnabled = false;
+  private readonly baishaShadowCameraPosition = new THREE.Vector3(Number.NaN, Number.NaN, Number.NaN);
+  private readonly baishaShadowCameraQuaternion = new THREE.Quaternion(Number.NaN, Number.NaN, Number.NaN, Number.NaN);
+  private gameplayPaused = false;
 
   // ── New movement architecture ──
   private readonly inputManager: InputManager;
@@ -171,6 +284,7 @@ export class Interior3D {
   private rafId = 0;
   private disposed = false;
   private pointerLocked = false;
+  private readonly visualReviewMode: boolean;
   private readonly perfEnabled: boolean;
   private perfWindowStartedAt = 0;
   private perfLastFrameAt = 0;
@@ -201,6 +315,7 @@ export class Interior3D {
     if (!this.pointerLocked) this.resetInput();
   };
   private readonly onCanvasClick = () => {
+    if (this.gameplayPaused) return;
     if (!this.isMobile && !this.pointerLocked) this.requestPointerLock();
   };
 
@@ -215,6 +330,12 @@ export class Interior3D {
     this.getStamina = options.getStamina;
     this.setStamina = options.setStamina;
     this.onAssetStateChange = options.onAssetStateChange;
+    this.onBaishaTrigger = options.onBaishaTrigger;
+    this.onBaishaChaseStart = options.onBaishaChaseStart;
+    this.onBaishaCapture = options.onBaishaCapture;
+    this.onBaishaExit = options.onBaishaExit;
+    this.visualReviewMode = options.buildingId === "dorm-baisha"
+      && new URLSearchParams(window.location.search).get("baishaReview") === "1";
     this.perfEnabled = new URLSearchParams(window.location.search).get("perfInterior") === "1";
     this.runtimeStamina = this.clampStamina(this.getStamina?.() ?? 100);
     this.persistedStamina = Math.round(this.runtimeStamina);
@@ -305,6 +426,17 @@ export class Interior3D {
     this.bloodLightEnabled = this.roomKind === "library";
     this.outsideRedLight.intensity = 0;
     this.outsideWhiteLight.intensity = this.roomKind === "library" ? 2.8 : 0;
+    if (this.roomKind === "dorm" && options.buildingId === "dorm-baisha") {
+      this.scene.background = new THREE.Color(0x0b0103);
+      this.scene.fog = new THREE.Fog(0x110104, 4, 30);
+      this.ambientLight.color.setHex(0x3a1116);
+      this.fillLight.color.setHex(0x481019);
+      this.fillLight.groundColor.setHex(0x080103);
+      this.nearFillLight.color.setHex(0xb67579);
+      this.outsideRedLight.position.set(29.2, 1.7, 1.2);
+      this.outsideRedLight.distance = 15;
+      this.outsideRedLight.intensity = 2.1;
+    }
     this.blueprint = getInteriorBlueprint(this.roomKind);
     this.room = buildRoom(this.roomKind);
     for (const pickup of this.room.pickups) this.pickupsByItemId.set(pickup.itemId, pickup);
@@ -390,13 +522,118 @@ export class Interior3D {
     return this.flashlightSys.battery;
   }
 
+  setGameplayPaused(paused: boolean): void {
+    this.gameplayPaused = paused;
+    if (!paused) {
+      this.inputManager.reset();
+      return;
+    }
+    this.exitPointerLock();
+    this.inputManager.reset();
+    this.moveCtx.velocity.x = 0;
+    this.moveCtx.velocity.y = 0;
+    this.ePressed = false;
+  }
+
+  setBaishaGameplayPhase(phase: BaishaGameplayPhase): void {
+    if (this.baishaGameplayPhase === phase) return;
+    this.baishaGameplayPhase = phase;
+    this.baishaTriggeredPhase = undefined;
+    this.setBaishaComputerGlow(phase === "computer");
+  }
+
+  completeBaishaDorm(): void {
+    const gameplay = this.assetHandle?.meta?.baishaGameplay;
+    if (!gameplay || this.baishaGameplayPhase === "complete") return;
+    this.baishaGameplayPhase = "complete";
+    this.baishaTriggeredPhase = undefined;
+    this.setBaishaComputerGlow(false);
+    for (const name of gameplay.door.visualNames) {
+      const door = this.assetHandle ? getInteriorAssetObject(this.assetHandle.root, name) : undefined;
+      if (door) door.visible = false;
+    }
+    if (this.baishaShadowCacheEnabled) this.renderer.shadowMap.needsUpdate = true;
+    if (this.baishaDoorCollider) {
+      const collider = this.baishaDoorCollider;
+      this.colliders = this.colliders.filter((candidate) => candidate !== collider);
+      this.baishaDoorCollider = undefined;
+    }
+    this.gameplayPaused = false;
+    this.inputManager.reset();
+  }
+
+  /** Restore the authored checkpoint immediately after the dorm forum. */
+  resetBaishaChaseCheckpoint(): void {
+    const gameplay = this.assetHandle?.meta?.baishaGameplay;
+    const chase = gameplay?.chase;
+    if (this.roomKind !== "dorm" || !gameplay || !chase) return;
+
+    this.restoreBaishaTrueExit();
+    this.baishaGameplayPhase = "complete";
+    this.baishaTriggeredPhase = undefined;
+    this.baishaGhostState = "dormant";
+    this.baishaChaseArmed = false;
+    this.baishaChaseBranch = "shortcut";
+    this.baishaChasePathIndex = 1;
+    this.baishaShortcutPath = this.getBaishaShortcutPath();
+    this.baishaPursuitPath = [];
+    this.baishaPursuitPathIndex = 1;
+    this.baishaNextRepathAt = Number.NEGATIVE_INFINITY;
+    this.baishaLastPursuitTarget.set(Number.NaN, Number.NaN);
+    this.baishaChaseTriggeredAt = Number.POSITIVE_INFINITY;
+    this.baishaCaptureDisabledUntil = Number.POSITIVE_INFINITY;
+    this.baishaHalfSpeedUntil = Number.NEGATIVE_INFINITY;
+    this.baishaPlayerReachedTriangle = false;
+    this.baishaCaptureReported = false;
+    this.baishaExitReported = false;
+    this.baishaEnergyActive = false;
+    this.baishaDebugEnergyChecked = false;
+    this.baishaDebugDoorChecked = false;
+    this.baishaDebugExitChecked = false;
+    this.moveCtx.sprintSpeed = this.blueprint.movement.sprintSpeed;
+
+    const start = this.baishaShortcutPath[0] ?? gameplay.chasePrep?.ghost;
+    if (start) this.setBaishaGhostPosition(start.x, start.z);
+    if (this.baishaGhostVisual) this.baishaGhostVisual.visible = true;
+
+    const energy = this.pickupsByItemId.get("energy");
+    if (energy) {
+      energy.taken = false;
+      energy.glow.visible = true;
+      this.setAssetPickupVisualVisible("energy", true);
+    }
+
+    for (const name of gameplay.door.visualNames) {
+      const door = this.assetHandle ? getInteriorAssetObject(this.assetHandle.root, name) : undefined;
+      if (door) door.visible = false;
+    }
+    if (this.baishaDoorCollider) {
+      this.colliders = this.colliders.filter((candidate) => candidate !== this.baishaDoorCollider);
+      this.baishaDoorCollider = undefined;
+    }
+
+    const checkpoint = chase.checkpoint;
+    this.camera.position.set(
+      checkpoint.x,
+      this.room.floorHeightAt(checkpoint.x, checkpoint.z) + this.crouchState.eyeHeight,
+      checkpoint.z,
+    );
+    this.cameraController.setLook(checkpoint.yaw, -0.04);
+    this.gameplayPaused = false;
+    this.inputManager.reset();
+    this.moveCtx.velocity.x = 0;
+    this.moveCtx.velocity.y = 0;
+    this.ePressed = false;
+    if (this.baishaShadowCacheEnabled) this.renderer.shadowMap.needsUpdate = true;
+  }
+
   /** Live position plus the authored model's floor-plan obstacles. */
   getInteriorMapSnapshot(): InteriorMapSnapshot | null {
     const collisionMap = this.assetHandle?.collisionMap;
-    if (!collisionMap || this.roomKind !== "library") return null;
+    if (!collisionMap || (this.roomKind !== "library" && this.roomKind !== "dorm")) return null;
     const sceneId = this.getStorySceneId?.();
     let objective: InteriorMapSnapshot["objective"];
-    if (sceneId === "library_intro") {
+    if (this.roomKind === "library" && sceneId === "library_intro") {
       if (!this.hasInventoryItem("flashlight")) {
         const flashlight = this.pickupsByItemId.get("flashlight");
         if (flashlight && !flashlight.taken) objective = { x: flashlight.position.x, z: flashlight.position.z };
@@ -404,24 +641,51 @@ export class Interior3D {
         const trigger = this.storyTriggersBySceneId.get(sceneId);
         if (trigger && !trigger.triggered) objective = { x: trigger.position.x, z: trigger.position.z };
       }
-    } else if (sceneId === "library_receipt" || sceneId === "library_talisman") {
+    } else if (this.roomKind === "library" && (sceneId === "library_receipt" || sceneId === "library_talisman")) {
       const itemId = sceneId === "library_receipt" ? "receipt" : "talisman";
       const pickup = this.pickupsByItemId.get(itemId);
       if (pickup && !pickup.taken) objective = { x: pickup.position.x, z: pickup.position.z };
-    } else if (sceneId === "library_shelf") {
+    } else if (this.roomKind === "library" && sceneId === "library_shelf") {
       const trigger = this.storyTriggersBySceneId.get(sceneId);
       if (trigger && !trigger.triggered) objective = { x: trigger.position.x, z: trigger.position.z };
+    } else if (this.roomKind === "dorm") {
+      const gameplay = this.assetHandle?.meta?.baishaGameplay;
+      const target = this.baishaGameplayPhase === "photo"
+        ? gameplay?.photo
+        : this.baishaGameplayPhase === "balcony"
+          ? gameplay?.balcony
+          : this.baishaGameplayPhase === "computer"
+            ? gameplay?.computer
+            : undefined;
+      if (target) objective = { x: target.x, z: target.z };
     }
     const fallReveal = this.assetHandle?.meta?.fallReveal;
+    const baishaMinimap = this.roomKind === "dorm"
+      ? this.assetHandle?.meta?.baishaGameplay?.minimap
+      : undefined;
+    const baishaExitSegment = baishaMinimap && this.baishaGameplayPhase === "complete"
+      ? this.baishaPlayerReachedTriangle || this.baishaTrueExitOpen
+        ? { ...baishaMinimap.trueExitSegment, color: "red" as const }
+        : { ...baishaMinimap.falseExitSegment, color: "green" as const }
+      : undefined;
     return {
       bounds: collisionMap.bounds,
       obstacles: this.interiorMapObstacles ?? collisionMap.obstacles,
       player: { x: this.camera.position.x, z: this.camera.position.z },
       objective,
+      ghost: this.baishaGhostState === "chase"
+        ? {
+            x: this.baishaGhostPosition.x,
+            z: this.baishaGhostPosition.y,
+            state: this.baishaGhostState,
+          }
+        : undefined,
       fallenPerson: this.fallRevealed && fallReveal
         ? { x: fallReveal.body.x, z: fallReveal.body.z }
         : undefined,
-      exitSegment: sceneId === "dorm_baiqiu" ? this.assetHandle?.meta?.exitSegment : undefined,
+      exitSegment: baishaExitSegment
+        ?? (sceneId === "dorm_baiqiu" ? this.assetHandle?.meta?.exitSegment : undefined),
+      layoutPaths: baishaMinimap?.paths,
     };
   }
 
@@ -510,6 +774,132 @@ export class Interior3D {
     return `已前往：${label}`;
   }
 
+  debugTeleportToBaishaTarget(): string {
+    if (this.roomKind !== "dorm") return "当前场景不是白沙宿舍";
+    const gameplay = this.assetHandle?.meta?.baishaGameplay;
+    const phase = this.baishaGameplayPhase;
+    if (!gameplay || phase === "paused") return "当前没有可前往的白沙目标";
+    if (phase === "complete") {
+      const door = gameplay.door.collisionBounds;
+      const centerX = (door.minX + door.maxX) * 0.5;
+      const chase = gameplay.chasePrep;
+      if (this.baishaGhostState === "chase") {
+        if (this.baishaTrueExitOpen && !this.baishaDebugExitChecked) {
+          const exit = gameplay.chase?.trueExit;
+          if (!exit) return "真出口元数据未加载";
+          const centerX = (exit.clearZones[0].minX + exit.clearZones[0].maxX) * 0.5;
+          const startZ = Math.min(...exit.clearZones.map((zone) => zone.minZ)) - 0.45;
+          const endZ = Math.max(...exit.clearZones.map((zone) => zone.maxZ)) + 0.45;
+          const sampleCount = 25;
+          let blockedSamples = 0;
+          for (let index = 0; index < sampleCount; index++) {
+            const z = THREE.MathUtils.lerp(startZ, endZ, index / (sampleCount - 1));
+            if (this.collides(centerX, z)) blockedSamples++;
+          }
+          const doorParts = exit.visualNames.map((name) => (
+            this.assetHandle ? getInteriorAssetObject(this.assetHandle.root, name) : undefined
+          ));
+          const unresolvedDoorParts = doorParts.filter((object) => !object).length;
+          const visibleDoorParts = doorParts.filter((object) => object?.visible).length;
+          this.camera.position.set(
+            centerX,
+            this.room.floorHeightAt(centerX, startZ) + this.crouchState.eyeHeight,
+            startZ,
+          );
+          this.cameraController.setLook(Math.PI, -0.04);
+          this.baishaCaptureDisabledUntil = Math.max(this.baishaCaptureDisabledUntil, this.clock.elapsedTime + 60);
+          this.baishaDebugExitChecked = true;
+          return blockedSamples === 0 && visibleDoorParts === 0 && unresolvedDoorParts === 0
+            ? "真出口检测：两扇门及碰撞均已移除"
+            : `真出口检测：${visibleDoorParts} 个门组件仍可见，${unresolvedDoorParts} 个节点未解析，${blockedSamples}/${sampleCount} 个通道采样受阻`;
+        }
+        const turnSamples = [12.25, 12.55, 12.85];
+        const blockedSamples = turnSamples.filter((x) => this.collides(x, -19.28)).length;
+        const targetX = 12.55;
+        const targetZ = -19.28;
+        this.camera.position.set(
+          targetX,
+          this.room.floorHeightAt(targetX, targetZ) + this.crouchState.eyeHeight,
+          targetZ,
+        );
+        this.cameraController.setLook(-Math.PI / 2, -0.04);
+        // The debug teleport exists to inspect the late chase route. Keep its
+        // artificial repositioning from immediately triggering capture while
+        // QA observes the shortcut, turns, minimap marker, and ceiling.
+        this.baishaCaptureDisabledUntil = Math.max(this.baishaCaptureDisabledUntil, this.clock.elapsedTime + 60);
+        const ghostPosition = `${this.baishaGhostPosition.x.toFixed(2)}, ${this.baishaGhostPosition.y.toFixed(2)}`;
+        const activePathIndex = this.baishaChaseBranch === "shortcut"
+          ? this.baishaChasePathIndex
+          : this.baishaPursuitPathIndex;
+        return blockedSamples === 0
+          ? `第三转角检测：可通行（${this.baishaChaseBranch}，鬼影 ${ghostPosition}，路径节点 ${activePathIndex}）`
+          : `第三转角检测：仍有 ${blockedSamples}/${turnSamples.length} 个阻挡采样`;
+      }
+      if (!this.baishaDebugEnergyChecked && this.baishaGhostState === "dormant") {
+        const energy = this.pickupsByItemId.get("energy");
+        const visuals = this.assetPickupVisuals.get("energy") ?? [];
+        if (!energy) return "能量饮料检测：拾取点未创建";
+        const viewZ = energy.position.z + 1.15;
+        this.camera.position.set(
+          energy.position.x,
+          this.room.floorHeightAt(energy.position.x, viewZ) + this.crouchState.eyeHeight,
+          viewZ,
+        );
+        this.cameraController.setLook(0, -0.72);
+        this.baishaDebugEnergyChecked = true;
+        const visibleVisuals = visuals.filter((object) => object.visible).length;
+        return visuals.length > 0 && visibleVisuals === visuals.length
+          ? `能量饮料检测：模型已加载（${energy.position.x.toFixed(2)}, ${energy.position.z.toFixed(2)}）`
+          : `能量饮料检测：${visibleVisuals}/${visuals.length} 个模型节点可见`;
+      }
+      if (this.baishaDebugDoorChecked && chase && this.baishaGhostState === "dormant") {
+        const z = chase.exitThresholdZ - 0.45;
+        this.camera.position.set(centerX, this.room.floorHeightAt(centerX, z) + this.crouchState.eyeHeight, z);
+        const dx = chase.ghost.x - this.camera.position.x;
+        const dz = chase.ghost.z - this.camera.position.z;
+        this.cameraController.setLook(Math.atan2(-dx, -dz), -0.04);
+        return "追逐准备：观察瘦长鬼影";
+      }
+      const sampleCount = 9;
+      let blockedSamples = 0;
+      for (let index = 0; index < sampleCount; index++) {
+        const z = THREE.MathUtils.lerp(door.minZ, door.maxZ, index / (sampleCount - 1));
+        if (this.collides(centerX, z)) blockedSamples++;
+      }
+      this.camera.position.set(centerX, this.room.floorHeightAt(centerX, door.maxZ + 0.55) + this.crouchState.eyeHeight, door.maxZ + 0.55);
+      this.cameraController.setLook(0, -0.08);
+      this.baishaDebugDoorChecked = true;
+      return blockedSamples === 0
+        ? "门洞检测：可通行"
+        : `门洞检测：仍有 ${blockedSamples}/${sampleCount} 个阻挡采样`;
+    }
+    const target = gameplay[phase];
+    const targetVector = new THREE.Vector3(target.x, EYE_HEIGHT, target.z);
+    let safe: THREE.Vector3 | undefined;
+    for (const radius of [0, target.radius * 0.35, target.radius * 0.62, target.radius * 0.84]) {
+      const steps = radius === 0 ? 1 : 24;
+      for (let step = 0; step < steps; step++) {
+        const angle = (Math.PI * 2 * step) / steps;
+        const x = this.clampToBounds(target.x + Math.cos(angle) * radius, this.bounds.minX, this.bounds.maxX);
+        const z = this.clampToBounds(target.z + Math.sin(angle) * radius, this.bounds.minZ, this.bounds.maxZ);
+        if (!this.collides(x, z)) {
+          safe = new THREE.Vector3(x, target.y, z);
+          break;
+        }
+      }
+      if (safe) break;
+    }
+    safe ??= this.findNearestClearPoint(targetVector)
+      ?? this.findNearestAssetClearPoint(targetVector)
+      ?? targetVector;
+    this.camera.position.set(safe.x, this.room.floorHeightAt(safe.x, safe.z) + this.crouchState.eyeHeight, safe.z);
+    const dx = target.x - safe.x;
+    const dz = target.z - safe.z;
+    this.cameraController.setLook(Math.atan2(-dx, -dz), -0.08);
+    this.resolvePenetration();
+    return `已前往白沙目标：${phase}`;
+  }
+
   /** Nearest door interaction hint text, or "" when nothing is in range. */
   get doorHint(): string {
     const door = this.findNearestDoor();
@@ -595,6 +985,8 @@ export class Interior3D {
     window.dispatchEvent(new CustomEvent("zju-horror-library-lightning", { detail: { active: false } }));
     this.clearAssetFlickerLights();
     this.clearAssetCeilingLights();
+    this.clearBaishaLighting();
+    this.clearBaishaGameplay();
     this.room.dispose();
     this.scene.clear();
 
@@ -642,6 +1034,8 @@ export class Interior3D {
       this.applyAssetPresentation(handle);
       this.bindInteriorAssetMetadata(handle);
       this.addAssetCeilingLights(handle);
+      this.addBaishaLighting(handle);
+      this.setupBaishaGameplay(handle);
       this.suppressLegacyGuidance = this.roomKind === "library" || !handle.meta;
       if (this.suppressLegacyGuidance) {
         this.bloodLightEnabled = false;
@@ -651,6 +1045,26 @@ export class Interior3D {
         if (this.guideLine) this.guideLine.visible = false;
       }
       this.setProceduralRoomVisualsVisible(false);
+      // Warm shaders, textures and shadow programs while the Baisha entry veil
+      // is still opaque. This preserves the exact render settings while
+      // removing the first visible frame hitch after the choice closes.
+      try {
+        await this.renderer.compileAsync(this.scene, this.camera);
+      } catch (compileError) {
+        console.warn("[Interior3D] Shader warm-up was unavailable; continuing with the loaded asset:", compileError);
+      }
+      if (this.disposed) return;
+      if (this.roomKind === "dorm" && handle.meta?.buildingId === "dorm-baisha" && !this.isMobile) {
+        // The authored dorm and its shadow casters are static. Reuse the exact
+        // 1024px flashlight shadow map while the camera is still, then refresh
+        // it on every position/rotation change. Quality is unchanged; the
+        // redundant shadow pass disappears during idle/story reading frames.
+        this.baishaShadowCacheEnabled = true;
+        this.renderer.shadowMap.autoUpdate = false;
+        this.renderer.shadowMap.needsUpdate = true;
+        this.baishaShadowCameraPosition.copy(this.camera.position);
+        this.baishaShadowCameraQuaternion.copy(this.camera.quaternion);
+      }
       this.onAssetStateChange?.("ready");
       window.dispatchEvent(new CustomEvent("zju-horror-interior-asset-state", {
         detail: {
@@ -680,17 +1094,12 @@ export class Interior3D {
     // The procedural room uses a different coordinate system. Once an
     // authored GLB is present, its projected meshes become collision truth.
     const clearZones = handle.meta?.navigationClearZones ?? [];
-    this.colliders = handle.collisionMap.obstacles.filter((obstacle) => {
-      const centerX = (obstacle.minX + obstacle.maxX) * 0.5;
-      const centerZ = (obstacle.minZ + obstacle.maxZ) * 0.5;
-      return !clearZones.some((zone) => (
-        (!zone.kind || zone.kind === obstacle.kind)
-        && centerX >= zone.minX
-        && centerX <= zone.maxX
-        && centerZ >= zone.minZ
-        && centerZ <= zone.maxZ
-      ));
-    });
+    this.colliders = handle.collisionMap.obstacles.flatMap((obstacle) => (
+      clearZones.reduce<InteriorMapObstacle[]>(
+        (pieces, zone) => pieces.flatMap((piece) => cutObstacleByClearZone(piece, zone)),
+        [obstacle],
+      )
+    ));
     this.staticColliderSet = this.colliders.every((collider) => (
       !collider.isActive && !collider.activeSceneIds?.length
     ));
@@ -791,7 +1200,7 @@ export class Interior3D {
       const clearSpots = spots.filter((spot) => !this.collides(spot.x, spot.z));
       const choices = clearSpots.length > 0 ? clearSpots : spots;
       const spot = choices[Math.floor(Math.random() * choices.length)];
-      pickup.position.set(spot.x, pickup.position.y, spot.z);
+      pickup.position.set(spot.x, spot.y ?? pickup.position.y, spot.z);
       pickup.glow.position.set(spot.x, pickup.glow.position.y, spot.z);
       if (spot.radius) pickup.radius = spot.radius;
     }
@@ -867,7 +1276,7 @@ export class Interior3D {
     }
 
     const isPaperClue = itemId === "receipt" || itemId === "talisman";
-    const emissiveIntensity = isPaperClue ? 1.22 : 0.18;
+    const emissiveIntensity = itemId === "energy" ? 1.05 : isPaperClue ? 1.22 : 0.18;
     for (const mesh of meshes) {
       const source = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       const materials = source.map((material) => {
@@ -921,12 +1330,17 @@ export class Interior3D {
     };
 
     for (const pickup of this.room.pickups) {
-      if (pickup.itemId === "flashlight" || pickup.itemId === "receipt" || pickup.itemId === "talisman") {
+      if (
+        pickup.itemId === "flashlight"
+        || pickup.itemId === "receipt"
+        || pickup.itemId === "talisman"
+        || pickup.itemId === "energy"
+      ) {
         add(
           `pickup:${pickup.itemId}`,
           pickup.position,
-          pickup.itemId === "flashlight" ? 5.6 : 5.1,
-          pickup.itemId === "flashlight" ? 5.2 : 4.7,
+          pickup.itemId === "flashlight" ? 5.6 : pickup.itemId === "energy" ? 3.4 : 5.1,
+          pickup.itemId === "flashlight" ? 5.2 : pickup.itemId === "energy" ? 3.8 : 4.7,
         );
       }
     }
@@ -1110,6 +1524,908 @@ export class Interior3D {
     this.assetCeilingLights.length = 0;
   }
 
+  private setupBaishaGameplay(handle: InteriorAssetHandle): void {
+    const gameplay = handle.meta?.baishaGameplay;
+    if (this.roomKind !== "dorm" || !gameplay) return;
+
+    this.clearBaishaGameplay();
+    this.baishaGameplayPhase = "photo";
+    this.baishaTriggeredPhase = undefined;
+    this.baishaGhostState = "dormant";
+    this.baishaChaseArmed = false;
+    this.baishaChaseBranch = "shortcut";
+    this.baishaChasePathIndex = 1;
+    this.baishaShortcutPath = [];
+    this.baishaPursuitPath = [];
+    this.baishaPursuitPathIndex = 1;
+    this.baishaNextRepathAt = Number.NEGATIVE_INFINITY;
+    this.baishaLastPursuitTarget.set(Number.NaN, Number.NaN);
+    this.baishaChaseTriggeredAt = Number.POSITIVE_INFINITY;
+    this.baishaCaptureDisabledUntil = Number.POSITIVE_INFINITY;
+    this.baishaHalfSpeedUntil = Number.NEGATIVE_INFINITY;
+    this.baishaTrueExitOpen = false;
+    this.baishaPlayerReachedTriangle = false;
+    this.baishaCaptureReported = false;
+    this.baishaExitReported = false;
+    this.baishaEnergyActive = false;
+    this.baishaDebugEnergyChecked = false;
+    this.baishaPreExitColliders = undefined;
+    this.baishaPreExitMapObstacles = undefined;
+    this.baishaDebugDoorChecked = false;
+    this.baishaDoorCollider = { ...gameplay.door.collisionBounds };
+    this.colliders.push(this.baishaDoorCollider);
+
+    for (const name of gameplay.computer.visualNames ?? []) {
+      const visual = getInteriorAssetObject(handle.root, name);
+      visual?.traverse((object) => {
+        const mesh = object as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        const sourceMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        const cloned = sourceMaterials.map((source) => source.clone());
+        mesh.material = Array.isArray(mesh.material) ? cloned : cloned[0];
+        for (const material of cloned) {
+          const standard = material as THREE.MeshStandardMaterial;
+          if (!standard.emissive) continue;
+          this.baishaComputerMaterials.push({
+            material: standard,
+            emissive: standard.emissive.clone(),
+            emissiveIntensity: standard.emissiveIntensity,
+            color: standard.color.clone(),
+          });
+        }
+      });
+    }
+
+    this.baishaComputerLight = new THREE.PointLight(0xf00618, 0, 5.6, 1.55);
+    this.baishaComputerLight.name = "baisha_computer_red_light";
+    this.baishaComputerLight.position.set(gameplay.computer.x, gameplay.computer.y, gameplay.computer.z);
+    this.scene.add(this.baishaComputerLight);
+    this.setBaishaComputerGlow(false);
+
+    const chase = gameplay.chase;
+    if (chase) {
+      this.baishaGhostVisual = getInteriorAssetObject(handle.root, chase.ghostVisualName);
+      this.baishaShortcutPath = this.getBaishaShortcutPath();
+      const start = this.baishaShortcutPath[0] ?? gameplay.chasePrep?.ghost;
+      if (start) this.setBaishaGhostPosition(start.x, start.z);
+    }
+  }
+
+  private clearBaishaGameplay(): void {
+    if (this.baishaComputerLight) this.scene.remove(this.baishaComputerLight);
+    this.baishaComputerLight = undefined;
+    this.baishaComputerMaterials.length = 0;
+    this.baishaDoorCollider = undefined;
+    this.baishaTriggeredPhase = undefined;
+    this.baishaGameplayPhase = "photo";
+    this.baishaGhostState = "dormant";
+    this.baishaChaseArmed = false;
+    this.baishaGhostVisual = undefined;
+    this.baishaChaseBranch = "shortcut";
+    this.baishaChasePathIndex = 1;
+    this.baishaShortcutPath = [];
+    this.baishaPursuitPath = [];
+    this.baishaPursuitPathIndex = 1;
+    this.baishaNextRepathAt = Number.NEGATIVE_INFINITY;
+    this.baishaLastPursuitTarget.set(Number.NaN, Number.NaN);
+    this.baishaChaseTriggeredAt = Number.POSITIVE_INFINITY;
+    this.baishaCaptureDisabledUntil = Number.POSITIVE_INFINITY;
+    this.baishaHalfSpeedUntil = Number.NEGATIVE_INFINITY;
+    this.baishaTrueExitOpen = false;
+    this.baishaPlayerReachedTriangle = false;
+    this.baishaCaptureReported = false;
+    this.baishaExitReported = false;
+    this.baishaEnergyActive = false;
+    this.baishaDebugEnergyChecked = false;
+    this.baishaPreExitColliders = undefined;
+    this.baishaPreExitMapObstacles = undefined;
+    this.baishaDebugDoorChecked = false;
+    if (this.baishaShadowCacheEnabled) {
+      this.baishaShadowCacheEnabled = false;
+      this.renderer.shadowMap.autoUpdate = true;
+      this.renderer.shadowMap.needsUpdate = true;
+    }
+    this.gameplayPaused = false;
+  }
+
+  private updateBaishaShadowCache(): void {
+    if (!this.baishaShadowCacheEnabled) return;
+    if (
+      this.camera.position.equals(this.baishaShadowCameraPosition)
+      && this.camera.quaternion.equals(this.baishaShadowCameraQuaternion)
+    ) return;
+    this.baishaShadowCameraPosition.copy(this.camera.position);
+    this.baishaShadowCameraQuaternion.copy(this.camera.quaternion);
+    this.renderer.shadowMap.needsUpdate = true;
+  }
+
+  private setBaishaComputerGlow(active: boolean): void {
+    if (this.baishaComputerLight) this.baishaComputerLight.intensity = active ? 7.2 : 0;
+    for (const entry of this.baishaComputerMaterials) {
+      entry.material.emissive.copy(active ? new THREE.Color(0xef0619) : entry.emissive);
+      entry.material.emissiveIntensity = active ? 5.4 : entry.emissiveIntensity;
+      entry.material.color.copy(active ? new THREE.Color(0x5f0710) : entry.color);
+      entry.material.needsUpdate = true;
+    }
+  }
+
+  private collectBaishaGameplayTrigger(): void {
+    if (this.roomKind !== "dorm" || this.gameplayPaused) return;
+    if (this.baishaGameplayPhase === "paused" || this.baishaGameplayPhase === "complete") return;
+    const gameplay = this.assetHandle?.meta?.baishaGameplay;
+    if (!gameplay) return;
+    const phase = this.baishaGameplayPhase;
+    const target = gameplay[phase];
+    if (!target || this.baishaTriggeredPhase === phase) return;
+    const dx = this.camera.position.x - target.x;
+    const dz = this.camera.position.z - target.z;
+    if (dx * dx + dz * dz > target.radius * target.radius) return;
+    this.baishaTriggeredPhase = phase;
+    this.ePressed = false;
+    this.onBaishaTrigger?.(phase);
+  }
+
+  private updateBaishaChasePrep(): void {
+    if (this.roomKind !== "dorm" || this.gameplayPaused || this.baishaGameplayPhase !== "complete") return;
+    if (this.baishaGhostState === "chase") return;
+    const config = this.assetHandle?.meta?.baishaGameplay?.chasePrep;
+    if (!config) return;
+
+    if (!this.baishaChaseArmed) {
+      if (this.camera.position.z >= config.exitThresholdZ) return;
+      this.baishaChaseArmed = true;
+      this.baishaChaseExitOrigin.set(this.camera.position.x, this.camera.position.z);
+    }
+
+    this.baishaChaseViewPoint.set(config.ghost.x, config.ghost.y, config.ghost.z).project(this.camera);
+    const dx = this.camera.position.x - config.ghost.x;
+    const dz = this.camera.position.z - config.ghost.z;
+    const ghostInView = dx * dx + dz * dz <= config.viewDistance * config.viewDistance
+      && this.baishaChaseViewPoint.z >= -1
+      && this.baishaChaseViewPoint.z <= 1
+      && Math.abs(this.baishaChaseViewPoint.x) <= 0.92
+      && Math.abs(this.baishaChaseViewPoint.y) <= 0.92;
+
+    const fleeX = config.fleeDirectionX;
+    const fleeZ = config.fleeDirectionZ;
+    const fleeLength = Math.hypot(fleeX, fleeZ) || 1;
+    const fledDistance = (
+      (this.camera.position.x - this.baishaChaseExitOrigin.x) * fleeX
+      + (this.camera.position.z - this.baishaChaseExitOrigin.y) * fleeZ
+    ) / fleeLength;
+    if (!ghostInView && fledDistance < config.fleeDistance) return;
+
+    this.baishaGhostState = "chase";
+    const now = this.clock.elapsedTime;
+    const chase = this.assetHandle?.meta?.baishaGameplay?.chase;
+    this.baishaChaseTriggeredAt = now;
+    this.baishaCaptureDisabledUntil = now
+      + (chase?.jumpscareDuration ?? 1.3)
+      + (chase?.openingHoldSeconds ?? 1);
+    this.baishaChaseBranch = "shortcut";
+    this.baishaChasePathIndex = 1;
+    this.baishaShortcutPath = this.getBaishaShortcutPath();
+    this.baishaPursuitPath = [];
+    this.baishaPursuitPathIndex = 1;
+    this.baishaNextRepathAt = Number.NEGATIVE_INFINITY;
+    this.baishaLastPursuitTarget.set(Number.NaN, Number.NaN);
+    const next = this.baishaShortcutPath[1];
+    if (next) this.faceBaishaGhostToward(next.x, next.z);
+    this.moveCtx.sprintSpeed = this.blueprint.movement.sprintSpeed * (this.baishaEnergyActive ? 1 : 0.9);
+    this.baishaLightningUntil = now + 0.28;
+    this.nextBaishaLightningAt = now + 7 + Math.random() * 2;
+    playBaishaThunder();
+    this.onBaishaChaseStart?.();
+  }
+
+  private updateBaishaChase(dt: number): void {
+    if (this.roomKind !== "dorm" || this.gameplayPaused || this.baishaGhostState !== "chase") return;
+    if (this.baishaCaptureReported || this.baishaExitReported) return;
+    const chase = this.assetHandle?.meta?.baishaGameplay?.chase;
+    if (!chase || !this.baishaGhostVisual) return;
+
+    const playerX = this.camera.position.x;
+    const playerZ = this.camera.position.z;
+    const triangleDistance = Math.hypot(playerX - chase.triangle.x, playerZ - chase.triangle.z);
+    const unlockZone = chase.trueExit.unlockZone;
+    const reachedUnlockZone = unlockZone
+      ? playerX >= unlockZone.minX
+        && playerX <= unlockZone.maxX
+        && playerZ >= unlockZone.minZ
+        && playerZ <= unlockZone.maxZ
+      : triangleDistance <= chase.triangle.radius;
+    if (!this.baishaPlayerReachedTriangle && reachedUnlockZone) {
+      this.baishaPlayerReachedTriangle = true;
+      this.openBaishaTrueExit();
+    }
+
+    const now = this.clock.elapsedTime;
+    const movementStart = this.baishaChaseTriggeredAt + chase.jumpscareDuration;
+    const holdEnd = movementStart + chase.openingHoldSeconds;
+    const openingHalfEnd = holdEnd + chase.openingHalfSpeedSeconds;
+    let speedFactor = now < holdEnd ? 0 : now < openingHalfEnd ? 0.5 : 1;
+    if (now < this.baishaHalfSpeedUntil) speedFactor = Math.min(speedFactor, 0.5);
+
+    const travelDistance = chase.fullSpeed * speedFactor * dt;
+    if (this.baishaChaseBranch === "shortcut") {
+      if (speedFactor > 0) this.advanceBaishaGhost(this.baishaShortcutPath, travelDistance);
+      if (this.baishaChasePathIndex >= this.baishaShortcutPath.length) {
+        // The only forced portion of the chase is the verified white-marked
+        // doorway and the corridor between the two long partitions. Once the
+        // ghost reaches the shortcut outlet, every following turn is selected
+        // from the live player position on the authored walkable graph.
+        this.baishaChaseBranch = "pursuit";
+        this.baishaPursuitPath = [];
+        this.baishaPursuitPathIndex = 1;
+        this.baishaNextRepathAt = Number.NEGATIVE_INFINITY;
+        this.baishaLastPursuitTarget.set(Number.NaN, Number.NaN);
+        if (!this.baishaPlayerReachedTriangle) {
+          this.baishaCaptureDisabledUntil = now + chase.encounterGraceSeconds;
+          this.baishaHalfSpeedUntil = now + chase.encounterHalfSpeedSeconds;
+          this.openBaishaTrueExit();
+        }
+      }
+    } else if (speedFactor > 0) {
+      this.advanceBaishaGhostPursuit(playerX, playerZ, travelDistance, now);
+    }
+
+    const playerDistance = Math.hypot(playerX - this.baishaGhostPosition.x, playerZ - this.baishaGhostPosition.y);
+
+    const exit = chase.trueExit.trigger;
+    const exitDistance = Math.hypot(playerX - exit.x, playerZ - exit.z);
+    if (this.baishaTrueExitOpen && exitDistance <= exit.radius) {
+      this.baishaExitReported = true;
+      this.gameplayPaused = true;
+      this.inputManager.reset();
+      this.onBaishaExit?.();
+      return;
+    }
+
+    if (
+      now >= this.baishaCaptureDisabledUntil
+      && playerDistance <= chase.captureDistance
+      && this.isBaishaLineOfSightClear(playerX, playerZ)
+    ) {
+      this.baishaCaptureReported = true;
+      this.gameplayPaused = true;
+      this.inputManager.reset();
+      this.moveCtx.velocity.x = 0;
+      this.moveCtx.velocity.y = 0;
+      this.onBaishaCapture?.();
+    }
+  }
+
+  private getBaishaShortcutPath(): Array<{ x: number; z: number }> {
+    const navigation = this.assetHandle?.meta?.baishaGameplay?.chase?.navigation;
+    if (!navigation) return [];
+    const nodes = new Map(navigation.nodes.map((node) => [node.id, node]));
+    return navigation.shortcutNodeIds.flatMap((id) => {
+      const node = nodes.get(id);
+      return node ? [{ x: node.x, z: node.z }] : [];
+    });
+  }
+
+  private advanceBaishaGhost(path: Array<{ x: number; z: number }>, distance: number): void {
+    if (path.length === 0 || distance <= 0) return;
+    let remaining = distance;
+    while (remaining > 0 && this.baishaChasePathIndex < path.length) {
+      const target = path[this.baishaChasePathIndex];
+      const dx = target.x - this.baishaGhostPosition.x;
+      const dz = target.z - this.baishaGhostPosition.y;
+      const length = Math.hypot(dx, dz);
+      if (length <= 0.001) {
+        this.baishaChasePathIndex++;
+        continue;
+      }
+      const step = Math.min(remaining, length);
+      this.setBaishaGhostPosition(
+        this.baishaGhostPosition.x + dx / length * step,
+        this.baishaGhostPosition.y + dz / length * step,
+      );
+      remaining -= step;
+      if (step >= length - 0.001) this.baishaChasePathIndex++;
+    }
+  }
+
+  private advanceBaishaGhostPursuit(playerX: number, playerZ: number, distance: number, now: number): void {
+    const chase = this.assetHandle?.meta?.baishaGameplay?.chase;
+    if (!chase) return;
+    const targetMoved = !Number.isFinite(this.baishaLastPursuitTarget.x)
+      || this.baishaLastPursuitTarget.distanceToSquared(new THREE.Vector2(playerX, playerZ)) > 0.64;
+    const pathFinished = this.baishaPursuitPathIndex >= this.baishaPursuitPath.length;
+    if (pathFinished || targetMoved || now >= this.baishaNextRepathAt) {
+      const nextPath = this.findBaishaPursuitPath(playerX, playerZ);
+      // Never keep following a stale route after a repath. If the player is
+      // already on the same projected graph point the route legitimately has
+      // fewer than two points and the ghost should wait for the next live
+      // projection, not continue toward an obsolete corner.
+      this.baishaPursuitPath = nextPath;
+      this.baishaPursuitPathIndex = nextPath.length >= 2 ? 1 : nextPath.length;
+      this.baishaLastPursuitTarget.set(playerX, playerZ);
+      this.baishaNextRepathAt = now + (chase.repathSeconds ?? 0.28);
+    }
+
+    let remaining = distance;
+    while (remaining > 0 && this.baishaPursuitPathIndex < this.baishaPursuitPath.length) {
+      const target = this.baishaPursuitPath[this.baishaPursuitPathIndex];
+      const dx = target.x - this.baishaGhostPosition.x;
+      const dz = target.z - this.baishaGhostPosition.y;
+      const length = Math.hypot(dx, dz);
+      if (length <= 0.001) {
+        this.baishaPursuitPathIndex++;
+        continue;
+      }
+      const step = Math.min(remaining, length);
+      this.setBaishaGhostPosition(
+        this.baishaGhostPosition.x + dx / length * step,
+        this.baishaGhostPosition.y + dz / length * step,
+      );
+      remaining -= step;
+      if (step >= length - 0.001) this.baishaPursuitPathIndex++;
+    }
+  }
+
+  /**
+   * Route on the authored corridor graph instead of the raw collision grid.
+   * The graph contains only walkable centre-lines, so doors and 90-degree
+   * corridor turns stay semantically stable even when the GLB is re-batched.
+   */
+  private findBaishaPursuitPath(playerX: number, playerZ: number): Array<{ x: number; z: number }> {
+    const chase = this.assetHandle?.meta?.baishaGameplay?.chase;
+    const navigation = chase?.navigation;
+    if (!navigation || navigation.nodes.length === 0) return [];
+
+    type GraphPoint = { x: number; z: number };
+    type ActiveEdge = {
+      from: number;
+      to: number;
+      length: number;
+      targetable: boolean;
+    };
+    const points: GraphPoint[] = navigation.nodes.map(({ x, z }) => ({ x, z }));
+    const nodeIndices = new Map(navigation.nodes.map((node, index) => [node.id, index]));
+    const edges: ActiveEdge[] = navigation.edges.flatMap((edge) => {
+      if (edge.requiresExitOpen && !this.baishaTrueExitOpen) return [];
+      const from = nodeIndices.get(edge.from);
+      const to = nodeIndices.get(edge.to);
+      if (from === undefined || to === undefined) return [];
+      const a = points[from];
+      const b = points[to];
+      return [{
+        from,
+        to,
+        length: Math.hypot(b.x - a.x, b.z - a.z),
+        targetable: edge.targetable !== false,
+      }];
+    });
+    if (edges.length === 0) return [];
+
+    const project = (x: number, z: number, targetOnly: boolean) => {
+      let best: { edgeIndex: number; x: number; z: number; t: number; distance: number } | undefined;
+      edges.forEach((edge, edgeIndex) => {
+        if (targetOnly && !edge.targetable) return;
+        const a = points[edge.from];
+        const b = points[edge.to];
+        const dx = b.x - a.x;
+        const dz = b.z - a.z;
+        const lengthSquared = dx * dx + dz * dz;
+        const t = lengthSquared > 0
+          ? THREE.MathUtils.clamp(((x - a.x) * dx + (z - a.z) * dz) / lengthSquared, 0, 1)
+          : 0;
+        const projectedX = a.x + dx * t;
+        const projectedZ = a.z + dz * t;
+        const distance = Math.hypot(x - projectedX, z - projectedZ);
+        if (!best || distance < best.distance) {
+          best = { edgeIndex, x: projectedX, z: projectedZ, t, distance };
+        }
+      });
+      return best;
+    };
+
+    const startProjection = project(this.baishaGhostPosition.x, this.baishaGhostPosition.y, false);
+    const goalProjection = project(playerX, playerZ, true);
+    if (!startProjection || !goalProjection) return [];
+
+    const adjacency: Array<Array<{ to: number; weight: number }>> = points.map(() => []);
+    const addUndirected = (from: number, to: number, weight: number): void => {
+      adjacency[from].push({ to, weight });
+      adjacency[to].push({ to: from, weight });
+    };
+    for (const edge of edges) addUndirected(edge.from, edge.to, edge.length);
+
+    const appendPoint = (point: GraphPoint): number => {
+      points.push(point);
+      adjacency.push([]);
+      return points.length - 1;
+    };
+    const startIndex = appendPoint({ x: this.baishaGhostPosition.x, z: this.baishaGhostPosition.y });
+    const startProjectionIndex = appendPoint({ x: startProjection.x, z: startProjection.z });
+    const goalProjectionIndex = appendPoint({ x: goalProjection.x, z: goalProjection.z });
+    const goalIndex = appendPoint({ x: playerX, z: playerZ });
+    addUndirected(startIndex, startProjectionIndex, startProjection.distance);
+    addUndirected(goalProjectionIndex, goalIndex, goalProjection.distance);
+
+    const connectProjection = (
+      projectionIndex: number,
+      projection: NonNullable<typeof startProjection>,
+    ): void => {
+      const edge = edges[projection.edgeIndex];
+      addUndirected(projectionIndex, edge.from, projection.t * edge.length);
+      addUndirected(projectionIndex, edge.to, (1 - projection.t) * edge.length);
+    };
+    connectProjection(startProjectionIndex, startProjection);
+    connectProjection(goalProjectionIndex, goalProjection);
+    if (startProjection.edgeIndex === goalProjection.edgeIndex) {
+      const edge = edges[startProjection.edgeIndex];
+      addUndirected(
+        startProjectionIndex,
+        goalProjectionIndex,
+        Math.abs(startProjection.t - goalProjection.t) * edge.length,
+      );
+    }
+
+    const distances = new Float64Array(points.length);
+    distances.fill(Number.POSITIVE_INFINITY);
+    distances[startIndex] = 0;
+    const parents = new Int32Array(points.length);
+    parents.fill(-1);
+    const visited = new Uint8Array(points.length);
+    for (let iteration = 0; iteration < points.length; iteration++) {
+      let current = -1;
+      let bestDistance = Number.POSITIVE_INFINITY;
+      for (let index = 0; index < points.length; index++) {
+        if (!visited[index] && distances[index] < bestDistance) {
+          current = index;
+          bestDistance = distances[index];
+        }
+      }
+      if (current < 0 || current === goalIndex) break;
+      visited[current] = 1;
+      for (const edge of adjacency[current]) {
+        const candidate = distances[current] + edge.weight;
+        if (candidate >= distances[edge.to]) continue;
+        distances[edge.to] = candidate;
+        parents[edge.to] = current;
+      }
+    }
+    if (!Number.isFinite(distances[goalIndex])) return [];
+
+    const routeIndices: number[] = [];
+    for (let current = goalIndex; current >= 0; current = parents[current]) routeIndices.push(current);
+    routeIndices.reverse();
+    const route = routeIndices.map((index) => points[index]);
+    const compact: GraphPoint[] = [];
+    for (const point of route) {
+      const last = compact[compact.length - 1];
+      if (last && Math.hypot(point.x - last.x, point.z - last.z) <= 0.001) continue;
+      if (compact.length >= 2) {
+        const before = compact[compact.length - 2];
+        const ax = last.x - before.x;
+        const az = last.z - before.z;
+        const bx = point.x - last.x;
+        const bz = point.z - last.z;
+        const collinear = Math.abs(ax * bz - az * bx) <= 0.001;
+        const sameDirection = ax * bx + az * bz >= 0;
+        if (collinear && sameDirection) {
+          compact[compact.length - 1] = point;
+          continue;
+        }
+      }
+      compact.push(point);
+    }
+    return compact;
+  }
+
+  private faceBaishaGhostToward(x: number, z: number): void {
+    if (!this.baishaGhostVisual) return;
+    const dx = x - this.baishaGhostPosition.x;
+    const dz = z - this.baishaGhostPosition.y;
+    if (dx * dx + dz * dz <= 0.000001) return;
+    const yawOffset = this.assetHandle?.meta?.baishaGameplay?.chase?.ghostYawOffset ?? Math.PI / 2;
+    this.baishaGhostVisual.rotation.y = Math.atan2(dx, dz) + yawOffset;
+  }
+
+  private setBaishaGhostPosition(x: number, z: number): void {
+    const previousX = this.baishaGhostPosition.x;
+    const previousZ = this.baishaGhostPosition.y;
+    this.baishaGhostPosition.set(x, z);
+    if (!this.baishaGhostVisual) return;
+    this.baishaGhostVisual.position.x = x;
+    this.baishaGhostVisual.position.z = z;
+    const dx = x - previousX;
+    const dz = z - previousZ;
+    if (this.baishaGhostState === "chase" && dx * dx + dz * dz > 0.000001) {
+      const yawOffset = this.assetHandle?.meta?.baishaGameplay?.chase?.ghostYawOffset ?? Math.PI / 2;
+      this.baishaGhostVisual.rotation.y = Math.atan2(dx, dz) + yawOffset;
+    }
+    this.baishaGhostVisual.updateMatrixWorld(true);
+  }
+
+  private openBaishaTrueExit(): void {
+    if (this.baishaTrueExitOpen) return;
+    const chase = this.assetHandle?.meta?.baishaGameplay?.chase;
+    if (!chase) return;
+    this.baishaTrueExitOpen = true;
+    this.baishaPreExitColliders = this.colliders;
+    this.baishaPreExitMapObstacles = this.interiorMapObstacles;
+
+    for (const name of chase.trueExit.visualNames) {
+      const visual = this.assetHandle ? getInteriorAssetObject(this.assetHandle.root, name) : undefined;
+      if (visual) visual.visible = false;
+    }
+    this.colliders = chase.trueExit.clearZones.reduce<AABB[]>((colliders, zone) => (
+      colliders.flatMap((collider) => cutObstacleByClearZone(
+        { ...collider, kind: "wall" },
+        zone,
+      ).map(({ kind: _kind, ...piece }) => piece))
+    ), this.colliders);
+    if (this.interiorMapObstacles) {
+      this.interiorMapObstacles = chase.trueExit.clearZones.reduce<InteriorMapObstacle[]>((obstacles, zone) => (
+        obstacles.flatMap((obstacle) => cutObstacleByClearZone(obstacle, zone))
+      ), this.interiorMapObstacles);
+    }
+    if (this.baishaShadowCacheEnabled) this.renderer.shadowMap.needsUpdate = true;
+  }
+
+  private restoreBaishaTrueExit(): void {
+    const chase = this.assetHandle?.meta?.baishaGameplay?.chase;
+    if (!chase) return;
+    for (const name of chase.trueExit.visualNames) {
+      const visual = this.assetHandle ? getInteriorAssetObject(this.assetHandle.root, name) : undefined;
+      if (visual) visual.visible = true;
+    }
+    if (this.baishaPreExitColliders) this.colliders = this.baishaPreExitColliders;
+    if (this.baishaPreExitMapObstacles) this.interiorMapObstacles = this.baishaPreExitMapObstacles;
+    this.baishaPreExitColliders = undefined;
+    this.baishaPreExitMapObstacles = undefined;
+    this.baishaTrueExitOpen = false;
+  }
+
+  private isBaishaLineOfSightClear(playerX: number, playerZ: number): boolean {
+    const dx = playerX - this.baishaGhostPosition.x;
+    const dz = playerZ - this.baishaGhostPosition.y;
+    for (let sample = 1; sample < 5; sample++) {
+      const amount = sample / 5;
+      const x = this.baishaGhostPosition.x + dx * amount;
+      const z = this.baishaGhostPosition.y + dz * amount;
+      if (this.colliders.some((collider) => (
+        (!collider.isActive || collider.isActive())
+        && x >= collider.minX
+        && x <= collider.maxX
+        && z >= collider.minZ
+        && z <= collider.maxZ
+      ))) return false;
+    }
+    return true;
+  }
+
+  private addBaishaLighting(handle: InteriorAssetHandle): void {
+    const config = handle.meta?.baishaLighting;
+    if (this.roomKind !== "dorm" || !config) return;
+
+    this.clearBaishaLighting();
+    this.baishaRevealAhead = config.revealAhead ?? 3;
+    const raisedCeiling = handle.meta?.baishaRaisedCeiling;
+    if (raisedCeiling) {
+      const { minX, maxX, minZ, maxZ, baseY, raisedY } = raisedCeiling;
+      const width = maxX - minX;
+      const depth = maxZ - minZ;
+      const lift = raisedY - baseY;
+      const group = new THREE.Group();
+      group.name = "baisha_raised_shortcut_ceiling";
+      const material = new THREE.MeshStandardMaterial({
+        color: 0x130a0b,
+        roughness: 0.96,
+        metalness: 0,
+      });
+      const addPanel = (geometry: THREE.BoxGeometry, x: number, y: number, z: number): void => {
+        const panel = new THREE.Mesh(geometry, material);
+        panel.position.set(x, y, z);
+        panel.castShadow = true;
+        panel.receiveShadow = true;
+        group.add(panel);
+      };
+      addPanel(new THREE.BoxGeometry(width, 0.14, depth), (minX + maxX) * 0.5, raisedY, (minZ + maxZ) * 0.5);
+      addPanel(new THREE.BoxGeometry(0.14, lift, depth), minX, baseY + lift * 0.5, (minZ + maxZ) * 0.5);
+      addPanel(new THREE.BoxGeometry(0.14, lift, depth), maxX, baseY + lift * 0.5, (minZ + maxZ) * 0.5);
+      addPanel(new THREE.BoxGeometry(width, lift, 0.14), (minX + maxX) * 0.5, baseY + lift * 0.5, minZ);
+      addPanel(new THREE.BoxGeometry(width, lift, 0.14), (minX + maxX) * 0.5, baseY + lift * 0.5, maxZ);
+      const divider = raisedCeiling.dividerExtension;
+      if (divider) {
+        const dividerHeight = divider.topY - divider.baseY;
+        addPanel(
+          new THREE.BoxGeometry(
+            divider.maxX - divider.minX,
+            dividerHeight,
+            divider.maxZ - divider.minZ,
+          ),
+          (divider.minX + divider.maxX) * 0.5,
+          divider.baseY + dividerHeight * 0.5,
+          (divider.minZ + divider.maxZ) * 0.5,
+        );
+      }
+      this.scene.add(group);
+      this.baishaRaisedCeiling = group;
+    }
+    this.baishaTubeGeometry = new THREE.BoxGeometry(2.35, 0.045, 0.075);
+    this.baishaHousingGeometry = new THREE.BoxGeometry(2.55, 0.1, 0.2);
+    this.baishaHousingMaterial = new THREE.MeshStandardMaterial({
+      color: 0x180507,
+      roughness: 0.58,
+      metalness: 0.42,
+    });
+
+    let corridorIndex = 0;
+    config.fixtures.forEach((fixture) => {
+      const group = new THREE.Group();
+      group.name = `baisha_fluorescent_${fixture.id}`;
+      group.position.set(fixture.x, fixture.y, fixture.z);
+      if (fixture.axis === "z") group.rotation.y = Math.PI / 2;
+
+      const housing = new THREE.Mesh(this.baishaHousingGeometry!, this.baishaHousingMaterial!);
+      housing.castShadow = true;
+      housing.receiveShadow = true;
+      group.add(housing);
+
+      const material = new THREE.MeshStandardMaterial({
+        color: 0x6e0710,
+        emissive: 0xb20d18,
+        emissiveIntensity: 4.2,
+        roughness: 0.24,
+        metalness: 0.08,
+      });
+      const tube = new THREE.Mesh(this.baishaTubeGeometry!, material);
+      tube.position.y = -0.075;
+      group.add(tube);
+      this.scene.add(group);
+
+      const isCorridor = fixture.zone === "corridor";
+      this.baishaTubes.push({
+        group,
+        material,
+        position: new THREE.Vector3(fixture.x, fixture.y - 0.18, fixture.z),
+        zone: fixture.zone,
+        corridorIndex: isCorridor ? corridorIndex++ : -1,
+        active: !isCorridor,
+        intensity: 0,
+      });
+    });
+
+    const windowConfig = handle.meta?.baishaCorridorWindow;
+    if (windowConfig) {
+      const windowGroup = new THREE.Group();
+      windowGroup.name = "baisha_corridor_window";
+      const frameMaterial = new THREE.MeshStandardMaterial({
+        color: 0x16090b,
+        roughness: 0.74,
+        metalness: 0.38,
+      });
+      const addFrame = (geometry: THREE.BoxGeometry, px: number, py: number, pz: number): void => {
+        const frame = new THREE.Mesh(geometry, frameMaterial);
+        frame.position.set(px, py, pz);
+        frame.castShadow = true;
+        frame.receiveShadow = true;
+        windowGroup.add(frame);
+      };
+      const halfWidth = windowConfig.width * 0.5;
+      const halfHeight = windowConfig.height * 0.5;
+      const frameX = windowConfig.x - 0.18;
+      addFrame(
+        new THREE.BoxGeometry(0.16, windowConfig.height + 0.18, 0.12),
+        frameX,
+        windowConfig.y,
+        windowConfig.z - halfWidth,
+      );
+      addFrame(
+        new THREE.BoxGeometry(0.16, windowConfig.height + 0.18, 0.12),
+        frameX,
+        windowConfig.y,
+        windowConfig.z + halfWidth,
+      );
+      addFrame(
+        new THREE.BoxGeometry(0.16, 0.12, windowConfig.width + 0.18),
+        frameX,
+        windowConfig.y - halfHeight,
+        windowConfig.z,
+      );
+      addFrame(
+        new THREE.BoxGeometry(0.16, 0.12, windowConfig.width + 0.18),
+        frameX,
+        windowConfig.y + halfHeight,
+        windowConfig.z,
+      );
+      addFrame(
+        new THREE.BoxGeometry(0.13, windowConfig.height, 0.075),
+        frameX - 0.015,
+        windowConfig.y,
+        windowConfig.z,
+      );
+
+      this.baishaCorridorWindowGlass = new THREE.MeshStandardMaterial({
+        color: 0x100306,
+        emissive: 0x240207,
+        emissiveIntensity: 0.38,
+        roughness: 0.2,
+        metalness: 0.04,
+        transparent: true,
+        opacity: 0.78,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+      const glass = new THREE.Mesh(
+        new THREE.PlaneGeometry(windowConfig.width - 0.08, windowConfig.height - 0.08),
+        this.baishaCorridorWindowGlass,
+      );
+      glass.name = "baisha_corridor_window_glass";
+      glass.position.set(windowConfig.x - 0.16, windowConfig.y, windowConfig.z);
+      glass.rotation.y = Math.PI / 2;
+      windowGroup.add(glass);
+      this.scene.add(windowGroup);
+      this.baishaCorridorWindow = windowGroup;
+
+      this.baishaCorridorWindowFlash = new THREE.PointLight(0xdce8ff, 0, 10.5, 1.65);
+      this.baishaCorridorWindowFlash.position.set(
+        windowConfig.x - 0.72,
+        windowConfig.y,
+        windowConfig.z,
+      );
+      this.scene.add(this.baishaCorridorWindowFlash);
+    }
+
+    // A small moving pool lights the fixtures visible around the player. Every
+    // passed tube remains emissive, but the shader never pays for dozens of
+    // simultaneous point lights down corridors hidden behind walls.
+    for (let index = 0; index < 6; index++) {
+      const light = new THREE.PointLight(0xb70d1a, 0, 8.2, 1.72);
+      light.name = `baisha_tube_pool_${index}`;
+      light.visible = false;
+      this.scene.add(light);
+      this.baishaLightPool.push(light);
+    }
+
+    if (config.lightning) {
+      const flash = config.lightning;
+      this.baishaLightningTarget = new THREE.Object3D();
+      this.baishaLightningTarget.position.set(flash.targetX, flash.targetY, flash.targetZ);
+      this.scene.add(this.baishaLightningTarget);
+      this.baishaLightning = new THREE.SpotLight(0xd8e5ff, 0, 24, Math.PI / 3.1, 0.72, 1.35);
+      this.baishaLightning.position.set(flash.x, flash.y, flash.z);
+      this.baishaLightning.target = this.baishaLightningTarget;
+      if (!this.isMobile) {
+        this.baishaLightning.castShadow = true;
+        this.baishaLightning.shadow.mapSize.set(1024, 1024);
+        this.baishaLightning.shadow.camera.near = 0.3;
+        this.baishaLightning.shadow.camera.far = 24;
+      }
+      this.scene.add(this.baishaLightning);
+      this.nextBaishaLightningAt = this.clock.elapsedTime + 7 + Math.random() * 2;
+    }
+    this.updateBaishaLighting(this.clock.elapsedTime, true);
+  }
+
+  private clearBaishaLighting(): void {
+    for (const fixture of this.baishaTubes) {
+      this.scene.remove(fixture.group);
+      fixture.material.dispose();
+    }
+    this.baishaTubes.length = 0;
+    for (const light of this.baishaLightPool) this.scene.remove(light);
+    this.baishaLightPool.length = 0;
+    if (this.baishaLightning) this.scene.remove(this.baishaLightning);
+    if (this.baishaLightningTarget) this.scene.remove(this.baishaLightningTarget);
+    if (this.baishaCorridorWindow) {
+      const geometries = new Set<THREE.BufferGeometry>();
+      const materials = new Set<THREE.Material>();
+      this.baishaCorridorWindow.traverse((object) => {
+        const mesh = object as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        geometries.add(mesh.geometry);
+        const meshMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        for (const material of meshMaterials) materials.add(material);
+      });
+      this.scene.remove(this.baishaCorridorWindow);
+      for (const geometry of geometries) geometry.dispose();
+      for (const material of materials) material.dispose();
+    }
+    if (this.baishaCorridorWindowFlash) this.scene.remove(this.baishaCorridorWindowFlash);
+    if (this.baishaRaisedCeiling) {
+      const materials = new Set<THREE.Material>();
+      this.baishaRaisedCeiling.traverse((object) => {
+        const mesh = object as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        mesh.geometry.dispose();
+        const meshMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        for (const material of meshMaterials) materials.add(material);
+      });
+      for (const material of materials) material.dispose();
+      this.scene.remove(this.baishaRaisedCeiling);
+      this.baishaRaisedCeiling = undefined;
+    }
+    this.baishaLightning = undefined;
+    this.baishaLightningTarget = undefined;
+    this.baishaCorridorWindow = undefined;
+    this.baishaCorridorWindowGlass = undefined;
+    this.baishaCorridorWindowFlash = undefined;
+    this.baishaTubeGeometry?.dispose();
+    this.baishaHousingGeometry?.dispose();
+    this.baishaHousingMaterial?.dispose();
+    this.baishaTubeGeometry = undefined;
+    this.baishaHousingGeometry = undefined;
+    this.baishaHousingMaterial = undefined;
+    this.baishaCorridorProgress = -1;
+    this.nextBaishaLightningAt = Number.POSITIVE_INFINITY;
+    this.baishaLightningUntil = 0;
+  }
+
+  private updateBaishaLighting(t: number, force = false): void {
+    if (this.baishaTubes.length === 0) return;
+    if (!force && t < this.nextBaishaLightingUpdateAt) return;
+    this.nextBaishaLightingUpdateAt = t + 1 / 12;
+
+    let nearestCorridor: BaishaTubeRuntime | undefined;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    for (const fixture of this.baishaTubes) {
+      if (fixture.zone !== "corridor") continue;
+      const distance = Math.hypot(
+        this.camera.position.x - fixture.position.x,
+        this.camera.position.z - fixture.position.z,
+      );
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestCorridor = fixture;
+      }
+    }
+    if (nearestCorridor && nearestDistance < 2.8) {
+      this.baishaCorridorProgress = Math.max(this.baishaCorridorProgress, nearestCorridor.corridorIndex);
+    }
+
+    const litFixtures: BaishaTubeRuntime[] = [];
+    for (const fixture of this.baishaTubes) {
+      const active = fixture.zone !== "corridor"
+        || fixture.corridorIndex <= this.baishaCorridorProgress + this.baishaRevealAhead;
+      const intensity = active ? 4.7 : 0.015;
+      fixture.active = active;
+      fixture.intensity = intensity;
+      fixture.material.emissiveIntensity = intensity;
+      fixture.material.color.setHex(active ? 0x700812 : 0x190306);
+      if (active) litFixtures.push(fixture);
+    }
+
+    litFixtures.sort((a, b) => (
+      this.camera.position.distanceToSquared(a.position) - this.camera.position.distanceToSquared(b.position)
+    ));
+    for (let index = 0; index < this.baishaLightPool.length; index++) {
+      const light = this.baishaLightPool[index];
+      const fixture = litFixtures[index];
+      if (!fixture) {
+        light.visible = false;
+        light.intensity = 0;
+        continue;
+      }
+      light.visible = true;
+      light.position.copy(fixture.position);
+      light.intensity = fixture.intensity * 0.92;
+    }
+
+    if (!this.baishaLightning) return;
+    if (t >= this.nextBaishaLightningAt) {
+      this.baishaLightningUntil = t + 0.16;
+      this.nextBaishaLightningAt = t + 7 + Math.random() * 2;
+      playLibraryThunder(0.12 + Math.random() * 0.16);
+    }
+    const flashing = t < this.baishaLightningUntil;
+    this.baishaLightning.intensity = flashing
+      ? 68 + Math.max(0, Math.sin(t * 92)) * 32
+      : 0;
+    if (this.baishaCorridorWindowGlass) {
+      this.baishaCorridorWindowGlass.emissive.setHex(flashing ? 0xdce8ff : 0x240207);
+      this.baishaCorridorWindowGlass.emissiveIntensity = flashing ? 9.5 : 0.38;
+    }
+    if (this.baishaCorridorWindowFlash) {
+      this.baishaCorridorWindowFlash.intensity = flashing ? 18 : 0;
+    }
+  }
+
   private setProceduralPickupGuideLightsVisible(visible: boolean): void {
     for (const pickup of this.room.pickups) {
       pickup.glow.traverse((child) => {
@@ -1164,6 +2480,9 @@ export class Interior3D {
 
   private collides(x: number, z: number): boolean {
     if (this.perfEnabled) this.perfCollisionCalls++;
+    // Review-only noclip lets the authored model be inspected before its
+    // static door receives approved interaction/animation gameplay.
+    if (this.visualReviewMode) return false;
     for (const c of this.colliders) {
       if (!this.isColliderActive(c)) continue;
       if (
@@ -1319,15 +2638,19 @@ export class Interior3D {
   private syncLightingState(dt: number, t: number): void {
     const hasFlashlight = this.hasInventoryItem("flashlight");
     const libraryProfile = this.roomKind === "library";
+    const baishaProfile = this.roomKind === "dorm" && this.baishaTubes.length > 0;
     const previewingUnmappedAsset = Boolean(this.assetHandle && !this.assetHandle.meta);
     const targetAmbient = previewingUnmappedAsset
       ? 0.32
+      : baishaProfile ? 0.18
       : hasFlashlight ? (libraryProfile ? 0.34 : 0.85) : libraryProfile ? 0.18 : 0.22;
     const targetFill = previewingUnmappedAsset
       ? 0.18
+      : baishaProfile ? 0.1
       : hasFlashlight ? (libraryProfile ? 0.22 : 0.55) : libraryProfile ? 0.11 : 0.14;
     const targetNear = previewingUnmappedAsset
       ? 0.25
+      : baishaProfile ? 0.2
       : hasFlashlight ? (libraryProfile ? 0.18 : 0.85) : libraryProfile ? 0.24 : 0.24;
     const k = Math.min(1, dt * 6);
 
@@ -1352,6 +2675,7 @@ export class Interior3D {
     this.updateTargetGlowLights(t);
     this.updateLibraryStorm(t);
     this.updateLibraryCeilingLights(t);
+    this.updateBaishaLighting(t);
   }
 
   private isInLibraryExterior(): boolean {
@@ -1503,6 +2827,13 @@ export class Interior3D {
 
     // 1. Feed the latest input snapshot into the context.
     const snap = this.inputManager.pollInput();
+    if (this.gameplayPaused) {
+      snap.moveX = 0;
+      snap.moveZ = 0;
+      snap.jumpPressed = false;
+      snap.sprintHeld = false;
+      snap.crouchHeld = false;
+    }
     if (this.runtimeStamina <= 0) snap.sprintHeld = false;
     ctx.input = snap;
     if (snap.moveX === 0 && snap.moveZ === 0) {
@@ -1608,6 +2939,11 @@ export class Interior3D {
     this.collectPickups();
     // 9. Check story triggers with the same shared interaction rule.
     this.collectStoryTriggers();
+    // 9b. Baisha's approved sequence is proximity-only and drives one map target at a time.
+    this.collectBaishaGameplayTrigger();
+    // 9c. Start and advance the authored Baisha corridor chase.
+    this.updateBaishaChasePrep();
+    this.updateBaishaChase(dt);
     // 10. Door interaction (E key).
     this.handleDoorInteraction();
     // 10. Update guide line to active trigger.
@@ -1636,6 +2972,15 @@ export class Interior3D {
         item.taken = true;
         item.glow.visible = false;
         this.setAssetPickupVisualVisible(item.itemId, false);
+        if (this.roomKind === "dorm" && item.itemId === "energy") {
+          this.baishaEnergyActive = true;
+          this.moveCtx.sprintSpeed = this.blueprint.movement.sprintSpeed;
+          this.runtimeStamina = Math.min(100, this.runtimeStamina + 30);
+          const restoredStamina = Math.round(this.runtimeStamina);
+          this.persistedStamina = restoredStamina;
+          this.staminaStoreSyncElapsed = 0;
+          this.setStamina?.(restoredStamina);
+        }
         // Do not let the same E press interact with a nearby door as well.
         this.ePressed = false;
         this.onPickup?.(item.itemId, item.name);
@@ -1947,6 +3292,7 @@ export class Interior3D {
     for (const door of this.room.doors) door.update(dt);
 
     this.syncLightingState(dt, t);
+    this.updateBaishaShadowCache();
 
     this.renderer.render(this.scene, this.camera);
     if (this.perfEnabled) this.reportPerformance(frameStartedAt);

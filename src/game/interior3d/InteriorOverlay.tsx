@@ -1,6 +1,12 @@
 import { useEffect, useRef, useCallback, useState, type CSSProperties } from "react";
-import { Interior3D, type InteriorAssetState } from "./Interior3D";
+import {
+  Interior3D,
+  type BaishaGameplayTrigger,
+  type InteriorAssetState,
+} from "./Interior3D";
 import { useGameStore } from "../store";
+import { JumpscarePipeline } from "../JumpscarePipeline";
+import BaishaDormExperience, { type BaishaDormStage } from "./BaishaDormExperience";
 
 export interface InteriorOverlayProps {
   building: { id: string; name: string; zone?: string };
@@ -19,6 +25,7 @@ export interface InteriorOverlayProps {
 
 const JOYSTICK_RADIUS = 56;
 const LIBRARY_STEPS = ["寻找手电筒", "笔记本", "借阅小票", "拾取符咒", "书架异响", "灯下的人", "离开图书馆"];
+const BAISHA_STEPS = ["调查桌上相框", "照片发生异变", "查看阳台", "玻璃外的人影", "浏览校园论坛", "离开寝室"];
 
 function libraryProgressIndex(sceneId: string, inventory: string[]): number {
   if (sceneId === "library_intro") return inventory.includes("flashlight") ? 1 : 0;
@@ -28,6 +35,15 @@ function libraryProgressIndex(sceneId: string, inventory: string[]): number {
   if (sceneId === "library_fall") return 5;
   if (sceneId === "dorm_baiqiu") return 6;
   return 0;
+}
+
+function baishaProgressIndex(stage: BaishaDormStage): number {
+  if (stage === "photo_target") return 0;
+  if (["photo_intro", "photo_normal", "photo_flash_white", "photo_flash_red", "photo_corrupt", "photo_ready", "photo_dissolve"].includes(stage)) return 1;
+  if (stage === "balcony_target") return 2;
+  if (["balcony_flash", "balcony_wait", "balcony_story"].includes(stage)) return 3;
+  if (["computer_target", "forum", "forum_ready", "forum_alarm", "forum_dissolve"].includes(stage)) return 4;
+  return 5;
 }
 
 /**
@@ -65,8 +81,21 @@ export default function InteriorOverlay({
   const [debugMessage, setDebugMessage] = useState("");
   const [lightningFlash, setLightningFlash] = useState(false);
   const lightningTimer = useRef<number | null>(null);
+  const [baishaTrigger, setBaishaTrigger] = useState<BaishaGameplayTrigger | null>(null);
+  const [baishaStage, setBaishaStage] = useState<BaishaDormStage>("photo_target");
   const scene01Debug = building.id === "medical-library"
     && new URLSearchParams(window.location.search).get("debugScene01") === "1";
+  const baishaGameplayDebug = building.id === "dorm-baisha"
+    && new URLSearchParams(window.location.search).get("baishaGameplayDebug") === "1";
+  const baishaChaseOnly = import.meta.env.DEV
+    && building.id === "dorm-baisha"
+    && new URLSearchParams(window.location.search).get("baishaChaseOnly") === "1";
+
+  useEffect(() => {
+    if (!baishaChaseOnly || assetState !== "ready") return;
+    engineRef.current?.resetBaishaChaseCheckpoint();
+    setBaishaStage("complete");
+  }, [assetState, baishaChaseOnly]);
 
   // Joystick state.
   const joyRef = useRef<HTMLDivElement>(null);
@@ -140,6 +169,29 @@ export default function InteriorOverlay({
           }));
         },
         onAssetStateChange: reportAssetState,
+        onBaishaTrigger: (trigger) => {
+          engineRef.current?.exitPointerLock();
+          setBaishaTrigger(trigger);
+        },
+        onBaishaChaseStart: () => {
+          engineRef.current?.exitPointerLock();
+          JumpscarePipeline.executeStoryEffect("library_fall", 0.96, "快逃", "library-fall", 0);
+        },
+        onBaishaCapture: () => {
+          engineRef.current?.exitPointerLock();
+          JumpscarePipeline.executeStoryEffect(
+            "ghost_caught",
+            1,
+            "你没能逃出白沙宿舍。",
+            "library-fall",
+            0,
+          );
+          window.dispatchEvent(new CustomEvent("zju-horror-baisha-capture"));
+        },
+        onBaishaExit: () => {
+          engineRef.current?.exitPointerLock();
+          (onExitTriggerRef.current ?? onExitRef.current)();
+        },
       });
       engineRef.current = engine;
       engine.start();
@@ -189,6 +241,17 @@ export default function InteriorOverlay({
   }, [building.id]);
 
   useEffect(() => {
+    if (building.id !== "dorm-baisha") return;
+    const resetCheckpoint = (): void => {
+      engineRef.current?.resetBaishaChaseCheckpoint();
+      setBaishaTrigger(null);
+      setBaishaStage("complete");
+    };
+    window.addEventListener("zju-horror-baisha-revive", resetCheckpoint);
+    return () => window.removeEventListener("zju-horror-baisha-revive", resetCheckpoint);
+  }, [building.id]);
+
+  useEffect(() => {
     const refreshDoorHint = (): void => {
       const nextHint = engineRef.current?.doorHint ?? "";
       setDoorHint((previousHint) => previousHint === nextHint ? previousHint : nextHint);
@@ -209,7 +272,7 @@ export default function InteriorOverlay({
   }, []);
 
   useEffect(() => {
-    if (building.id !== "medical-library") return;
+    if (building.id !== "medical-library" && building.id !== "dorm-baisha") return;
     let frame = 0;
     let lastDraw = 0;
     const draw = (time: number): void => {
@@ -241,22 +304,52 @@ export default function InteriorOverlay({
       const offsetX = (width - mapWidth) / 2;
       const offsetY = (height - mapHeight) / 2;
       const mapX = (x: number) => offsetX + (x - snapshot.bounds.minX) * scale;
-      const mapY = (z: number) => offsetY + (snapshot.bounds.maxZ - z) * scale;
+      // The authored Baisha model reads more naturally with the dormitory at
+      // the lower-right of the plan. Mirror only its vertical map axis so the
+      // room moves from upper-right to lower-right without swapping left/right.
+      const mapY = building.id === "dorm-baisha"
+        ? (z: number) => offsetY + (z - snapshot.bounds.minZ) * scale
+        : (z: number) => offsetY + (snapshot.bounds.maxZ - z) * scale;
 
       context.fillStyle = "rgba(4, 7, 10, 0.82)";
       context.fillRect(offsetX, offsetY, mapWidth, mapHeight);
-      for (const obstacle of snapshot.obstacles) {
-        context.fillStyle = obstacle.kind === "wall"
-          ? "rgba(210, 220, 224, 0.86)"
-          : obstacle.kind === "shelf"
-            ? "rgba(166, 139, 90, 0.9)"
-            : "rgba(111, 125, 128, 0.48)";
-        context.fillRect(
-          mapX(obstacle.minX),
-          mapY(obstacle.maxZ),
-          Math.max(1, (obstacle.maxX - obstacle.minX) * scale),
-          Math.max(1, (obstacle.maxZ - obstacle.minZ) * scale),
-        );
+      if (building.id === "dorm-baisha" && snapshot.layoutPaths?.length) {
+        context.lineJoin = "round";
+        context.lineCap = "square";
+        for (const path of snapshot.layoutPaths) {
+          if (path.length < 2) continue;
+          context.beginPath();
+          context.moveTo(mapX(path[0].x), mapY(path[0].z));
+          for (let index = 1; index < path.length; index++) {
+            context.lineTo(mapX(path[index].x), mapY(path[index].z));
+          }
+          context.strokeStyle = "rgba(210, 220, 224, 0.86)";
+          context.lineWidth = 5;
+          context.stroke();
+          context.strokeStyle = "rgba(7, 9, 11, 0.98)";
+          context.lineWidth = 2.6;
+          context.stroke();
+        }
+        // Retain only the large dorm furniture blocks. The raw corridor mesh
+        // contains hundreds of tiny door/trim rectangles that previously made
+        // the left half of the plan unreadable.
+        // The chase map is a route diagram, not a furnished-room survey.
+        // Drawing raw bed, chair and door-trim rectangles obscures the actual
+        // walkable passages and creates false-looking branches near the dorm.
+      } else {
+        for (const obstacle of snapshot.obstacles) {
+          context.fillStyle = obstacle.kind === "wall"
+            ? "rgba(210, 220, 224, 0.86)"
+            : obstacle.kind === "shelf"
+              ? "rgba(166, 139, 90, 0.9)"
+              : "rgba(111, 125, 128, 0.48)";
+          context.fillRect(
+            mapX(obstacle.minX),
+            mapY(obstacle.maxZ),
+            Math.max(1, (obstacle.maxX - obstacle.minX) * scale),
+            Math.max(1, (obstacle.maxZ - obstacle.minZ) * scale),
+          );
+        }
       }
       context.strokeStyle = "rgba(215, 225, 228, 0.65)";
       context.lineWidth = 1;
@@ -266,8 +359,9 @@ export default function InteriorOverlay({
         context.beginPath();
         context.moveTo(mapX(snapshot.exitSegment.minX), mapY(snapshot.exitSegment.z));
         context.lineTo(mapX(snapshot.exitSegment.maxX), mapY(snapshot.exitSegment.z));
-        context.strokeStyle = "#f01824";
-        context.shadowColor = "rgba(240,24,36,0.95)";
+        const markerGreen = snapshot.exitSegment.color === "green";
+        context.strokeStyle = markerGreen ? "#44e36e" : "#f01824";
+        context.shadowColor = markerGreen ? "rgba(68,227,110,0.95)" : "rgba(240,24,36,0.95)";
         context.shadowBlur = 8;
         context.lineWidth = 3;
         context.stroke();
@@ -282,6 +376,19 @@ export default function InteriorOverlay({
         context.fillStyle = "#ed111f";
         context.shadowColor = "rgba(255,17,31,1)";
         context.shadowBlur = 10;
+        context.fill();
+        context.shadowBlur = 0;
+      }
+
+      if (snapshot.ghost?.state === "chase") {
+        const ghostX = mapX(snapshot.ghost.x);
+        const ghostY = mapY(snapshot.ghost.z);
+        const pulse = 4.1 + Math.sin(time * 0.012) * 0.8;
+        context.beginPath();
+        context.arc(ghostX, ghostY, pulse, 0, Math.PI * 2);
+        context.fillStyle = "#ff101f";
+        context.shadowColor = "rgba(255,16,31,1)";
+        context.shadowBlur = 13;
         context.fill();
         context.shadowBlur = 0;
       }
@@ -455,6 +562,14 @@ export default function InteriorOverlay({
         style={{ ...styles.lightningFlash, opacity: lightningFlash ? 0.78 : 0 }}
       />
 
+      <BaishaDormExperience
+        active={building.id === "dorm-baisha"}
+        engineRef={engineRef}
+        trigger={baishaTrigger}
+        onTriggerHandled={() => setBaishaTrigger(null)}
+        onStageChange={setBaishaStage}
+      />
+
       {/* Mobile look surface covers the right half of the screen. */}
       {isMobile && (
         <div
@@ -466,17 +581,17 @@ export default function InteriorOverlay({
         />
       )}
 
-      {/* Top-right: leave the building. */}
-      {building.id === "medical-library" && (
-        <div style={styles.floorPlan} aria-label="医学院图书馆平面图">
+      {/* Top-right authored floor plan. Hidden story/scare points are never previewed. */}
+      {(building.id === "medical-library" || building.id === "dorm-baisha") && (
+        <div style={styles.floorPlan} aria-label={`${building.name}平面图`}>
           <div style={styles.floorPlanTitle}>
-            <strong>医学院图书馆</strong>
+            <strong>{building.id === "medical-library" ? "医学院图书馆" : "白沙宿舍"}</strong>
             <span>平面图</span>
           </div>
           <canvas ref={floorPlanRef} style={styles.floorPlanCanvas} />
           <div style={styles.floorPlanLegend}>
             <span><i style={{ ...styles.legendSwatch, background: "#d2dce0" }} />墙体</span>
-            <span><i style={{ ...styles.legendSwatch, background: "#a68b5a" }} />书架</span>
+            <span><i style={{ ...styles.legendSwatch, background: "#a68b5a" }} />{building.id === "medical-library" ? "书架" : "家具"}</span>
             <span><i style={styles.legendDot} />你</span>
           </div>
         </div>
@@ -522,9 +637,50 @@ export default function InteriorOverlay({
           </aside>
         </>
       )}
-      {building.id !== "medical-library" && (
+      {building.id === "dorm-baisha" && (
+        <>
+          <aside style={styles.inventoryRail} aria-label="场景道具栏">
+            <strong style={styles.sideRailTitle}>道具</strong>
+            {([
+              ["flashlight", "手电筒", "光"],
+              ["receipt", "借阅小票", "票"],
+              ["talisman", "符纸", "符"],
+            ] as const).map(([id, label, icon]) => {
+              const owned = inventory.includes(id);
+              return (
+                <div key={id} style={{ ...styles.inventorySlot, ...(owned ? styles.inventorySlotOwned : undefined) }}>
+                  <i style={styles.inventoryIcon}>{owned ? icon : "·"}</i>
+                  <span>{label}</span>
+                </div>
+              );
+            })}
+          </aside>
+          <aside style={styles.storyChain} aria-label="剧情链">
+            <strong style={styles.sideRailTitle}>剧情链</strong>
+            {BAISHA_STEPS.map((label, index) => {
+              const progress = baishaProgressIndex(baishaStage);
+              const complete = index < progress;
+              const active = index === progress;
+              return (
+                <div
+                  key={label}
+                  style={{
+                    ...styles.storyStep,
+                    ...(complete ? styles.storyStepComplete : undefined),
+                    ...(active ? styles.storyStepActive : undefined),
+                  }}
+                >
+                  <i style={styles.storyStepDot} />
+                  <span>{label}</span>
+                </div>
+              );
+            })}
+          </aside>
+        </>
+      )}
+      {building.id !== "medical-library" && building.id !== "dorm-baisha" && (
         <button
-          style={{ ...styles.exitBtn, ...(canExit ? undefined : styles.exitBtnDisabled) }}
+          style={{ ...styles.exitBtn, ...styles.exitBtnBelowMap, ...(canExit ? undefined : styles.exitBtnDisabled) }}
           onClick={handleExit}
           disabled={!canExit}
         >
@@ -532,12 +688,17 @@ export default function InteriorOverlay({
         </button>
       )}
 
-      {scene01Debug && (
+      {(scene01Debug || baishaGameplayDebug) && (
         <button
           type="button"
           style={styles.debugTargetButton}
           aria-label="调试前往当前目标"
-          onClick={() => setDebugMessage(engineRef.current?.debugTeleportToActiveTarget() ?? "场景仍在加载")}
+          onClick={() => setDebugMessage(
+            (baishaGameplayDebug
+              ? engineRef.current?.debugTeleportToBaishaTarget()
+              : engineRef.current?.debugTeleportToActiveTarget())
+              ?? "场景仍在加载",
+          )}
         >
           调试：前往当前目标
           {debugMessage && <small style={styles.debugTargetMessage}>{debugMessage}</small>}

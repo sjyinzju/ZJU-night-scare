@@ -160,6 +160,11 @@ export function buildInteriorCollisionMap(root: THREE.Object3D, modelBounds: THR
     const position = mesh.geometry.getAttribute("position");
     if (!position) return;
     box.setFromObject(mesh);
+    // Exact broad-phase rejection: meshes wholly below the collision slice or
+    // above the player's head cannot contribute any accepted triangle. Large
+    // authored ceilings and upper structures are skipped without changing the
+    // 10 cm occupancy result.
+    if (box.max.y <= FLOOR_CUTOFF || box.min.y >= WALKER_TOP) return;
     box.getSize(size);
     const kind = classifyObstacle(size);
     const weight = obstacleWeight(kind);

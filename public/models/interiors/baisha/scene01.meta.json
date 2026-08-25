@@ -1,0 +1,211 @@
+{
+  "assetVersion": 2,
+  "buildingId": "dorm-baisha",
+  "roomKind": "dorm",
+  "model": "baisha.glb",
+  "additionalModels": ["baisha-dorm-props.glb", "baisha-corridor-props.glb", "baisha-chase-props.glb"],
+  "qualityProfile": "baisha-visual-review",
+  "spawn": { "x": 29.5, "y": 1.6, "z": -3.0, "yaw": 0 },
+  "baishaGameplay": {
+    "photo": { "x": 31.58, "y": 1.16, "z": -6.22, "radius": 1.65 },
+    "balcony": { "x": 29.5, "y": 1.6, "z": -0.55, "radius": 1.1 },
+    "computer": {
+      "x": 28.42,
+      "y": 1.36,
+      "z": -6.62,
+      "radius": 1.6,
+      "visualNames": ["Geom3D.242"]
+    },
+    "door": {
+      "visualNames": [
+        "组“870”#1",
+        "Group#794",
+        "Group#785",
+        "Group#785_1"
+      ],
+      "collisionBounds": { "minX": 29.38, "maxX": 30.45, "minZ": -7.69, "maxZ": -7.35 }
+    },
+    "chasePrep": {
+      "ghost": { "x": 35.0, "y": 1.72, "z": -8.9 },
+      "exitThresholdZ": -7.9,
+      "fleeDirectionX": -1,
+      "fleeDirectionZ": 0,
+      "fleeDistance": 2.0,
+      "viewDistance": 14.0
+    },
+    "chase": {
+      "ghostVisualName": "baisha_slender_ghost",
+      "ghostYawOffset": 1.5707963268,
+      "fullSpeed": 2.78,
+      "captureDistance": 0.78,
+      "encounterDistance": 2.2,
+      "jumpscareDuration": 1.3,
+      "openingHoldSeconds": 1.0,
+      "openingHalfSpeedSeconds": 2.0,
+      "encounterGraceSeconds": 1.0,
+      "encounterHalfSpeedSeconds": 2.0,
+      "repathSeconds": 0.2,
+      "navigation": {
+        "nodes": [
+          { "id": "ghost-start", "x": 35.0, "z": -8.55 },
+          { "id": "main-dorm", "x": 29.82, "z": -8.55 },
+          { "id": "main-exit", "x": 13.55, "z": -8.55 },
+          { "id": "white-main", "x": 9.68, "z": -8.55 },
+          { "id": "main-left", "x": 4.25, "z": -8.55 },
+          { "id": "outer-left-top", "x": 4.25, "z": -10.35 },
+          { "id": "outer-left-bottom", "x": 4.25, "z": -19.28 },
+          { "id": "shortcut-exit", "x": 9.4, "z": -19.28 },
+          { "id": "outer-right-bottom", "x": 13.2, "z": -19.28 },
+          { "id": "outer-right-top", "x": 13.2, "z": -10.35 },
+          { "id": "white-entry", "x": 9.68, "z": -10.35 },
+          { "id": "shortcut-deep", "x": 9.4, "z": -18.35 },
+          { "id": "exit-out", "x": 13.55, "z": -6.65 },
+          { "id": "dorm-door", "x": 29.82, "z": -6.55 }
+        ],
+        "edges": [
+          { "from": "ghost-start", "to": "main-dorm" },
+          { "from": "main-dorm", "to": "main-exit" },
+          { "from": "main-exit", "to": "white-main" },
+          { "from": "white-main", "to": "main-left" },
+          { "from": "main-left", "to": "outer-left-top" },
+          { "from": "outer-left-top", "to": "outer-left-bottom" },
+          { "from": "outer-left-bottom", "to": "shortcut-exit" },
+          { "from": "shortcut-exit", "to": "outer-right-bottom" },
+          { "from": "outer-right-bottom", "to": "outer-right-top" },
+          { "from": "outer-right-top", "to": "main-exit", "requiresExitOpen": true },
+          { "from": "main-exit", "to": "exit-out", "requiresExitOpen": true },
+          { "from": "main-dorm", "to": "dorm-door" },
+          { "from": "white-main", "to": "white-entry", "targetable": false },
+          { "from": "white-entry", "to": "shortcut-deep", "targetable": false },
+          { "from": "shortcut-deep", "to": "shortcut-exit", "targetable": false }
+        ],
+        "shortcutNodeIds": [
+          "ghost-start",
+          "main-dorm",
+          "main-exit",
+          "white-main",
+          "white-entry",
+          "shortcut-deep",
+          "shortcut-exit"
+        ]
+      },
+      "triangle": { "x": 12.75, "z": -19.28, "radius": 2.1 },
+      "trueExit": {
+        "visualNames": ["baisha_true_exit_near", "baisha_true_exit_opposite"],
+        "clearZones": [
+          { "minX": 12.7, "maxX": 14.4, "minZ": -10.02, "maxZ": -8.95 },
+          { "minX": 12.7, "maxX": 14.4, "minZ": -8.1, "maxZ": -7.0 }
+        ],
+        "unlockZone": { "minX": 11.65, "maxX": 14.15, "minZ": -20.05, "maxZ": -18.15 },
+        "trigger": { "x": 13.55, "z": -6.65, "radius": 1.2 }
+      },
+      "checkpoint": { "x": 29.82, "y": 1.6, "z": -6.55, "yaw": 0.0 }
+    },
+    "minimap": {
+      "paths": [
+        [
+          { "x": 3.37, "z": -7.4 },
+          { "x": 27.65, "z": -7.4 },
+          { "x": 27.65, "z": -0.9 },
+          { "x": 32.11, "z": -0.9 },
+          { "x": 32.11, "z": -7.4 },
+          { "x": 36.29, "z": -7.4 },
+          { "x": 36.29, "z": -9.63 },
+          { "x": 14.41, "z": -9.63 },
+          { "x": 14.41, "z": -20.22 },
+          { "x": 3.37, "z": -20.22 },
+          { "x": 3.37, "z": -9.63 },
+          { "x": 3.37, "z": -7.4 }
+        ],
+        [
+          { "x": 4.9, "z": -9.54 },
+          { "x": 8.72, "z": -9.54 },
+          { "x": 8.72, "z": -18.85 },
+          { "x": 4.9, "z": -18.85 },
+          { "x": 4.9, "z": -9.54 }
+        ],
+        [
+          { "x": 10.1, "z": -9.54 },
+          { "x": 12.48, "z": -9.54 },
+          { "x": 12.48, "z": -18.85 },
+          { "x": 10.1, "z": -18.85 },
+          { "x": 10.1, "z": -9.54 }
+        ]
+      ],
+      "falseExitSegment": { "minX": 32.05, "maxX": 33.25, "z": -9.65 },
+      "trueExitSegment": { "minX": 13.05, "maxX": 14.05, "z": -9.55 }
+    }
+  },
+  "pickupSpots": {
+    "energy": [
+      { "x": 4.25, "y": 0.12, "z": -15.4, "radius": 1.0 }
+    ]
+  },
+  "pickupVisuals": {
+    "energy": ["baisha_energy_drink"]
+  },
+  "navigationClearZones": [
+    { "minX": 29.25, "maxX": 30.57, "minZ": -7.78, "maxZ": -7.26 },
+    { "minX": 4.55, "maxX": 5.5, "minZ": -20.06, "maxZ": -18.55, "kind": "wall" },
+    { "minX": 12.05, "maxX": 13.05, "minZ": -20.06, "maxZ": -18.55, "kind": "wall" }
+  ],
+  "baishaRaisedCeiling": {
+    "minX": 13.2,
+    "maxX": 22.85,
+    "minZ": -20.15,
+    "maxZ": -9.55,
+    "baseY": 3.6,
+    "raisedY": 4.45,
+    "visualCutNames": ["Geom3D_.005", "Geom3D_.007"],
+    "dividerExtension": {
+      "minX": 7.88,
+      "maxX": 8.72,
+      "minZ": -18.9,
+      "maxZ": -9.56,
+      "baseY": 1.48,
+      "topY": 3.6
+    }
+  },
+  "baishaLighting": {
+    "revealAhead": 3,
+    "fixtures": [
+      { "id": "room-near", "x": 29.88, "y": 3.28, "z": -3.05, "axis": "z", "zone": "room" },
+      { "id": "room-far", "x": 29.88, "y": 3.28, "z": -5.72, "axis": "z", "zone": "room" },
+      { "id": "balcony", "x": 29.1, "y": 2.72, "z": -0.48, "axis": "x", "zone": "balcony" },
+      { "id": "false-exit", "x": 32.65, "y": 3.28, "z": -9.65, "axis": "x", "zone": "room" },
+      { "id": "corridor-00", "x": 29.2, "y": 3.25, "z": -8.48, "axis": "x", "zone": "corridor" },
+      { "id": "corridor-01", "x": 25.45, "y": 3.25, "z": -8.48, "axis": "x", "zone": "corridor" },
+      { "id": "corridor-02", "x": 21.7, "y": 3.25, "z": -8.48, "axis": "x", "zone": "corridor" },
+      { "id": "corridor-03", "x": 17.9, "y": 3.25, "z": -8.48, "axis": "x", "zone": "corridor" },
+      { "id": "corridor-04", "x": 14.05, "y": 3.25, "z": -8.48, "axis": "x", "zone": "corridor" },
+      { "id": "corridor-05", "x": 10.1, "y": 3.25, "z": -8.48, "axis": "x", "zone": "corridor" },
+      { "id": "corridor-06", "x": 6.25, "y": 3.25, "z": -8.48, "axis": "x", "zone": "corridor" },
+      { "id": "corridor-07", "x": 4.25, "y": 3.25, "z": -11.15, "axis": "x", "zone": "corridor" },
+      { "id": "corridor-08", "x": 4.25, "y": 3.25, "z": -14.25, "axis": "x", "zone": "corridor" },
+      { "id": "corridor-09", "x": 4.25, "y": 3.25, "z": -17.3, "axis": "x", "zone": "corridor" },
+      { "id": "corridor-10", "x": 6.15, "y": 3.25, "z": -19.28, "axis": "x", "zone": "corridor" },
+      { "id": "corridor-11", "x": 9.55, "y": 3.25, "z": -19.28, "axis": "x", "zone": "corridor" },
+      { "id": "corridor-12", "x": 12.75, "y": 3.25, "z": -19.28, "axis": "x", "zone": "corridor" }
+    ],
+    "lightning": {
+      "x": 29.2,
+      "y": 5.8,
+      "z": 4.0,
+      "targetX": 29.2,
+      "targetY": 1.0,
+      "targetZ": -0.8
+    }
+  },
+  "baishaCorridorWindow": {
+    "x": 36.3,
+    "y": 1.72,
+    "z": -8.9,
+    "width": 2.2,
+    "height": 2.25,
+    "visualCutNames": ["Geom3D_.005", "Geom3D.307"]
+  },
+  "notes": [
+    "Spawn is position 3 beside the balcony-side chair, facing the door.",
+    "Photo is position 2, computer is position 1, and the independent dorm door disappears after the forum."
+  ]
+}

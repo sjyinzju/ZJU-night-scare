@@ -62,7 +62,6 @@ const INTERIOR_STORY_ITEMS: Record<string, InteriorStoryItemDefinition[]> = {
     { itemId: "medicine", placement: "item-0", color: 0x8fd0ff },
   ],
   dorm: [
-    { itemId: "photograph", placement: "item-0", color: 0xffe08a },
     { itemId: "energy", placement: "item-1", color: 0x8fd0ff },
   ],
   hall: [{ itemId: "talisman", placement: "item-0", color: 0xffe08a }],

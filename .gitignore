@@ -9,7 +9,7 @@ vite.config.d.ts
 .DS_Store
 
 # Reference materials kept local unless explicitly requested
-*.pdf
+
 *.png
 *.jpg
 *.jpeg

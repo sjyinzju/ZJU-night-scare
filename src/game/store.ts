@@ -101,6 +101,7 @@ export interface GameStore {
   // ── Actions ──
   setPlayerIso: (iso: IsoPoint) => void;
   revive: () => boolean;
+  reviveInterior: () => "talisman" | "life" | null;
   startSession: (building: EnterableBuilding) => void;
   openInterior: (building: EnterableBuilding) => boolean;
   closeInterior: () => void;
@@ -204,6 +205,48 @@ export const useGameStore = create<GameStore>((set, get) => ({
       nextObjectiveCue: null,
     });
     return true;
+  },
+
+  reviveInterior: () => {
+    const state = get();
+    if (state.world !== "dead" || state.interiorBuilding?.id !== "dorm-baisha") return null;
+    const talismanIndex = state.storyState.inventory.indexOf("talisman");
+    const useTalisman = talismanIndex >= 0;
+    if (!useTalisman && state.revivesRemaining <= 0) return null;
+
+    const inventory = state.storyState.inventory.filter((itemId, index) => (
+      index !== talismanIndex && itemId !== "energy"
+    ));
+    const resource = useTalisman ? "talisman" : "life";
+    const remaining = useTalisman ? state.revivesRemaining : state.revivesRemaining - 1;
+    const flags = { ...state.storyState.flags };
+    delete flags.baishaCaptured;
+    delete flags.baishaEnergyBoost;
+    const restoredStoryState = {
+      ...state.storyState,
+      currentSceneId: "dorm_forum" as StorySceneId,
+      stats: { ...state.storyState.stats, sanity: REVIVE_SANITY },
+      inventory,
+      flags,
+      log: [
+        useTalisman
+          ? "符纸在掌心烧成灰烬。你重新站在白沙寝室门内。"
+          : `你重新站在白沙寝室门内。还剩 ${remaining} 次复活机会。`,
+        ...state.storyState.log,
+      ].slice(0, 6),
+    };
+    set({
+      world: "interior",
+      transition: "idle",
+      activeSceneId: null,
+      storyState: restoredStoryState,
+      lastSafeSceneId: "dorm_forum" as StorySceneId,
+      guideHotspotId: getSceneHotspot(restoredStoryState.currentSceneId),
+      revivesRemaining: remaining,
+      screenEffect: "",
+      nextObjectiveCue: null,
+    });
+    return resource;
   },
 
   startSession: (building) =>

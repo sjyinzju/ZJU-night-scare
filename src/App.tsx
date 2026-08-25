@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import Phaser from "phaser";
 import {
   Backpack,
@@ -35,7 +36,7 @@ import {
 import { useGameAudio } from "./game/audio/useGameAudio";
 import { playImpactBang } from "./game/audio/proceduralAudio";
 import { assetUrl } from "./game/assetPath";
-import { INITIAL_REVIVES, REVIVE_SANITY, useGameStore } from "./game/store";
+import { INITIAL_REVIVES, REVIVE_SANITY, useGameStore, type GameStore } from "./game/store";
 import { pickJumpscareText, contextForHotspot, textVariantClass, type JumpscareContext } from "./game/jumpscareTexts";
 import { JumpscarePipeline } from "./game/JumpscarePipeline";
 import {
@@ -69,6 +70,35 @@ type MiniMapSnapshot = {
 
 type JumpscareSpriteId = "library-shelf" | "library-fall";
 type DocumentView = { title: string; lines: string[] };
+
+// Temporary branch-local shortcut for Baisha iteration. `?fullStory=1` keeps
+// the complete opening available for regression checks without editing code.
+const BAISHA_DEVELOPMENT_START = import.meta.env.DEV
+  && new URLSearchParams(window.location.search).get("fullStory") !== "1";
+const BAISHA_CHASE_ONLY = import.meta.env.DEV
+  && new URLSearchParams(window.location.search).get("baishaChaseOnly") === "1";
+const BAISHA_DEVELOPMENT_PLAYER = new URLSearchParams(window.location.search).get("baishaDoor") === "1"
+  ? { x: 7.6, y: 8.11 }
+  : { x: 19.4, y: 30.2 };
+
+function createBaishaDevelopmentStoryState(chaseOnly = false): GameStore["storyState"] {
+  return {
+    currentSceneId: chaseOnly ? "dorm_forum" : "dorm_baiqiu",
+    stats: { sanity: 73, stamina: 76, clues: 31, trust: 54, affection: 0 },
+    inventory: ["flashlight", "receipt", "talisman"],
+    flags: {
+      talisman_collected: true,
+      library_fall_witnessed: true,
+      ...(chaseOnly ? { readForum: true } : {}),
+    },
+    visitedHotspots: ["library"],
+    completedHotspots: ["library"],
+    log: [
+      "你带着借阅小票和从医学院图书馆取得的符纸回到校园。",
+      "林伟坠楼前留下的线索指向白沙宿舍。",
+    ],
+  };
+}
 
 /** 同步判定是否为触摸/移动设备:窄屏 + 触摸能力任一满足即视为移动端。 */
 function detectMobile(): boolean {
@@ -325,6 +355,7 @@ function App() {
   const nearBuilding = useGameStore((s) => s.nearBuilding);
   const revivesRemaining = useGameStore((s) => s.revivesRemaining);
   const revive = useGameStore((s) => s.revive);
+  const reviveInterior = useGameStore((s) => s.reviveInterior);
   const startSession = useGameStore((s) => s.startSession);
   const openInterior = useGameStore((s) => s.openInterior);
   const closeInterior = useGameStore((s) => s.closeInterior);
@@ -372,14 +403,19 @@ function App() {
   // ── 统一的恐怖效果触发器（音频 + CSS 叠加层 + 惊吓文字 + 相机抖动）──
   // 被 handleOpenStory / handleInteriorStory / choose / ghost-hit 等所有路径复用。
   const triggerEffect = useCallback(
-    (effect?: HorrorEffect, context?: JumpscareContext, spriteId?: JumpscareSpriteId) => {
+    (
+      effect?: HorrorEffect,
+      context?: JumpscareContext,
+      spriteId?: JumpscareSpriteId,
+      customMessage?: string,
+    ) => {
       if (!effect) return;
       if (effect === "jumpscare") setJumpscareSprite(spriteId ?? null);
       setScreenEffect(effect);
       playEffect(effect);
       if (effect === "jumpscare" || effect === "shake") {
         const ctx = context ?? contextForHotspot(targetHotspotId);
-        const text = pickJumpscareText(ctx, storyState.stats.sanity);
+        const text = customMessage ?? pickJumpscareText(ctx, storyState.stats.sanity);
         useGameStore.getState().setJumpscareText(text);
       }
       window.dispatchEvent(new CustomEvent("zju-horror-effect", { detail: { effect } }));
@@ -405,7 +441,7 @@ function App() {
 
   useEffect(() => {
     const canvas = particleCanvasRef.current;
-    if (!canvas) return;
+    if (!canvas || interiorBuilding) return;
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
@@ -449,7 +485,7 @@ function App() {
       window.cancelAnimationFrame(raf);
       window.removeEventListener("resize", resize);
     };
-  }, [gameSessionId]);
+  }, [gameSessionId, interiorBuilding, isMobile]);
 
   useEffect(() => {
     const canvas = miniMapCanvasRef.current;
@@ -478,6 +514,17 @@ function App() {
       const sceneId = currentScene.locationId === detail.hotspotId ? storyState.currentSceneId : detail.sceneId;
       const scene = storyScenes[sceneId];
 
+      // Baisha is a 78 MB authored scene. Mount it behind the entry veil as
+      // soon as the warning opens, so model parsing, collision projection and
+      // GPU preparation happen while the player reads instead of after choice.
+      if (scene.id === "dorm_baiqiu") {
+        const building = getStoryBuildingForHotspot("dorm");
+        if (building) {
+          setLaunchAssetState("loading");
+          openInterior(building);
+        }
+      }
+
       setStoryState((previous) => visitStoryHotspot(previous, scene));
       setActiveSceneId(sceneId);
       // 统一走 triggerEffect：音频 + CSS 叠加层 + 惊吓文字 + 相机抖动全部到位
@@ -488,7 +535,7 @@ function App() {
     return () => {
       window.removeEventListener("zju-horror-open-story", handleOpenStory);
     };
-  }, [currentScene.locationId, playEffect, storyState.currentSceneId, triggerNarrativeEffect]);
+  }, [currentScene.locationId, openInterior, storyState.currentSceneId, triggerNarrativeEffect]);
 
   // 3D 内景中的故事触发区 → 弹出文字弹窗（覆盖在 3D 画面上）
   useEffect(() => {
@@ -599,6 +646,10 @@ function App() {
     window.dispatchEvent(
       new CustomEvent("zju-horror-interior-state", { detail: { open: Boolean(interiorBuilding) } }),
     );
+    const game = gameRef.current;
+    if (!game) return;
+    if (interiorBuilding) game.loop.sleep();
+    else game.loop.wake();
   }, [interiorBuilding]);
 
   // 内景里拾取的道具加入剧情物品栏(去重),对后续文字剧情选项有用。
@@ -606,6 +657,13 @@ function App() {
     const onPickup = (event: Event) => {
       const { itemId, name } = (event as CustomEvent<{ itemId: string; name: string }>).detail;
       setStoryState((prev) => {
+        if (itemId === "energy" && useGameStore.getState().interiorBuilding?.id === "dorm-baisha") {
+          return {
+            ...prev,
+            flags: { ...prev.flags, baishaEnergyBoost: true },
+            log: [`你喝下能量饮料，体力恢复，脚步也轻快了一些。`, ...prev.log].slice(0, 6),
+          };
+        }
         const collected = collectStoryItem(prev, itemId, name).nextState;
         if (itemId === "talisman" && prev.currentSceneId === "library_talisman") {
           return {
@@ -680,6 +738,37 @@ function App() {
   }, [closeInterior, interiorBuilding?.id, placePlayerAtInteriorExit]);
 
   const leaveInteriorFromTrigger = useCallback(() => {
+    if (interiorBuilding?.id === "dorm-baisha") {
+      setExitBlackout(true);
+      setStoryState((previous) => ({
+        ...previous,
+        currentSceneId: "find_yicheng",
+        stats: { ...previous.stats, clues: Math.min(100, previous.stats.clues + 8) },
+        inventory: previous.inventory.includes("diary")
+          ? previous.inventory.filter((itemId) => itemId !== "energy")
+          : [...previous.inventory.filter((itemId) => itemId !== "energy"), "diary"],
+        flags: {
+          ...previous.flags,
+          readForum: true,
+          baishaEscaped: true,
+        },
+        visitedHotspots: previous.visitedHotspots.includes("dorm")
+          ? previous.visitedHotspots
+          : [...previous.visitedHotspots, "dorm"],
+        completedHotspots: previous.completedHotspots.includes("dorm")
+          ? previous.completedHotspots
+          : [...previous.completedHotspots, "dorm"],
+        log: ["你穿过消失的两道门，带着论坛日记逃出了白沙宿舍。", ...previous.log].slice(0, 6),
+      }));
+      window.setTimeout(() => {
+        setActiveSceneId(null);
+        placePlayerAtInteriorExit("dorm-baisha");
+        closeInterior();
+        setPhaserReady(true);
+      }, 720);
+      window.setTimeout(() => setExitBlackout(false), 1380);
+      return;
+    }
     const nextOutdoorSceneId = resolveInteriorExitTrigger(storyState);
     if (!nextOutdoorSceneId) return;
     // The next outdoor scene remains the map objective in storyState. Leaving
@@ -695,13 +784,31 @@ function App() {
       setPhaserReady(true);
     }, 460);
     window.setTimeout(() => setExitBlackout(false), 980);
-  }, [closeInterior, interiorBuilding?.id, placePlayerAtInteriorExit, setPlayerIso, setActiveSceneId, storyState]);
+  }, [closeInterior, interiorBuilding?.id, placePlayerAtInteriorExit, setPlayerIso, setActiveSceneId, setStoryState, storyState]);
 
   // Story interiors cannot be abandoned through the top-right button.  The
   // active red exit performs the atomic "leave + show outdoor scene" step.
   const canExitInterior = Boolean(resolveInteriorExitTrigger(storyState));
 
   const startGame = useCallback(() => {
+    if (BAISHA_CHASE_ONLY) {
+      setLaunchMode(null);
+      setLaunchAssetState("loading");
+      setStoryState(() => createBaishaDevelopmentStoryState(true));
+      startSession({ id: "dorm-baisha", name: "白沙宿舍", zone: "story" });
+      setPhaserReady(false);
+      return;
+    }
+    if (BAISHA_DEVELOPMENT_START) {
+      setLaunchMode(null);
+      setLaunchAssetState("loading");
+      setStoryState(() => createBaishaDevelopmentStoryState());
+      startSession({ id: "medical-library", name: "农医馆", zone: "story" });
+      closeInterior();
+      setPlayerIso({ ...BAISHA_DEVELOPMENT_PLAYER });
+      setPhaserReady(true);
+      return;
+    }
     setPhaserReady(false); // 不加载 2.5D 地图，直接进入 3D 内景
     setLaunchAssetState("loading");
     setAssetLoadAttempt((value) => value + 1);
@@ -709,15 +816,15 @@ function App() {
     // 使用 storyEngine 统一解析起始建筑（始终从第一个热点开始）
     const startBuilding = resolveGameStartBuilding();
     startSession(startBuilding ?? { id: "medical-library", name: "农医馆", zone: "story" });
-  }, [scene01Debug, startSession]);
+  }, [closeInterior, scene01Debug, setPlayerIso, setStoryState, startSession]);
 
   const restartGame = useCallback(() => {
-    setPhaserReady(false);
     resetAll();
     JumpscarePipeline.reset();
     setHud(initialHud);
     setLaunchAssetState("loading");
     setAssetLoadAttempt((value) => value + 1);
+    setPhaserReady(false);
     setLaunchMode("restart");
     const startBuilding = resolveGameStartBuilding();
     startSession(startBuilding ?? { id: "medical-library", name: "农医馆", zone: "story" });
@@ -755,6 +862,14 @@ function App() {
   }, [dismissDocument, documentView]);
 
   const reviveGame = useCallback(() => {
+    const state = useGameStore.getState();
+    if (state.interiorBuilding?.id === "dorm-baisha" && state.storyState.flags.baishaCaptured) {
+      if (!reviveInterior()) return;
+      JumpscarePipeline.reset();
+      triggerEffect("reveal");
+      window.dispatchEvent(new CustomEvent("zju-horror-baisha-revive"));
+      return;
+    }
     const deathPoint = { ...useGameStore.getState().playerIso };
     if (!revive()) return;
     JumpscarePipeline.reset();
@@ -762,7 +877,32 @@ function App() {
     window.dispatchEvent(new CustomEvent("zju-horror-player-revive", {
       detail: { playerIso: deathPoint, sanity: REVIVE_SANITY },
     }));
-  }, [revive, triggerEffect]);
+  }, [revive, reviveInterior, triggerEffect]);
+
+  useEffect(() => {
+    const handleBaishaCapture = (): void => {
+      const state = useGameStore.getState();
+      if (state.storyState.flags.baishaCaptured || state.world === "dead") return;
+      playGhostHit();
+      setNextObjectiveCue(null);
+      setStoryState((previous) => ({
+        ...previous,
+        currentSceneId: "death_sanity",
+        stats: { ...previous.stats, sanity: 0 },
+        flags: { ...previous.flags, baishaCaptured: true },
+        log: ["瘦长鬼影从红光里扣住了你。白沙的走廊重新合拢。", ...previous.log].slice(0, 6),
+      }));
+      // Put the death state and choice modal in place immediately, behind the
+      // running jumpscare. When the scare clears there is no frozen gap and no
+      // timer that can be cancelled by an intervening React lifecycle change.
+      setWorld("dead");
+      setActiveSceneId("death_sanity");
+    };
+    window.addEventListener("zju-horror-baisha-capture", handleBaishaCapture);
+    return () => {
+      window.removeEventListener("zju-horror-baisha-capture", handleBaishaCapture);
+    };
+  }, [playGhostHit, setActiveSceneId, setNextObjectiveCue, setStoryState, setWorld]);
 
   useEffect(() => {
     const handleGhostHit = (event: Event) => {
@@ -808,11 +948,12 @@ function App() {
         context: string; intensity: number;
         sanityCost: number; customMessage?: string; spriteId?: JumpscareSpriteId;
       }>).detail;
-      const text = detail.customMessage ?? pickJumpscareText(
-        detail.context as JumpscareContext, storyState.stats.sanity,
+      triggerEffect(
+        "jumpscare",
+        detail.context as JumpscareContext,
+        detail.spriteId,
+        detail.customMessage,
       );
-      useGameStore.getState().setJumpscareText(text);
-      triggerEffect("jumpscare", detail.context as JumpscareContext, detail.spriteId);
     };
     const handleSanityHit = (event: Event) => {
       const detail = (event as CustomEvent<{ amount: number; source: string }>).detail;
@@ -915,10 +1056,102 @@ function App() {
   );
 
   const rootClass = ["appShell", !gameStarted ? "titleMode" : "", screenEffect ? `fx-${screenEffect}` : ""].filter(Boolean).join(" ");
+  const isBaishaInterior = interiorBuilding?.id === "dorm-baisha";
+  const isBaishaEntryStory = Boolean(isBaishaInterior && activeScene?.locationId === "dorm" && activeScene.setting === "outdoor");
+  const baishaStillLoading = Boolean(isBaishaInterior && launchAssetState === "loading");
   const completedCount = storyState.completedHotspots.length;
   const talismanShield = storyState.inventory.includes("talisman") ? 1 : 0;
+  const isBaishaDeath = Boolean(storyState.flags.baishaCaptured);
+  const isBaishaDeathScene = Boolean(isBaishaDeath && activeScene?.id === "death_sanity");
+  const activeSceneTitle = isBaishaDeathScene ? "逃离失败" : activeScene?.title;
+  const activeScenePlace = isBaishaDeathScene
+    ? "白沙宿舍"
+    : activeScene
+      ? getHotspotById(activeScene.locationId)?.place
+      : undefined;
+  const activeSceneBody = isBaishaDeathScene
+    ? [
+        "瘦长的影子在走廊转角追上了你。红灯一盏盏沉进黑暗，最后只剩那阵贴近耳后的呼吸声。",
+        "意识散去以前，你记得那条被白痕封住的捷径，也记得真正的出口仍在走廊另一侧。",
+      ]
+    : activeScene?.body ?? [];
+  const canReviveDeath = revivesRemaining > 0 || (isBaishaDeath && talismanShield > 0);
   const livesAvailable = revivesRemaining + (world === "dead" ? 0 : 1) + talismanShield;
   const maxLives = INITIAL_REVIVES + 1 + talismanShield;
+  const storyLayer = activeScene ? (
+    <>
+      <div
+        className={`storyGlassBackdrop ${activeScene.strongBlur ? "strong" : ""} ${isBaishaEntryStory ? "baishaEntry" : ""} ${storyClosing ? "closing" : ""}`}
+        style={interiorBuilding ? { zIndex: 4999 } : undefined}
+        aria-hidden="true"
+      />
+      <section
+        className={`${activeScene.ending ? "storyModal ending" : "storyModal"} ${storyClosing ? "closing" : ""}`}
+        style={interiorBuilding ? { zIndex: 5000 } : undefined}
+        aria-live="polite"
+      >
+        <div className="storyKicker">
+          <span>{activeScene.chapter}</span>
+          <b>{activeScenePlace}</b>
+        </div>
+        <h1>{activeSceneTitle}</h1>
+        <div className="storyText">
+          {activeSceneBody.map((paragraph, index) => (
+            <p
+              className={storyTone(paragraph)}
+              data-text={paragraph}
+              key={paragraph}
+              style={{ "--story-line-delay": `${180 + index * 260}ms` } as CSSProperties}
+            >
+              {paragraph}
+            </p>
+          ))}
+        </div>
+        {activeScene.ending ? (
+          <div className="endingActions">
+            {activeScene.id === "death_sanity" && canReviveDeath && (
+              <button className="choiceButton primary reviveButton" onClick={reviveGame} type="button">
+                <span>复活</span>
+                <em>{isBaishaDeath && talismanShield > 0 ? "消耗 1 张符纸" : `消耗 1 次复活 · 当前剩余 ${revivesRemaining}`}</em>
+              </button>
+            )}
+            <button
+              className={activeScene.id === "death_sanity" && canReviveDeath ? "choiceButton restartButton" : "choiceButton primary"}
+              onClick={restartGame}
+              type="button"
+            >
+              重新开始游戏
+            </button>
+          </div>
+        ) : (
+          <div
+            className="choiceList"
+            style={{ "--choice-list-delay": `${260 + activeSceneBody.length * 260}ms` } as CSSProperties}
+          >
+            {activeScene.choices.map((choice, choiceIndex) => {
+              const locked = isChoiceLocked(choice, storyState);
+              const delta = statDeltaText(choice.statChanges);
+              const required = choice.requireItem ? `需要：${itemCatalog[choice.requireItem].name}` : "";
+              return (
+                <button
+                  className={`${locked ? "choiceButton locked" : "choiceButton"} ${selectedChoiceId === choice.id ? "selected" : ""}`}
+                  disabled={locked || selectedChoiceId !== null}
+                  key={choice.id}
+                  style={{ "--choice-delay": `${choiceIndex * 100}ms` } as CSSProperties}
+                  onClick={() => choose(choice)}
+                  onFocus={() => !locked && playHover()}
+                  onMouseEnter={() => !locked && playHover()}
+                >
+                  <span>{choice.text}</span>
+                  {(delta || required) && <em>{locked ? required : delta}</em>}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </section>
+    </>
+  ) : null;
 
   return (
     <main className={rootClass}>
@@ -1108,79 +1341,7 @@ function App() {
           </section>
         )}
 
-        {activeScene && <div
-          className={`storyGlassBackdrop ${activeScene.strongBlur ? "strong" : ""} ${storyClosing ? "closing" : ""}`}
-          style={interiorBuilding ? { zIndex: 1999 } : undefined}
-          aria-hidden="true"
-        />}
-
-        {activeScene && (
-          <section
-            className={`${activeScene.ending ? "storyModal ending" : "storyModal"} ${storyClosing ? "closing" : ""}`}
-            style={interiorBuilding ? { zIndex: 2000 } : undefined}
-            aria-live="polite"
-          >
-            <div className="storyKicker">
-              <span>{activeScene.chapter}</span>
-              <b>{getHotspotById(activeScene.locationId)?.place}</b>
-            </div>
-            <h1>{activeScene.title}</h1>
-            <div className="storyText">
-              {activeScene.body.map((paragraph, index) => (
-                <p
-                  className={storyTone(paragraph)}
-                  data-text={paragraph}
-                  key={paragraph}
-                  style={{ "--story-line-delay": `${180 + index * 260}ms` } as CSSProperties}
-                >
-                  {paragraph}
-                </p>
-              ))}
-            </div>
-            {activeScene.ending ? (
-              <div className="endingActions">
-                {activeScene.id === "death_sanity" && revivesRemaining > 0 && (
-                  <button className="choiceButton primary reviveButton" onClick={reviveGame} type="button">
-                    <span>原地复活</span>
-                    <em>剩余 {revivesRemaining} 次复活机会</em>
-                  </button>
-                )}
-                <button
-                  className={activeScene.id === "death_sanity" && revivesRemaining > 0 ? "choiceButton restartButton" : "choiceButton primary"}
-                  onClick={restartGame}
-                  type="button"
-                >
-                  重新开始
-                </button>
-              </div>
-            ) : (
-              <div
-                className="choiceList"
-                style={{ "--choice-list-delay": `${260 + activeScene.body.length * 260}ms` } as CSSProperties}
-              >
-                {activeScene.choices.map((choice, choiceIndex) => {
-                  const locked = isChoiceLocked(choice, storyState);
-                  const delta = statDeltaText(choice.statChanges);
-                  const required = choice.requireItem ? `需要：${itemCatalog[choice.requireItem].name}` : "";
-                  return (
-                    <button
-                      className={`${locked ? "choiceButton locked" : "choiceButton"} ${selectedChoiceId === choice.id ? "selected" : ""}`}
-                      disabled={locked || selectedChoiceId !== null}
-                      key={choice.id}
-                      style={{ "--choice-delay": `${choiceIndex * 100}ms` } as CSSProperties}
-                      onClick={() => choose(choice)}
-                      onFocus={() => !locked && playHover()}
-                      onMouseEnter={() => !locked && playHover()}
-                    >
-                      <span>{choice.text}</span>
-                      {(delta || required) && <em>{locked ? required : delta}</em>}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-        )}
+        {!interiorBuilding && storyLayer}
       </section>
 
       {!gameStarted && (
@@ -1210,9 +1371,20 @@ function App() {
           onExit={leaveInteriorFromTrigger}
           onExitTrigger={leaveInteriorFromTrigger}
           canExit={canExitInterior}
-          blockUntilAssetReady={launchMode !== null}
+          blockUntilAssetReady={launchMode !== null || baishaStillLoading}
           onAssetStateChange={setLaunchAssetState}
         />
+      )}
+
+      {interiorBuilding && storyLayer ? createPortal(storyLayer, document.body) : null}
+
+      {isBaishaInterior && (
+        <div
+          className={`baishaLoadCurtain ${isBaishaEntryStory || baishaStillLoading ? "active" : ""}`}
+          aria-hidden="true"
+        >
+          {!activeScene && baishaStillLoading ? <span>白沙宿舍 / 正在适应黑暗</span> : null}
+        </div>
       )}
 
       {/* Interior3D is its own high stacking layer. Mirror the central scare
