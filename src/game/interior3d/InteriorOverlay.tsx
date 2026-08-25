@@ -7,6 +7,7 @@ import {
 import { useGameStore } from "../store";
 import { JumpscarePipeline } from "../JumpscarePipeline";
 import BaishaDormExperience, { type BaishaDormStage } from "./BaishaDormExperience";
+import { shouldUseBaishaDirectChaseTest } from "./baishaDebug";
 
 export interface InteriorOverlayProps {
   building: { id: string; name: string; zone?: string };
@@ -26,6 +27,7 @@ export interface InteriorOverlayProps {
 const JOYSTICK_RADIUS = 56;
 const LIBRARY_STEPS = ["寻找手电筒", "笔记本", "借阅小票", "拾取符咒", "书架异响", "灯下的人", "离开图书馆"];
 const BAISHA_STEPS = ["调查桌上相框", "照片发生异变", "查看阳台", "玻璃外的人影", "浏览校园论坛", "离开寝室"];
+type PickupToast = { name: string; detail?: string };
 
 function libraryProgressIndex(sceneId: string, inventory: string[]): number {
   if (sceneId === "library_intro") return inventory.includes("flashlight") ? 1 : 0;
@@ -73,7 +75,7 @@ export default function InteriorOverlay({
   const [failed, setFailed] = useState(false);
   const [assetState, setAssetState] = useState<InteriorAssetState>("loading");
   // 拾取道具时的短暂提示文案。
-  const [pickupToast, setPickupToast] = useState<string | null>(null);
+  const [pickupToast, setPickupToast] = useState<PickupToast | null>(null);
   const toastTimer = useRef<number | null>(null);
   const [doorHint, setDoorHint] = useState("");
   const [doorMessage, setDoorMessage] = useState<string | null>(null);
@@ -83,17 +85,19 @@ export default function InteriorOverlay({
   const lightningTimer = useRef<number | null>(null);
   const [baishaTrigger, setBaishaTrigger] = useState<BaishaGameplayTrigger | null>(null);
   const [baishaStage, setBaishaStage] = useState<BaishaDormStage>("photo_target");
+  const [baishaChaseStarted, setBaishaChaseStarted] = useState(false);
+  const baishaEnergyBoost = useGameStore((state) => Boolean(state.storyState.flags.baishaEnergyBoost));
   const scene01Debug = building.id === "medical-library"
     && new URLSearchParams(window.location.search).get("debugScene01") === "1";
   const baishaGameplayDebug = building.id === "dorm-baisha"
     && new URLSearchParams(window.location.search).get("baishaGameplayDebug") === "1";
-  const baishaChaseOnly = import.meta.env.DEV
-    && building.id === "dorm-baisha"
-    && new URLSearchParams(window.location.search).get("baishaChaseOnly") === "1";
+  const baishaChaseOnly = building.id === "dorm-baisha"
+    && shouldUseBaishaDirectChaseTest();
 
   useEffect(() => {
     if (!baishaChaseOnly || assetState !== "ready") return;
     engineRef.current?.resetBaishaChaseCheckpoint();
+    setBaishaChaseStarted(false);
     setBaishaStage("complete");
   }, [assetState, baishaChaseOnly]);
 
@@ -146,7 +150,11 @@ export default function InteriorOverlay({
         onPickup: (itemId, name) => {
           // 通知外层剧情系统把道具加入物品栏，并弹一个短暂提示。
           window.dispatchEvent(new CustomEvent("zju-horror-pickup", { detail: { itemId, name } }));
-          setPickupToast(name);
+          if (itemId === "energy") setBaishaChaseStarted(true);
+          setPickupToast({
+            name,
+            detail: itemId === "energy" ? "体力恢复 · 移动速度提升" : undefined,
+          });
           if (toastTimer.current !== null) window.clearTimeout(toastTimer.current);
           toastTimer.current = window.setTimeout(() => setPickupToast(null), 2600);
         },
@@ -175,6 +183,7 @@ export default function InteriorOverlay({
         },
         onBaishaChaseStart: () => {
           engineRef.current?.exitPointerLock();
+          setBaishaChaseStarted(true);
           JumpscarePipeline.executeStoryEffect("library_fall", 0.96, "快逃", "library-fall", 0);
         },
         onBaishaCapture: () => {
@@ -245,6 +254,7 @@ export default function InteriorOverlay({
     const resetCheckpoint = (): void => {
       engineRef.current?.resetBaishaChaseCheckpoint();
       setBaishaTrigger(null);
+      setBaishaChaseStarted(false);
       setBaishaStage("complete");
     };
     window.addEventListener("zju-horror-baisha-revive", resetCheckpoint);
@@ -645,12 +655,18 @@ export default function InteriorOverlay({
               ["flashlight", "手电筒", "光"],
               ["receipt", "借阅小票", "票"],
               ["talisman", "符纸", "符"],
+              ...((baishaChaseStarted || baishaEnergyBoost)
+                ? [["energy", "能量饮料", "饮"] as const]
+                : []),
             ] as const).map(([id, label, icon]) => {
-              const owned = inventory.includes(id);
+              const owned = id === "energy" ? baishaEnergyBoost : inventory.includes(id);
               return (
                 <div key={id} style={{ ...styles.inventorySlot, ...(owned ? styles.inventorySlotOwned : undefined) }}>
                   <i style={styles.inventoryIcon}>{owned ? icon : "·"}</i>
-                  <span>{label}</span>
+                  <span>
+                    {label}
+                    {id === "energy" && owned && <small style={styles.inventorySlotStatus}>加速中</small>}
+                  </span>
                 </div>
               );
             })}
@@ -712,7 +728,8 @@ export default function InteriorOverlay({
       {pickupToast && (
         <div style={styles.pickupToast}>
           <span>拾取</span>
-          <strong>{pickupToast}</strong>
+          <strong>{pickupToast.name}</strong>
+          {pickupToast.detail && <small style={styles.pickupToastDetail}>{pickupToast.detail}</small>}
         </div>
       )}
 
@@ -916,6 +933,13 @@ const styles: Record<string, CSSProperties> = {
     fontStyle: "normal",
     boxShadow: "0 0 12px rgba(179, 19, 30, 0.16)",
   },
+  inventorySlotStatus: {
+    display: "block",
+    marginTop: 2,
+    color: "rgba(236, 94, 72, 0.9)",
+    fontSize: 9,
+    letterSpacing: "0.12em",
+  },
   storyChain: {
     position: "absolute",
     top: 344,
@@ -1097,6 +1121,11 @@ const styles: Record<string, CSSProperties> = {
     letterSpacing: "0.12em",
     boxShadow: "0 8px 22px rgba(0,0,0,0.5), 0 0 18px rgba(215,183,118,0.25)",
     animation: "interiorFadeIn 0.3s ease-out both",
+  },
+  pickupToastDetail: {
+    color: "rgba(240, 111, 82, 0.92)",
+    fontSize: 11,
+    letterSpacing: "0.08em",
   },
   fallback: {
     position: "absolute",

@@ -19,6 +19,9 @@ export class CameraController {
   private targetFov: number;
   private bobPhase = 0;
   private bobAmount = 0;
+  private bobOffsetX = 0;
+  private bobOffsetY = 0;
+  private visualBobApplied = false;
   private readonly baseBobAmp = 0.018;
   private readonly sprintBobAmp = 0.038;
 
@@ -90,18 +93,34 @@ export class CameraController {
     const bobSpeed = isSprinting ? 2.8 : 1.8;
     this.bobAmount += (targetBob - this.bobAmount) * Math.min(1, dt * 6);
 
+    this.bobOffsetX = 0;
+    this.bobOffsetY = 0;
     if (this.bobAmount > 0.001) {
       const speed = isSprinting ? ctx.sprintSpeed : ctx.walkSpeed;
       this.bobPhase += dt * bobSpeed * speed * 0.6;
       const amp = (isSprinting ? this.sprintBobAmp : this.baseBobAmp) * this.bobAmount;
-      const bobY = Math.sin(this.bobPhase * 2) * amp;
-      const bobX = Math.cos(this.bobPhase) * amp * 0.4;
-      this.camera.position.y += bobY;
-      this.camera.position.x += bobX;
+      this.bobOffsetY = Math.sin(this.bobPhase * 2) * amp;
+      this.bobOffsetX = Math.cos(this.bobPhase) * amp * 0.4;
     }
 
     // Sync yaw to context so states can do world-space velocity math.
     ctx.yaw = this.yaw;
+  }
+
+  /** Apply the visual-only head bob immediately before rendering. */
+  applyVisualBob(): void {
+    if (this.visualBobApplied) return;
+    this.camera.position.x += this.bobOffsetX;
+    this.camera.position.y += this.bobOffsetY;
+    this.visualBobApplied = true;
+  }
+
+  /** Restore the authoritative physical camera position after rendering. */
+  clearVisualBob(): void {
+    if (!this.visualBobApplied) return;
+    this.camera.position.x -= this.bobOffsetX;
+    this.camera.position.y -= this.bobOffsetY;
+    this.visualBobApplied = false;
   }
 
   // ── internals ──

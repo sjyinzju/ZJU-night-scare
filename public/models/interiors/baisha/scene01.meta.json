@@ -51,9 +51,9 @@
           { "id": "main-dorm", "x": 29.82, "z": -8.55 },
           { "id": "main-exit", "x": 13.55, "z": -8.55 },
           { "id": "white-main", "x": 9.68, "z": -8.55 },
-          { "id": "main-left", "x": 4.25, "z": -8.55 },
-          { "id": "outer-left-top", "x": 4.25, "z": -10.35 },
-          { "id": "outer-left-bottom", "x": 4.25, "z": -19.28 },
+          { "id": "main-left", "x": 6.45, "z": -8.55 },
+          { "id": "outer-left-top", "x": 6.45, "z": -10.35 },
+          { "id": "outer-left-bottom", "x": 6.45, "z": -19.28 },
           { "id": "shortcut-exit", "x": 9.4, "z": -19.28 },
           { "id": "outer-right-bottom", "x": 13.2, "z": -19.28 },
           { "id": "outer-right-top", "x": 13.2, "z": -10.35 },
@@ -104,7 +104,7 @@
     "minimap": {
       "paths": [
         [
-          { "x": 3.37, "z": -7.4 },
+          { "x": 5.12, "z": -7.4 },
           { "x": 27.65, "z": -7.4 },
           { "x": 27.65, "z": -0.9 },
           { "x": 32.11, "z": -0.9 },
@@ -113,16 +113,16 @@
           { "x": 36.29, "z": -9.63 },
           { "x": 14.41, "z": -9.63 },
           { "x": 14.41, "z": -20.22 },
-          { "x": 3.37, "z": -20.22 },
-          { "x": 3.37, "z": -9.63 },
-          { "x": 3.37, "z": -7.4 }
+          { "x": 5.12, "z": -20.22 },
+          { "x": 5.12, "z": -9.63 },
+          { "x": 5.12, "z": -7.4 }
         ],
         [
-          { "x": 4.9, "z": -9.54 },
+          { "x": 5.12, "z": -9.54 },
           { "x": 8.72, "z": -9.54 },
           { "x": 8.72, "z": -18.85 },
-          { "x": 4.9, "z": -18.85 },
-          { "x": 4.9, "z": -9.54 }
+          { "x": 5.12, "z": -18.85 },
+          { "x": 5.12, "z": -9.54 }
         ],
         [
           { "x": 10.1, "z": -9.54 },
@@ -138,7 +138,7 @@
   },
   "pickupSpots": {
     "energy": [
-      { "x": 4.25, "y": 0.12, "z": -15.4, "radius": 1.0 }
+      { "x": 6.45, "y": 0.12, "z": -14.25, "radius": 1.0 }
     ]
   },
   "pickupVisuals": {
@@ -146,8 +146,17 @@
   },
   "navigationClearZones": [
     { "minX": 29.25, "maxX": 30.57, "minZ": -7.78, "maxZ": -7.26 },
-    { "minX": 4.55, "maxX": 5.5, "minZ": -20.06, "maxZ": -18.55, "kind": "wall" },
     { "minX": 12.05, "maxX": 13.05, "minZ": -20.06, "maxZ": -18.55, "kind": "wall" }
+  ],
+  "baishaBoundaryWalls": [
+    {
+      "minX": 3.34,
+      "maxX": 5.12,
+      "minZ": -20.35,
+      "maxZ": -9.55,
+      "baseY": 0.0,
+      "topY": 3.6
+    }
   ],
   "baishaRaisedCeiling": {
     "minX": 13.2,
@@ -156,15 +165,7 @@
     "maxZ": -9.55,
     "baseY": 3.6,
     "raisedY": 4.45,
-    "visualCutNames": ["Geom3D_.005", "Geom3D_.007"],
-    "dividerExtension": {
-      "minX": 7.88,
-      "maxX": 8.72,
-      "minZ": -18.9,
-      "maxZ": -9.56,
-      "baseY": 1.48,
-      "topY": 3.6
-    }
+    "visualCutNames": ["Geom3D_.005", "Geom3D_.007"]
   },
   "baishaLighting": {
     "revealAhead": 3,
@@ -180,9 +181,9 @@
       { "id": "corridor-04", "x": 14.05, "y": 3.25, "z": -8.48, "axis": "x", "zone": "corridor" },
       { "id": "corridor-05", "x": 10.1, "y": 3.25, "z": -8.48, "axis": "x", "zone": "corridor" },
       { "id": "corridor-06", "x": 6.25, "y": 3.25, "z": -8.48, "axis": "x", "zone": "corridor" },
-      { "id": "corridor-07", "x": 4.25, "y": 3.25, "z": -11.15, "axis": "x", "zone": "corridor" },
-      { "id": "corridor-08", "x": 4.25, "y": 3.25, "z": -14.25, "axis": "x", "zone": "corridor" },
-      { "id": "corridor-09", "x": 4.25, "y": 3.25, "z": -17.3, "axis": "x", "zone": "corridor" },
+      { "id": "corridor-07", "x": 6.45, "y": 3.25, "z": -11.15, "axis": "x", "zone": "corridor" },
+      { "id": "corridor-08", "x": 6.45, "y": 3.25, "z": -14.25, "axis": "x", "zone": "corridor" },
+      { "id": "corridor-09", "x": 6.45, "y": 3.25, "z": -17.3, "axis": "x", "zone": "corridor" },
       { "id": "corridor-10", "x": 6.15, "y": 3.25, "z": -19.28, "axis": "x", "zone": "corridor" },
       { "id": "corridor-11", "x": 9.55, "y": 3.25, "z": -19.28, "axis": "x", "zone": "corridor" },
       { "id": "corridor-12", "x": 12.75, "y": 3.25, "z": -19.28, "axis": "x", "zone": "corridor" }

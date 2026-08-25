@@ -18,6 +18,7 @@ import {
 import { CampusScene, type GameHudEvent, type GameMiniMapEvent } from "./game/CampusScene";
 import InteriorOverlay from "./game/interior3d/InteriorOverlay";
 import type { InteriorAssetState } from "./game/interior3d/Interior3D";
+import { shouldUseBaishaDirectChaseTest } from "./game/interior3d/baishaDebug";
 import LaunchSequence, { type LaunchSequenceMode } from "./LaunchSequence";
 import { campusBuildings, campusRoads, type IsoPoint } from "./game/mapData";
 import {
@@ -75,8 +76,7 @@ type DocumentView = { title: string; lines: string[] };
 // direct-entry path explicit so it remains available for focused QA only.
 const BAISHA_DEVELOPMENT_START = import.meta.env.DEV
   && new URLSearchParams(window.location.search).get("baishaDev") === "1";
-const BAISHA_CHASE_ONLY = import.meta.env.DEV
-  && new URLSearchParams(window.location.search).get("baishaChaseOnly") === "1";
+const BAISHA_CHASE_ONLY = shouldUseBaishaDirectChaseTest();
 const BAISHA_DEVELOPMENT_PLAYER = new URLSearchParams(window.location.search).get("baishaDoor") === "1"
   ? { x: 7.6, y: 8.11 }
   : { x: 19.4, y: 30.2 };

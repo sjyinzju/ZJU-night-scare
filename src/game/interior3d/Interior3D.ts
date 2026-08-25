@@ -113,6 +113,12 @@ const PICKUP_AUTO_RADIUS_SCALE = 1;
 const STORY_AUTO_RADIUS_SCALE = 1.1;
 /** Pressing E grants a wider margin without changing the authored radius stored in scene metadata. */
 const MANUAL_INTERACTION_RADIUS_SCALE = 1.25;
+/** Baisha remains escapable without the drink, but the chase is deliberately tighter. */
+const BAISHA_CHASE_SPRINT_MULTIPLIER = 0.9;
+/** The drink restores the authored dorm sprint speed for the rest of this chase. */
+const BAISHA_ENERGY_SPRINT_MULTIPLIER = 1;
+/** Prevent run/walk/FOV oscillation when exhausted stamina recovers by fractions. */
+const BAISHA_AUTOSPRINT_RECOVERY_STAMINA = 24;
 
 type BaishaTubeRuntime = {
   group: THREE.Group;
@@ -225,6 +231,7 @@ export class Interior3D {
   private baishaCorridorWindow?: THREE.Group;
   private baishaCorridorWindowGlass?: THREE.MeshStandardMaterial;
   private baishaCorridorWindowFlash?: THREE.PointLight;
+  private baishaBoundaryWalls?: THREE.Group;
   private baishaRaisedCeiling?: THREE.Group;
   private nextBaishaLightningAt = Number.POSITIVE_INFINITY;
   private baishaLightningUntil = 0;
@@ -255,6 +262,7 @@ export class Interior3D {
   private baishaCaptureReported = false;
   private baishaExitReported = false;
   private baishaEnergyActive = false;
+  private baishaAutoSprintRecovering = false;
   private baishaPreExitColliders?: AABB[];
   private baishaPreExitMapObstacles?: InteriorMapObstacle[];
   private baishaComputerLight?: THREE.PointLight;
@@ -587,6 +595,7 @@ export class Interior3D {
     this.baishaCaptureReported = false;
     this.baishaExitReported = false;
     this.baishaEnergyActive = false;
+    this.baishaAutoSprintRecovering = false;
     this.baishaDebugEnergyChecked = false;
     this.baishaDebugDoorChecked = false;
     this.baishaDebugExitChecked = false;
@@ -839,7 +848,21 @@ export class Interior3D {
         const energy = this.pickupsByItemId.get("energy");
         const visuals = this.assetPickupVisuals.get("energy") ?? [];
         if (!energy) return "能量饮料检测：拾取点未创建";
-        const viewZ = energy.position.z + 1.15;
+        const outsideStripBlocked = [3.65, 4.25, 4.85].every((x) => (
+          Array.from({ length: 13 }, (_, index) => THREE.MathUtils.lerp(-9.45, -20.0, index / 12))
+            .every((z) => this.collides(x, z))
+        ));
+        const safeExitVerticalClear = Array.from(
+          { length: 25 },
+          (_, index) => THREE.MathUtils.lerp(-8.55, -19.28, index / 24),
+        ).every((z) => !this.collides(6.45, z));
+        const safeExitBottomTurnClear = Array.from(
+          { length: 9 },
+          (_, index) => THREE.MathUtils.lerp(6.45, 9.4, index / 8),
+        ).every((x) => !this.collides(x, -19.28));
+        const safeExitCorridorClear = safeExitVerticalClear && safeExitBottomTurnClear;
+        const energyInSafeExitCorridor = Math.abs(energy.position.x - 6.45) <= 0.05;
+        const viewZ = energy.position.z + energy.radius + 0.2;
         this.camera.position.set(
           energy.position.x,
           this.room.floorHeightAt(energy.position.x, viewZ) + this.crouchState.eyeHeight,
@@ -848,9 +871,13 @@ export class Interior3D {
         this.cameraController.setLook(0, -0.72);
         this.baishaDebugEnergyChecked = true;
         const visibleVisuals = visuals.filter((object) => object.visible).length;
-        return visuals.length > 0 && visibleVisuals === visuals.length
-          ? `能量饮料检测：模型已加载（${energy.position.x.toFixed(2)}, ${energy.position.z.toFixed(2)}）`
-          : `能量饮料检测：${visibleVisuals}/${visuals.length} 个模型节点可见`;
+        return visuals.length > 0
+          && visibleVisuals === visuals.length
+          && outsideStripBlocked
+          && safeExitCorridorClear
+          && energyInSafeExitCorridor
+          ? `能量饮料检测：模型位于安全出口走廊，墙外条带已封闭（${energy.position.x.toFixed(2)}, ${energy.position.z.toFixed(2)}）`
+          : `能量饮料检测：模型 ${visibleVisuals}/${visuals.length}，墙外条带 ${outsideStripBlocked ? "已封闭" : "仍可进入"}，安全出口走廊 ${safeExitCorridorClear ? "畅通" : "受阻"}，饮料 ${energyInSafeExitCorridor ? "位置正确" : `误置于 x=${energy.position.x.toFixed(2)}`}`;
       }
       if (this.baishaDebugDoorChecked && chase && this.baishaGhostState === "dormant") {
         const z = chase.exitThresholdZ - 0.45;
@@ -1100,6 +1127,14 @@ export class Interior3D {
         [obstacle],
       )
     ));
+    const boundaryWallObstacles: InteriorMapObstacle[] = (handle.meta?.baishaBoundaryWalls ?? []).map((wall) => ({
+      minX: wall.minX,
+      maxX: wall.maxX,
+      minZ: wall.minZ,
+      maxZ: wall.maxZ,
+      kind: "wall",
+    }));
+    this.colliders.push(...boundaryWallObstacles);
     this.staticColliderSet = this.colliders.every((collider) => (
       !collider.isActive && !collider.activeSceneIds?.length
     ));
@@ -1112,6 +1147,7 @@ export class Interior3D {
         || obstacle.minZ > hiddenBodyBounds.maxZ
       ))
       : handle.collisionMap.obstacles;
+    this.interiorMapObstacles = [...this.interiorMapObstacles, ...boundaryWallObstacles];
     this.playerRadius = AUTHORED_LIBRARY_PLAYER_RADIUS;
     this.moveCtx.playerRadius = this.playerRadius;
 
@@ -1219,6 +1255,7 @@ export class Interior3D {
     const delta = new THREE.Vector3(pickup.position.x - center.x, 0, pickup.position.z - center.z);
     for (const obj of objects) {
       obj.position.add(delta);
+      if (itemId === "energy") obj.scale.multiplyScalar(1.2);
       obj.updateMatrixWorld(true);
     }
   }
@@ -1276,7 +1313,7 @@ export class Interior3D {
     }
 
     const isPaperClue = itemId === "receipt" || itemId === "talisman";
-    const emissiveIntensity = itemId === "energy" ? 1.05 : isPaperClue ? 1.22 : 0.18;
+    const emissiveIntensity = itemId === "energy" ? 1.55 : isPaperClue ? 1.22 : 0.18;
     for (const mesh of meshes) {
       const source = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       const materials = source.map((material) => {
@@ -1339,8 +1376,8 @@ export class Interior3D {
         add(
           `pickup:${pickup.itemId}`,
           pickup.position,
-          pickup.itemId === "flashlight" ? 5.6 : pickup.itemId === "energy" ? 3.4 : 5.1,
-          pickup.itemId === "flashlight" ? 5.2 : pickup.itemId === "energy" ? 3.8 : 4.7,
+          pickup.itemId === "flashlight" ? 5.6 : pickup.itemId === "energy" ? 5.2 : 5.1,
+          pickup.itemId === "flashlight" ? 5.2 : pickup.itemId === "energy" ? 4.8 : 4.7,
         );
       }
     }
@@ -1548,6 +1585,7 @@ export class Interior3D {
     this.baishaCaptureReported = false;
     this.baishaExitReported = false;
     this.baishaEnergyActive = false;
+    this.baishaAutoSprintRecovering = false;
     this.baishaDebugEnergyChecked = false;
     this.baishaPreExitColliders = undefined;
     this.baishaPreExitMapObstacles = undefined;
@@ -1616,6 +1654,7 @@ export class Interior3D {
     this.baishaCaptureReported = false;
     this.baishaExitReported = false;
     this.baishaEnergyActive = false;
+    this.baishaAutoSprintRecovering = false;
     this.baishaDebugEnergyChecked = false;
     this.baishaPreExitColliders = undefined;
     this.baishaPreExitMapObstacles = undefined;
@@ -1709,9 +1748,12 @@ export class Interior3D {
     this.baishaPursuitPathIndex = 1;
     this.baishaNextRepathAt = Number.NEGATIVE_INFINITY;
     this.baishaLastPursuitTarget.set(Number.NaN, Number.NaN);
+    this.baishaAutoSprintRecovering = this.runtimeStamina <= 0;
     const next = this.baishaShortcutPath[1];
     if (next) this.faceBaishaGhostToward(next.x, next.z);
-    this.moveCtx.sprintSpeed = this.blueprint.movement.sprintSpeed * (this.baishaEnergyActive ? 1 : 0.9);
+    this.moveCtx.sprintSpeed = this.blueprint.movement.sprintSpeed * (
+      this.baishaEnergyActive ? BAISHA_ENERGY_SPRINT_MULTIPLIER : BAISHA_CHASE_SPRINT_MULTIPLIER
+    );
     this.baishaLightningUntil = now + 0.28;
     this.nextBaishaLightningAt = now + 7 + Math.random() * 2;
     playBaishaThunder();
@@ -2105,6 +2147,37 @@ export class Interior3D {
 
     this.clearBaishaLighting();
     this.baishaRevealAhead = config.revealAhead ?? 3;
+    const boundaryWalls = handle.meta?.baishaBoundaryWalls ?? [];
+    if (boundaryWalls.length > 0) {
+      const group = new THREE.Group();
+      group.name = "baisha_boundary_wall_repairs";
+      const material = new THREE.MeshStandardMaterial({
+        color: 0x170b0c,
+        roughness: 0.96,
+        metalness: 0,
+      });
+      for (const wall of boundaryWalls) {
+        if (wall.visible === false) continue;
+        const mesh = new THREE.Mesh(
+          new THREE.BoxGeometry(
+            wall.maxX - wall.minX,
+            wall.topY - wall.baseY,
+            wall.maxZ - wall.minZ,
+          ),
+          material,
+        );
+        mesh.position.set(
+          (wall.minX + wall.maxX) * 0.5,
+          wall.baseY + (wall.topY - wall.baseY) * 0.5,
+          (wall.minZ + wall.maxZ) * 0.5,
+        );
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        group.add(mesh);
+      }
+      this.scene.add(group);
+      this.baishaBoundaryWalls = group;
+    }
     const raisedCeiling = handle.meta?.baishaRaisedCeiling;
     if (raisedCeiling) {
       const { minX, maxX, minZ, maxZ, baseY, raisedY } = raisedCeiling;
@@ -2130,20 +2203,6 @@ export class Interior3D {
       addPanel(new THREE.BoxGeometry(0.14, lift, depth), maxX, baseY + lift * 0.5, (minZ + maxZ) * 0.5);
       addPanel(new THREE.BoxGeometry(width, lift, 0.14), (minX + maxX) * 0.5, baseY + lift * 0.5, minZ);
       addPanel(new THREE.BoxGeometry(width, lift, 0.14), (minX + maxX) * 0.5, baseY + lift * 0.5, maxZ);
-      const divider = raisedCeiling.dividerExtension;
-      if (divider) {
-        const dividerHeight = divider.topY - divider.baseY;
-        addPanel(
-          new THREE.BoxGeometry(
-            divider.maxX - divider.minX,
-            dividerHeight,
-            divider.maxZ - divider.minZ,
-          ),
-          (divider.minX + divider.maxX) * 0.5,
-          divider.baseY + dividerHeight * 0.5,
-          (divider.minZ + divider.maxZ) * 0.5,
-        );
-      }
       this.scene.add(group);
       this.baishaRaisedCeiling = group;
     }
@@ -2328,6 +2387,19 @@ export class Interior3D {
       for (const material of materials) material.dispose();
     }
     if (this.baishaCorridorWindowFlash) this.scene.remove(this.baishaCorridorWindowFlash);
+    if (this.baishaBoundaryWalls) {
+      const materials = new Set<THREE.Material>();
+      this.baishaBoundaryWalls.traverse((object) => {
+        const mesh = object as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        mesh.geometry.dispose();
+        const meshMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        for (const material of meshMaterials) materials.add(material);
+      });
+      for (const material of materials) material.dispose();
+      this.scene.remove(this.baishaBoundaryWalls);
+      this.baishaBoundaryWalls = undefined;
+    }
     if (this.baishaRaisedCeiling) {
       const materials = new Set<THREE.Material>();
       this.baishaRaisedCeiling.traverse((object) => {
@@ -2834,6 +2906,26 @@ export class Interior3D {
       snap.sprintHeld = false;
       snap.crouchHeld = false;
     }
+    // The corridor sequence is an authored chase, so forward movement must
+    // enter the run state without requiring an undocumented Shift press.
+    // Stamina still gates running and keeps the drink's recovery meaningful.
+    if (!this.gameplayPaused && this.baishaGhostState === "chase") {
+      if (this.runtimeStamina <= 0) {
+        this.baishaAutoSprintRecovering = true;
+      } else if (
+        this.baishaAutoSprintRecovering
+        && this.runtimeStamina >= BAISHA_AUTOSPRINT_RECOVERY_STAMINA
+      ) {
+        this.baishaAutoSprintRecovering = false;
+      }
+      if (
+        !this.baishaAutoSprintRecovering
+        && snap.moveZ > 0.1
+        && this.runtimeStamina > 0
+      ) {
+        snap.sprintHeld = true;
+      }
+    }
     if (this.runtimeStamina <= 0) snap.sprintHeld = false;
     ctx.input = snap;
     if (snap.moveX === 0 && snap.moveZ === 0) {
@@ -2965,7 +3057,15 @@ export class Interior3D {
   private collectPickups(): void {
     const p = this.camera.position;
     for (const item of this.room.pickups) {
-      if (item.taken || !item.glow.visible) continue;
+      // Gameplay availability must not depend on whether a procedural glow or
+      // imported model happens to be visible. Rendering and phase sync can
+      // change independently; the authored phase plus taken/inventory state
+      // are the interaction truth.
+      if (
+        item.taken
+        || this.hasInventoryItem(item.itemId)
+        || !this.isPickupAvailable(item, this.storySceneId)
+      ) continue;
       const dx = p.x - item.position.x;
       const dz = p.z - item.position.z;
       if (this.isInteractionInRange(dx * dx + dz * dz, item.radius, PICKUP_AUTO_RADIUS_SCALE)) {
@@ -2974,7 +3074,8 @@ export class Interior3D {
         this.setAssetPickupVisualVisible(item.itemId, false);
         if (this.roomKind === "dorm" && item.itemId === "energy") {
           this.baishaEnergyActive = true;
-          this.moveCtx.sprintSpeed = this.blueprint.movement.sprintSpeed;
+          this.baishaAutoSprintRecovering = false;
+          this.moveCtx.sprintSpeed = this.blueprint.movement.sprintSpeed * BAISHA_ENERGY_SPRINT_MULTIPLIER;
           this.runtimeStamina = Math.min(100, this.runtimeStamina + 30);
           const restoredStamina = Math.round(this.runtimeStamina);
           this.persistedStamina = restoredStamina;
@@ -3294,7 +3395,12 @@ export class Interior3D {
     this.syncLightingState(dt, t);
     this.updateBaishaShadowCache();
 
-    this.renderer.render(this.scene, this.camera);
+    this.cameraController.applyVisualBob();
+    try {
+      this.renderer.render(this.scene, this.camera);
+    } finally {
+      this.cameraController.clearVisualBob();
+    }
     if (this.perfEnabled) this.reportPerformance(frameStartedAt);
   };
 }

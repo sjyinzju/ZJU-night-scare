@@ -53,6 +53,17 @@ export interface InteriorAssetMeta {
     maxZ: number;
     kind?: "wall" | "shelf" | "furniture";
   }>;
+  /** Authored repairs for exterior walls missing from the source Baisha GLB. */
+  baishaBoundaryWalls?: Array<{
+    minX: number;
+    maxX: number;
+    minZ: number;
+    maxZ: number;
+    baseY: number;
+    topY: number;
+    /** False when the source GLB already supplies the visible wall. */
+    visible?: boolean;
+  }>;
   baishaLighting?: {
     revealAhead?: number;
     fixtures: Array<{
@@ -88,14 +99,6 @@ export interface InteriorAssetMeta {
     baseY: number;
     raisedY: number;
     visualCutNames: string[];
-    dividerExtension?: {
-      minX: number;
-      maxX: number;
-      minZ: number;
-      maxZ: number;
-      baseY: number;
-      topY: number;
-    };
   };
   baishaGameplay?: {
     photo: { x: number; y: number; z: number; radius: number };
