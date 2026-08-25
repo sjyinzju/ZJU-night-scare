@@ -107,7 +107,7 @@ export const buildingThemes: Record<string, BuildingTheme> = {
     labelColor: "#d6ebe7",
   },
   "medical-library": {
-    label: "医学院图书馆",
+    label: "农医馆",
     altLabels: ["深夜自习室", "最后借阅记录"],
     body: 0x4b5f65,
     roof: 0x1f2b32,
@@ -174,7 +174,7 @@ export const horrorZones: Record<string, HorrorZone> = {
   },
   medicalLibrary: {
     id: "medicalLibrary",
-    name: "医学院图书馆",
+    name: "农医馆",
     center: { x: 19.4, y: 29.4 },
     radius: 4.0,
     strength: 0.34,

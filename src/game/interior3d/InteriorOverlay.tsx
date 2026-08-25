@@ -596,7 +596,7 @@ export default function InteriorOverlay({
       {(building.id === "medical-library" || building.id === "dorm-baisha") && (
         <div style={styles.floorPlan} aria-label={`${building.name}平面图`}>
           <div style={styles.floorPlanTitle}>
-            <strong>{building.id === "medical-library" ? "医学院图书馆" : "白沙宿舍"}</strong>
+            <strong>{building.id === "medical-library" ? "农医馆" : "白沙宿舍"}</strong>
             <span>平面图</span>
           </div>
           <canvas ref={floorPlanRef} style={styles.floorPlanCanvas} />
@@ -723,7 +723,7 @@ export default function InteriorOverlay({
       )}
 
       {/* Building label. */}
-      <div style={styles.title}>{building.id === "medical-library" ? "医学院图书馆" : building.name}</div>
+      <div style={styles.title}>{building.id === "medical-library" ? "农医馆" : building.name}</div>
 
       {/* Pickup toast. */}
       {pickupToast && (

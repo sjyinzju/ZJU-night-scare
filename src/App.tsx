@@ -94,7 +94,7 @@ function createBaishaDevelopmentStoryState(chaseOnly = false): GameStore["storyS
     visitedHotspots: ["library"],
     completedHotspots: ["library"],
     log: [
-      "你带着借阅小票和从医学院图书馆取得的符纸回到校园。",
+      "你带着借阅小票和从农医馆取得的符纸回到校园。",
       "林伟坠楼前留下的线索指向白沙宿舍。",
     ],
   };
@@ -690,7 +690,7 @@ function App() {
             lines: [
               "借阅人：　　　　",
               "索书号：R-1953 / 戏曲病理档案",
-              "借出地点：医学院图书馆一层",
+              "借出地点：农医馆一层",
               "归还地点：医学院地下仓库",
               "打印时间：23:47",
               "备注：湖边不要回头。",
@@ -803,7 +803,7 @@ function App() {
       setLaunchMode(null);
       setLaunchAssetState("loading");
       setStoryState(() => createBaishaDevelopmentStoryState());
-      startSession({ id: "medical-library", name: "医学院图书馆", zone: "story" });
+      startSession({ id: "medical-library", name: "农医馆", zone: "story" });
       closeInterior();
       setPlayerIso({ ...BAISHA_DEVELOPMENT_PLAYER });
       setPhaserReady(true);
@@ -815,7 +815,7 @@ function App() {
     setLaunchMode(scene01Debug ? null : "intro");
     // 使用 storyEngine 统一解析起始建筑（始终从第一个热点开始）
     const startBuilding = resolveGameStartBuilding();
-    startSession(startBuilding ?? { id: "medical-library", name: "医学院图书馆", zone: "story" });
+    startSession(startBuilding ?? { id: "medical-library", name: "农医馆", zone: "story" });
   }, [closeInterior, scene01Debug, setPlayerIso, setStoryState, startSession]);
 
   const restartGame = useCallback(() => {
@@ -827,7 +827,7 @@ function App() {
     setPhaserReady(false);
     setLaunchMode("restart");
     const startBuilding = resolveGameStartBuilding();
-    startSession(startBuilding ?? { id: "medical-library", name: "医学院图书馆", zone: "story" });
+    startSession(startBuilding ?? { id: "medical-library", name: "农医馆", zone: "story" });
     miniMapSnapshotRef.current = { player: { x: 19.4, y: 30.2 }, ghostVisible: false };
     resetAudio();
     setGameSessionId((value) => value + 1);
@@ -1332,7 +1332,7 @@ function App() {
             aria-label="借阅小票内容，按任意键继续"
           >
             <div className="documentReading__paper">
-              <span>医学院图书馆 / 借阅终端</span>
+              <span>农医馆 / 借阅终端</span>
               <h1>{documentView.title}</h1>
               {documentView.lines.map((line, index) => (
                 <p
