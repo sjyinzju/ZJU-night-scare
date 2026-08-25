@@ -71,10 +71,10 @@ type MiniMapSnapshot = {
 type JumpscareSpriteId = "library-shelf" | "library-fall";
 type DocumentView = { title: string; lines: string[] };
 
-// Temporary branch-local shortcut for Baisha iteration. `?fullStory=1` keeps
-// the complete opening available for regression checks without editing code.
+// Normal development follows the complete story from scene 01. Keep Baisha's
+// direct-entry path explicit so it remains available for focused QA only.
 const BAISHA_DEVELOPMENT_START = import.meta.env.DEV
-  && new URLSearchParams(window.location.search).get("fullStory") !== "1";
+  && new URLSearchParams(window.location.search).get("baishaDev") === "1";
 const BAISHA_CHASE_ONLY = import.meta.env.DEV
   && new URLSearchParams(window.location.search).get("baishaChaseOnly") === "1";
 const BAISHA_DEVELOPMENT_PLAYER = new URLSearchParams(window.location.search).get("baishaDoor") === "1"
