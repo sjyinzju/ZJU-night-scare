@@ -255,16 +255,13 @@ export class CampusScene extends Phaser.Scene {
 
     this.cameras.main.setBackgroundColor("#0b1110");
     this.physics.world.setBounds(WORLD_BOUNDS.x, WORLD_BOUNDS.y, WORLD_BOUNDS.width, WORLD_BOUNDS.height);
-    this.drawGround();
-    this.drawSwampField();
-    this.drawWater();
+    // 外景地图的几何层集中在一个入口里：道路、湖岸、广场和建筑共用
+    // mapData 的坐标，剧情/碰撞/红鬼仍然读取同一份数据，不在这里复制一套。
+    this.drawExteriorMapV2();
     this.createLocalTilemapLayer();
     this.drawLakeMemoryEffects();
-    this.drawPlazas();
-    this.drawRoads();
     this.drawGroundDecals();
     this.drawGreenery();
-    this.drawBuildings();
     this.drawStoryProps();
     this.drawTaskMarkers();
     this.drawLightLayer();
@@ -341,6 +338,176 @@ export class CampusScene extends Phaser.Scene {
       x: ORIGIN_X + (point.x - point.y) * (TILE_W / 2),
       y: ORIGIN_Y + (point.x + point.y) * (TILE_H / 2),
     };
+  }
+
+  /**
+   * 外景地图 v2 的唯一绘制入口。
+   *
+   * 这里刻意只负责“看得见的几何”：道路仍然来自 campusRoads，建筑仍然
+   * 来自 campusBuildings。移动、碰撞、剧情热点和红鬼寻路不会读取这里的
+   * 临时图形，因此换皮时不会悄悄改掉玩法坐标。
+   */
+  private drawExteriorMapV2() {
+    this.drawGroundV2();
+    this.drawSwampField();
+    this.drawWater();
+    this.drawMapLandmarksV2();
+    this.drawPlazas();
+    this.drawRoads();
+    this.drawBuildings();
+  }
+
+  private drawGroundV2() {
+    const g = this.add.graphics();
+    const corners = [
+      this.toScreen({ x: 1.0, y: 1.0 }),
+      this.toScreen({ x: MAP_W - 1.0, y: 1.0 }),
+      this.toScreen({ x: MAP_W - 1.0, y: MAP_D - 1.0 }),
+      this.toScreen({ x: 1.0, y: MAP_D - 1.0 }),
+    ];
+
+    // A single continuous campus slab makes the map read as one place instead
+    // of a collection of disconnected tiles. The old tile texture remains as
+    // a low-opacity overlay later in the pipeline.
+    g.fillStyle(0x0b1719, 0.98);
+    g.lineStyle(7, 0x1b3030, 0.88);
+    g.beginPath();
+    corners.forEach((point, index) => {
+      if (index === 0) g.moveTo(point.x, point.y);
+      else g.lineTo(point.x, point.y);
+    });
+    g.closePath();
+    g.fillPath();
+    g.strokePath();
+
+    const districts = [
+      { x: 2.0, y: 2.1, w: 8.0, d: 6.4, color: 0x182829, alpha: 0.58 },
+      { x: 28.4, y: 8.0, w: 9.0, d: 8.5, color: 0x192a2c, alpha: 0.48 },
+      { x: 9.0, y: 27.0, w: 12.0, d: 4.2, color: 0x1b292a, alpha: 0.44 },
+      { x: 28.8, y: 26.4, w: 9.6, d: 4.0, color: 0x192927, alpha: 0.42 },
+    ];
+    districts.forEach((district, index) => {
+      const points = [
+        this.toScreen({ x: district.x, y: district.y }),
+        this.toScreen({ x: district.x + district.w, y: district.y }),
+        this.toScreen({ x: district.x + district.w, y: district.y + district.d }),
+        this.toScreen({ x: district.x, y: district.y + district.d }),
+      ];
+      g.fillStyle(district.color, district.alpha);
+      g.beginPath();
+      points.forEach((point, pointIndex) => {
+        if (pointIndex === 0) g.moveTo(point.x, point.y);
+        else g.lineTo(point.x, point.y);
+      });
+      g.closePath();
+      g.fillPath();
+      g.lineStyle(1, index % 2 ? 0x42605b : 0x385653, 0.22);
+      g.strokePath();
+    });
+
+    // Fine contour lines imply a hand-drawn map without interfering with the
+    // road graph. They are purely decorative and stay below all walkable paths.
+    for (let i = 0; i < 8; i += 1) {
+      const y = 3.3 + i * 3.55;
+      const start = this.toScreen({ x: 2.0, y });
+      const end = this.toScreen({ x: MAP_W - 2.0, y: y + 0.18 * Math.sin(i * 1.7) });
+      g.lineStyle(1, 0x34504e, 0.12);
+      g.beginPath();
+      g.moveTo(start.x, start.y);
+      g.lineTo(end.x, end.y);
+      g.strokePath();
+    }
+    g.setDepth(0);
+  }
+
+  private drawMapLandmarksV2() {
+    // 启真湖湖心岛：不加入 campusWaters，避免改变 isBlocked；它只是水面
+    // 上的可见地标，玩家仍沿原来的环湖路和桥走。
+    const island = [
+      { x: 18.0, y: 16.5 },
+      { x: 19.1, y: 15.8 },
+      { x: 21.2, y: 16.2 },
+      { x: 22.0, y: 17.5 },
+      { x: 21.3, y: 18.8 },
+      { x: 19.2, y: 19.2 },
+      { x: 18.0, y: 18.3 },
+    ];
+    const islandPoints = island.map((point) => this.toScreen(point));
+    const islandGraphics = this.add.graphics();
+    islandGraphics.fillStyle(0x304b3f, 0.95);
+    islandGraphics.lineStyle(3, 0x7b9a83, 0.42);
+    islandGraphics.beginPath();
+    islandPoints.forEach((point, index) => {
+      if (index === 0) islandGraphics.moveTo(point.x, point.y);
+      else islandGraphics.lineTo(point.x, point.y);
+    });
+    islandGraphics.closePath();
+    islandGraphics.fillPath();
+    islandGraphics.strokePath();
+    islandGraphics.setDepth(13.5);
+
+    for (let i = 0; i < 7; i += 1) {
+      const point = this.toScreen({ x: 18.5 + (i % 3) * 0.9, y: 16.8 + Math.floor(i / 3) * 0.72 });
+      const trunk = this.add.rectangle(point.x, point.y - 9, 4, 16, 0x1b2922, 0.9);
+      const crown = this.add.circle(point.x, point.y - 19, 8 + (i % 2) * 2, 0x55735b, 0.85);
+      trunk.setDepth(14.2);
+      crown.setDepth(14.3);
+    }
+
+    // 桥面沿既有 lake-admin-bridge 道路绘制，使用同一组坐标，不会产生
+    // “视觉上有桥、寻路却过不去”的假连接。
+    const bridge = campusRoads.find((road) => road.id === "lake-admin-bridge");
+    if (bridge) {
+      const points = bridge.points.map((point) => this.toScreen(point));
+      const bridgeGraphics = this.add.graphics();
+      bridgeGraphics.lineStyle(15, 0x0a1213, 0.7);
+      bridgeGraphics.beginPath();
+      points.forEach((point, index) => {
+        if (index === 0) bridgeGraphics.moveTo(point.x, point.y + 1);
+        else bridgeGraphics.lineTo(point.x, point.y + 1);
+      });
+      bridgeGraphics.strokePath();
+      bridgeGraphics.lineStyle(9, 0x4a5c56, 0.95);
+      bridgeGraphics.beginPath();
+      points.forEach((point, index) => {
+        if (index === 0) bridgeGraphics.moveTo(point.x, point.y - 1);
+        else bridgeGraphics.lineTo(point.x, point.y - 1);
+      });
+      bridgeGraphics.strokePath();
+      bridgeGraphics.lineStyle(2, 0x9ab4a5, 0.42);
+      for (let i = 1; i < points.length; i += 1) {
+        const previous = points[i - 1];
+        const point = points[i];
+        const dx = point.x - previous.x;
+        const dy = point.y - previous.y;
+        const length = Math.hypot(dx, dy);
+        if (length < 1) continue;
+        const nx = -dy / length;
+        const ny = dx / length;
+        for (let step = 0; step < length; step += 24) {
+          const t = step / length;
+          const x = previous.x + dx * t;
+          const y = previous.y + dy * t;
+          bridgeGraphics.beginPath();
+          bridgeGraphics.moveTo(x - nx * 4, y - ny * 4);
+          bridgeGraphics.lineTo(x + nx * 4, y + ny * 4);
+          bridgeGraphics.strokePath();
+        }
+      }
+      bridgeGraphics.setDepth(16.4);
+    }
+
+    // 月牙楼先用可替换的几何地标占位，后续贴图只需替换这个对象，不触碰
+    // 任何剧情或路线数据。
+    const crescent = this.toScreen({ x: 23.1, y: 6.3 });
+    const crescentGraphics = this.add.graphics();
+    crescentGraphics.fillStyle(0x52615d, 0.88);
+    crescentGraphics.fillEllipse(crescent.x, crescent.y - 12, 112, 52);
+    crescentGraphics.fillStyle(0x0b1719, 1);
+    crescentGraphics.fillEllipse(crescent.x + 17, crescent.y - 18, 88, 42);
+    crescentGraphics.lineStyle(3, 0x9aafa3, 0.42);
+    crescentGraphics.strokeEllipse(crescent.x, crescent.y - 12, 112, 52);
+    crescentGraphics.setDepth(crescent.y + 18);
   }
 
   private drawDiamond(graphics: Phaser.GameObjects.Graphics, x: number, y: number, color: number, alpha = 1) {
@@ -675,6 +842,22 @@ export class CampusScene extends Phaser.Scene {
         }
       }
     });
+
+    // 路口节点和桥头用统一的小标记强调，位置直接来自 campusRoads，便于
+    // 玩家辨认路线，也方便后续把这层替换为美术绘制的道路贴图。
+    const junctions = new Map<string, IsoPoint>();
+    campusRoads.forEach((road) => {
+      road.points.forEach((point) => junctions.set(`${point.x.toFixed(2)},${point.y.toFixed(2)}`, point));
+    });
+    const nodes = this.add.graphics();
+    junctions.forEach((point) => {
+      const p = this.toScreen(point);
+      nodes.fillStyle(0x8ea99f, 0.24);
+      nodes.fillCircle(p.x, p.y, 3.5);
+      nodes.lineStyle(1, 0xadc4b9, 0.22);
+      nodes.strokeCircle(p.x, p.y, 8);
+    });
+    nodes.setDepth(17.35);
   }
 
   private drawGroundDecals() {
@@ -913,6 +1096,7 @@ export class CampusScene extends Phaser.Scene {
         y: building.y + building.d / 2,
       });
       g.setDepth(center.y + building.h * 26);
+      this.drawBuildingGeometryV2(building, center, center.y + building.h * 26 + 1);
       if (building.id === "admin-center") {
         this.drawAdminEyeRoof(building, center.y + building.h * 26 + 1);
       }
@@ -970,6 +1154,95 @@ export class CampusScene extends Phaser.Scene {
         this.targetGlowTweens.set(building.id, tween);
       }
     });
+  }
+
+  /**
+   * 建筑的“轮廓层”：先把体量和入口做清楚，贴图以后可以只替换 sprite
+   * 或材质，不需要重新计算地图坐标。这里不写入碰撞，也不改变 enterable。
+   */
+  private drawBuildingGeometryV2(building: CampusBuilding, center: IsoPoint, depth: number) {
+    const g = this.add.graphics();
+    const nw = this.toScreen({ x: building.x, y: building.y });
+    const ne = this.toScreen({ x: building.x + building.w, y: building.y });
+    const se = this.toScreen({ x: building.x + building.w, y: building.y + building.d });
+    const sw = this.toScreen({ x: building.x, y: building.y + building.d });
+
+    // 建筑基座比主体略宽，给等距视角一个稳定的“落地感”。
+    g.fillStyle(0x030708, 0.44);
+    g.beginPath();
+    g.moveTo(sw.x - 10, sw.y + 7);
+    g.lineTo(se.x + 12, se.y + 7);
+    g.lineTo(ne.x + 7, ne.y + 14);
+    g.lineTo(nw.x - 8, nw.y + 14);
+    g.closePath();
+    g.fillPath();
+
+    g.lineStyle(building.enterable ? 3 : 2, building.enterable ? 0xb2c5b9 : 0x78938a, building.enterable ? 0.38 : 0.2);
+    g.beginPath();
+    g.moveTo(nw.x, nw.y);
+    g.lineTo(ne.x, ne.y);
+    g.lineTo(se.x, se.y);
+    g.lineTo(sw.x, sw.y);
+    g.closePath();
+    g.strokePath();
+
+    const roof = this.toScreen({
+      x: building.x + building.w / 2,
+      y: building.y + building.d / 2,
+    });
+    roof.y -= building.h * 28 + 3;
+    g.lineStyle(2, 0xc3d5c8, 0.24);
+    g.beginPath();
+    g.moveTo(roof.x - building.w * 16, roof.y + building.d * 8);
+    g.lineTo(roof.x + building.w * 16, roof.y - building.d * 8);
+    g.strokePath();
+
+    const entrance = this.toScreen({ x: building.x + building.w * 0.5, y: building.y + building.d + 0.04 });
+    const entranceDepth = entrance.y + building.h * 26 + 4;
+    g.fillStyle(0x05090a, building.enterable ? 0.8 : 0.54);
+    g.fillRect(entrance.x - 13, entrance.y - building.h * 13 - 2, 26, building.h * 13 + 4);
+    g.lineStyle(2, building.enterable ? 0xd1b47b : 0x759188, building.enterable ? 0.5 : 0.24);
+    g.beginPath();
+    g.moveTo(entrance.x - 18, entrance.y - building.h * 13 - 3);
+    g.lineTo(entrance.x + 18, entrance.y - building.h * 13 - 3);
+    g.strokePath();
+    g.setDepth(entranceDepth);
+
+    // 四个可进入建筑各自保留一个一眼可认的几何符号；故事灯光仍在
+    // drawBuildingAtmosphere 里处理，二者互不耦合。
+    if (building.id === "medical-library") {
+      g.lineStyle(3, 0xd4e5dc, 0.56);
+      g.beginPath();
+      g.moveTo(roof.x, roof.y - 15);
+      g.lineTo(roof.x, roof.y + 15);
+      g.moveTo(roof.x - 12, roof.y);
+      g.lineTo(roof.x + 12, roof.y);
+      g.strokePath();
+    } else if (building.id === "medical-college") {
+      g.lineStyle(2, 0xbdd8d0, 0.48);
+      for (let i = 0; i < 3; i += 1) {
+        const x = entrance.x - 30 + i * 30;
+        g.strokeRect(x, entrance.y - building.h * 20, 16, 12);
+      }
+    } else if (building.id === "dorm-baisha") {
+      g.lineStyle(2, 0xd1b580, 0.34);
+      for (let i = 0; i < 3; i += 1) {
+        const x = entrance.x - 34 + i * 34;
+        g.strokeRect(x, entrance.y - building.h * 21, 19, 12);
+        g.lineBetween(x, entrance.y - building.h * 9, x + 19, entrance.y - building.h * 9);
+      }
+    } else if (building.id === "little-theater") {
+      g.fillStyle(0x7f2d3b, 0.8);
+      g.fillEllipse(entrance.x, entrance.y - building.h * 12, 64, 22);
+      g.lineStyle(2, 0xe1b07b, 0.42);
+      g.strokeEllipse(entrance.x, entrance.y - building.h * 12, 64, 22);
+    }
+
+    g.setDepth(depth + 1);
+    if (center.y > 0) {
+      const shadow = this.add.ellipse(center.x + 12, center.y + building.h * 8, building.w * 30, building.d * 18, 0x000000, 0.18);
+      shadow.setDepth(depth - 2);
+    }
   }
 
   private drawBuildingAtmosphere(building: CampusBuilding, center: IsoPoint, depth: number) {
@@ -3233,5 +3506,3 @@ export class CampusScene extends Phaser.Scene {
     return campusRoadGraph.findRoute(from, to);
   }
 }
-
-
