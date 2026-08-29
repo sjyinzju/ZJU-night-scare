@@ -18,7 +18,7 @@ import { CampusScene, type GameHudEvent, type GameMiniMapEvent } from "./game/Ca
 import InteriorOverlay from "./game/interior3d/InteriorOverlay";
 import type { InteriorAssetState } from "./game/interior3d/Interior3D";
 import LaunchSequence, { type LaunchSequenceMode } from "./LaunchSequence";
-import { campusBuildings, campusRoads, type IsoPoint } from "./game/mapData";
+import { campusBuildings, campusRoads, ROAD, type IsoPoint } from "./game/mapData";
 import {
   getHotspotById,
   getSceneHotspot,
@@ -277,7 +277,7 @@ function App() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const particleCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const miniMapCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const miniMapSnapshotRef = useRef<MiniMapSnapshot>({ player: { x: 19.4, y: 30.2 }, ghostVisible: false });
+  const miniMapSnapshotRef = useRef<MiniMapSnapshot>({ player: { x: 18.6, y: ROAD.ySouth }, ghostVisible: false });
   const miniMapFrameRef = useRef<number | null>(null);
   const [hud, setHud] = useState<GameHudEvent>(initialHud);
   const [gameSessionId, setGameSessionId] = useState(0);
@@ -585,9 +585,9 @@ function App() {
     }));
   }, []);
 
-  const enterNearBuilding = useCallback(() => {
-    if (nearBuilding) openInterior(nearBuilding);
-  }, [nearBuilding, openInterior]);
+  const confirmMapInteract = useCallback(() => {
+    window.dispatchEvent(new CustomEvent("zju-horror-confirm-interact"));
+  }, []);
 
   const placePlayerAtInteriorExit = useCallback((buildingId?: string) => {
     if (!buildingId) return false;
@@ -613,7 +613,7 @@ function App() {
     // back into the library to discover the same scene again.
     if (nextActiveSceneId) setActiveSceneId(nextActiveSceneId);
     if (!placePlayerAtInteriorExit(interiorBuilding?.id) && storyState.currentSceneId === "library_police") {
-      setPlayerIso({ x: 19.4, y: 30.2 });
+      setPlayerIso({ x: 18.6, y: ROAD.ySouth });
     }
     closeInterior();
     setPhaserReady(true);
@@ -643,7 +643,7 @@ function App() {
     setLaunchMode("restart");
     const startBuilding = resolveGameStartBuilding();
     startSession(startBuilding ?? { id: "medical-library", name: "农医馆", zone: "story" });
-    miniMapSnapshotRef.current = { player: { x: 19.4, y: 30.2 }, ghostVisible: false };
+    miniMapSnapshotRef.current = { player: { x: 18.6, y: ROAD.ySouth }, ghostVisible: false };
     resetAudio();
     setGameSessionId((value) => value + 1);
   }, [resetAll, resetAudio, startSession]);
@@ -777,7 +777,7 @@ function App() {
           // used to leave the newly-created map frozen at the library door.
           setActiveSceneId(null);
           if (!placePlayerAtInteriorExit(interiorBuilding?.id) && activeScene.locationId === "library") {
-            setPlayerIso({ x: 19.4, y: 30.2 });
+            setPlayerIso({ x: 18.6, y: ROAD.ySouth });
           }
           closeInterior();
           setPhaserReady(true);
@@ -803,6 +803,12 @@ function App() {
   const rootClass = ["appShell", !gameStarted ? "titleMode" : "", screenEffect ? `fx-${screenEffect}` : ""].filter(Boolean).join(" ");
   const completedCount = storyState.completedHotspots.length;
   const livesAvailable = revivesRemaining + (world === "dead" ? 0 : 1);
+  const interactHotspot = hud.activeHotspotId ? getHotspotById(hud.activeHotspotId) : undefined;
+  const interactLabel = interactHotspot
+    ? (interactHotspot.mode === "indoor-3d" ? `进入${interactHotspot.place}` : `调查${interactHotspot.title}`)
+    : nearBuilding
+      ? `进入 ${nearBuilding.name}`
+      : "";
 
   return (
     <main className={rootClass}>
@@ -945,10 +951,10 @@ function App() {
           </div>
         )}
 
-        {gameStarted && nearBuilding && !activeScene && !interiorBuilding && (
-          <button className="enterBuildingBtn" onClick={enterNearBuilding} type="button">
-            <span>进入 {nearBuilding.name}</span>
-            <em>{isMobile ? "点击进入内部" : "按 E 或点击进入"}</em>
+        {gameStarted && !activeScene && !interiorBuilding && interactLabel && (
+          <button className="enterBuildingBtn" onClick={confirmMapInteract} type="button">
+            <span>{interactLabel}</span>
+            <em>{isMobile ? "点击确认" : "按 E 或点击确认"}</em>
           </button>
         )}
 

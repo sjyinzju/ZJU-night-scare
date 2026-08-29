@@ -4,6 +4,7 @@ import {
   campusRoads,
   campusPlazas,
   campusWaters,
+  ROAD,
   type CampusBuilding,
   type IsoPoint,
 } from "./mapData";
@@ -41,7 +42,7 @@ const MAP_D = 34;
 // making movement frame-rate independent.
 const PLAYER_SPEED = 18.9;
 const ROAD_SNAP_RADIUS = 0.9;
-const JUNCTION_RADIUS = 1.85;
+const JUNCTION_RADIUS = 1.2;
 // 玩家中心距离可进入建筑中心小于此值时，判定为"可进入"。
 const ENTER_RADIUS = 2.6;
 const WORLD_BOUNDS = { x: -1200, y: 0, width: 4300, height: 2200 };
@@ -51,9 +52,10 @@ const GHOST_CHASE_SPEED = 16;
 const GHOST_CLOSE_RADIUS = 1.65;
 const GHOST_CAUGHT_RADIUS = 0.55;
 const GHOST_SANITY_COOLDOWN = 2200;
-// Recalculate against the player's latest road position often enough that a
-// turn at a junction is reflected immediately, including on mobile screens.
-const GHOST_ROUTE_REFRESH_INTERVAL = 140;
+// Re-path when the player has moved a junction-scale distance, not every
+// frame. 140ms Dijkstra was hitching at every crossroads.
+const GHOST_ROUTE_REFRESH_INTERVAL = 650;
+const GHOST_ROUTE_RETARGET = 1.15;
 const GHOST_SPAWN_DELAY = 5000;
 const GHOST_MIN_SPAWN_DISTANCE = 13;
 const GHOST_MIN_SPAWN_ROUTE_DISTANCE = 22;
@@ -305,6 +307,7 @@ export class CampusScene extends Phaser.Scene {
     window.addEventListener("zju-horror-map-move-input", this.handleMapMoveInput as EventListener);
     window.addEventListener("zju-horror-player-relocate", this.handlePlayerRelocate as EventListener);
     window.addEventListener("zju-horror-player-revive", this.handlePlayerRevive as EventListener);
+    window.addEventListener("zju-horror-confirm-interact", this.handleConfirmInteract);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.sceneReady = false;
       this.cancelGhostSpawnTimer();
@@ -315,6 +318,7 @@ export class CampusScene extends Phaser.Scene {
       window.removeEventListener("zju-horror-map-move-input", this.handleMapMoveInput as EventListener);
       window.removeEventListener("zju-horror-player-relocate", this.handlePlayerRelocate as EventListener);
       window.removeEventListener("zju-horror-player-revive", this.handlePlayerRevive as EventListener);
+      window.removeEventListener("zju-horror-confirm-interact", this.handleConfirmInteract);
     });
 
     this.emitHud("", "沿红色虚线路线前进，绕开红鬼。");
@@ -2016,7 +2020,7 @@ export class CampusScene extends Phaser.Scene {
     this.statusLabel = "路线重复";
     this.cameras.main.fadeOut(220, 3, 8, 7);
     this.time.delayedCall(180, () => {
-      this.playerIso = this.snapToRoad({ x: 4.0, y: 27.0 });
+      this.playerIso = this.snapToRoad({ x: ROAD.xWest, y: 27.0 });
       const p = this.toScreen(this.playerIso);
       this.player.setPosition(p.x, p.y);
       this.cameras.main.fadeIn(260, 3, 8, 7);
@@ -2147,19 +2151,20 @@ export class CampusScene extends Phaser.Scene {
 
   /**
    * 三岔路先分上下，再分左右。
-   * 例如: 下方1条上方2条 → 按下默认往下，按左往左上，按右往右上。
-   * 返回每个方向应得的加成分数（在原 dot 分数之上）。
+   * 加分必须小于摇杆点积范围（[-1, 1]），否则斜交处会被拧到非意图分支。
    */
   private junctionBonuses(
     input: IsoPoint,
     dirs: { direction: IsoPoint; screenDirection: IsoPoint }[],
   ): number[] {
+    const bonuses = dirs.map(() => 0);
+    if (dirs.length < 3) return bonuses;
+
     const isDown = input.y > 0.35;
     const isUp = input.y < -0.35;
     const isLeft = input.x < -0.35;
     const isRight = input.x > 0.35;
 
-    // 将方向按屏幕 y 分为上下两组
     const upIdx: number[] = [];
     const downIdx: number[] = [];
     const midIdx: number[] = [];
@@ -2170,7 +2175,10 @@ export class CampusScene extends Phaser.Scene {
       else midIdx.push(i);
     });
 
-    const bonuses = dirs.map(() => 0);
+    const uniquePick = 0.42;
+    const groupPick = 0.28;
+    const fallbackPick = 0.16;
+
     const chooseByHorizontal = (indices: number[], verticalSign: -1 | 1 | 0) => {
       const sorted = [...indices].sort((a, b) => dirs[a].screenDirection.x - dirs[b].screenDirection.x);
       if (isLeft) return sorted[0];
@@ -2185,43 +2193,32 @@ export class CampusScene extends Phaser.Scene {
       })[0];
     };
 
-    // 下键: 优先选下方组
     if (isDown && downIdx.length > 0) {
-      if (downIdx.length === 1) {
-        bonuses[downIdx[0]] = 100; // 唯一下方 → 必定选中
-      } else {
-        bonuses[chooseByHorizontal(downIdx, 1)] = 75;
-      }
+      bonuses[downIdx.length === 1 ? downIdx[0] : chooseByHorizontal(downIdx, 1)] =
+        downIdx.length === 1 ? uniquePick : groupPick;
       return bonuses;
     }
 
-    // 上键: 优先选上方组
     if (isUp && upIdx.length > 0) {
-      if (upIdx.length === 1) {
-        bonuses[upIdx[0]] = 100;
-      } else {
-        bonuses[chooseByHorizontal(upIdx, -1)] = 75;
-      }
+      bonuses[upIdx.length === 1 ? upIdx[0] : chooseByHorizontal(upIdx, -1)] =
+        upIdx.length === 1 ? uniquePick : groupPick;
       return bonuses;
     }
 
-    // 没有明确的上下分组时 (如纯水平方向): 按左右匹配
     if ((isLeft || isRight) && midIdx.length > 0) {
-      bonuses[chooseByHorizontal(midIdx, 0)] = 60;
+      bonuses[chooseByHorizontal(midIdx, 0)] = groupPick;
       return bonuses;
     }
 
-    // 下键但无下方分枝: 在所有方向中选最下方的
     if (isDown) {
       const sorted = [...dirs.keys()].sort((a, b) => dirs[b].screenDirection.y - dirs[a].screenDirection.y);
-      bonuses[sorted[0]] = 50;
+      bonuses[sorted[0]] = fallbackPick;
       return bonuses;
     }
 
-    // 上键但无上方分枝: 选最上方的
     if (isUp) {
       const sorted = [...dirs.keys()].sort((a, b) => dirs[a].screenDirection.y - dirs[b].screenDirection.y);
-      bonuses[sorted[0]] = 50;
+      bonuses[sorted[0]] = fallbackPick;
       return bonuses;
     }
 
@@ -2660,7 +2657,7 @@ export class CampusScene extends Phaser.Scene {
     if (
       !this.ghost.route.length ||
       time - this.ghost.lastRouteAt >= GHOST_ROUTE_REFRESH_INTERVAL ||
-      targetShift >= 0.18 ||
+      targetShift >= GHOST_ROUTE_RETARGET ||
       this.ghost.routeIndex >= this.ghost.route.length
     ) {
       // MapGraph uses Dijkstra over the complete campus-road graph, so this is
@@ -2764,23 +2761,45 @@ export class CampusScene extends Phaser.Scene {
     this.activeHotspot = inRange ? hotspot : undefined;
 
     if (inRange) {
-      this.emitHud(hotspot.place, `已抵达：${hotspot.title}`, hotspot.id);
+      const verb = hotspot.mode === "indoor-3d" ? "进入" : "调查";
+      this.emitHud(hotspot.place, `按 E · ${verb}${hotspot.title}`, hotspot.id);
     } else {
       this.emitHud(this.findNearbyPlace(), "");
     }
     this.updateHotspotMarkerStates();
+    this.updateEnterableProximityFallback();
+    if (!inRange && this.nearBuildingId) {
+      const building = campusBuildings.find((item) => item.id === this.nearBuildingId);
+      if (building) this.emitHud(building.name, `按 E · 进入${building.name}`);
+    }
 
-    if (!inRange) return;
+    if (this.keys && Phaser.Input.Keyboard.JustDown(this.keys.e)) {
+      this.confirmCurrentInteraction(time);
+    }
+  }
 
-    if (time - this.lastInteract > 800) {
-      this.lastInteract = time;
+  private handleConfirmInteract = () => {
+    if (!this.sceneReady) return;
+    this.confirmCurrentInteraction(this.time.now);
+  };
+
+  private confirmCurrentInteraction(time: number) {
+    if (this.frozen || this.storyOpen || this.dead) return;
+    if (time - this.lastInteract < 400) return;
+    this.lastInteract = time;
+
+    const hotspot = this.activeHotspot;
+    if (hotspot) {
       this.visitedHotspots.add(hotspot.id);
       this.updateHotspotMarkerStates();
       this.dispatchStoryInteraction(resolveStoryHotspotInteraction(hotspot.id, [...this.completedHotspots]));
+      return;
     }
 
-    // 同时检测可进入建筑（用于非剧情目标的探索 / E 键兜底）
-    this.updateEnterableProximityFallback();
+    if (this.nearBuildingId) {
+      const building = campusBuildings.find((item) => item.id === this.nearBuildingId);
+      if (building) useGameStore.getState().openInterior({ id: building.id, name: building.name, zone: building.zone });
+    }
   }
 
   /** 进入 3D 内景以推进故事。黑屏转场 → 进入建筑 → 内景红点引导剧情。 */
@@ -2845,10 +2864,6 @@ export class CampusScene extends Phaser.Scene {
       useGameStore.getState().setNearBuilding(near ? { id: near.id, name: near.name, zone: near.zone } : null);
     }
 
-    // E 键进入：仅对当前剧情热点对应的建筑生效（与按钮一致）
-    if (near && this.keys && Phaser.Input.Keyboard.JustDown(this.keys.e)) {
-      useGameStore.getState().openInterior({ id: near.id, name: near.name, zone: near.zone });
-    }
   }
 
   private updateGuideLine(time: number) {

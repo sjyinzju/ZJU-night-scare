@@ -320,6 +320,13 @@ export default function InteriorOverlay({
       {/* Building label. */}
       <div style={styles.title}>{building.name}</div>
 
+      {assetState === "loading" && (
+        <div style={styles.loadingChip} role="status">正在点亮楼道灯……</div>
+      )}
+      {assetState === "failed" && (
+        <div style={styles.loadingChip} role="status">模型未就绪，已改用简化内景</div>
+      )}
+
       {/* Pickup toast. */}
       {pickupToast && (
         <div style={styles.pickupToast}>
@@ -406,6 +413,20 @@ const styles: Record<string, CSSProperties> = {
   },
   hostBlocked: {
     visibility: "hidden",
+  },
+  loadingChip: {
+    position: "absolute",
+    top: 58,
+    left: "50%",
+    transform: "translateX(-50%)",
+    zIndex: 6,
+    padding: "8px 16px",
+    background: "rgba(8, 10, 14, 0.78)",
+    color: "#d7b776",
+    border: "1px solid rgba(179, 50, 46, 0.45)",
+    fontSize: 13,
+    letterSpacing: "0.08em",
+    pointerEvents: "none",
   },
   // 暗角：四周压暗，聚焦画面中心，和外层 .vignette 呼应。
   vignette: {

@@ -162,7 +162,7 @@ export class DoorComponent {
    * @param inventory   Array of item IDs the player holds (for key checks).
    * @param maxDistance Max interaction distance.
    */
-  interact(playerPos: THREE.Vector3, inventory: string[] = [], maxDistance = 2.5): string | null {
+  interact(playerPos: THREE.Vector3, inventory: string[] = [], maxDistance = 3.2): string | null {
     const dist = playerPos.distanceTo(this.hinge);
     if (dist > maxDistance) return null;
 
@@ -170,6 +170,8 @@ export class DoorComponent {
       if (inventory.includes(this.keyItemId)) {
         this._isLocked = false;
         this.label = "门";
+        this.targetAngle = this.openAngle;
+        this._isOpen = true;
         return "门禁卡刷过，锁咔哒一声弹开了。";
       }
       return "锁住了，需要门禁卡。";
@@ -180,12 +182,11 @@ export class DoorComponent {
       this._isOpen = false;
       this.label = "门";
       return null;
-    } else {
-      this.targetAngle = this.openAngle;
-      this._isOpen = true;
-      this.label = "门";
-      return null;
     }
+    this.targetAngle = this.openAngle;
+    this._isOpen = true;
+    this.label = "门";
+    return null;
   }
 
   update(dt: number): void {

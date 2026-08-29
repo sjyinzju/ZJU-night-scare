@@ -4,7 +4,7 @@
  */
 import { create } from "zustand";
 import { getSceneHotspot, type HorrorEffect, type HotspotId, type ItemId, type StatKey, type StorySceneId } from "./storyData";
-import type { IsoPoint } from "./mapData";
+import { ROAD, type IsoPoint } from "./mapData";
 
 // ── 鬼状态机 ──
 export type GhostFSM =
@@ -151,7 +151,7 @@ const initialAtmosphere: AtmosphereState = {
 
 const initialMiniMap: MiniMapSnapshot = {
   // 农医馆门外：开场 3D 内景结束后回到这里，而不是默认的医学院入口。
-  player: { x: 19.4, y: 30.2 },
+  player: { x: 18.6, y: ROAD.ySouth },
   ghostVisible: false,
 };
 
@@ -161,7 +161,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   gameStarted: false,
   interiorBuilding: null,
   nearBuilding: null,
-  playerIso: { x: 19.4, y: 30.2 },
+  playerIso: { x: 18.6, y: ROAD.ySouth },
   revivesRemaining: INITIAL_REVIVES,
   lastSafeSceneId: "library_intro" as StorySceneId,
   storyState: { ...initialStoryState, stats: { ...initialStoryState.stats }, log: [...initialStoryState.log] },
@@ -213,7 +213,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       gameStarted: true,
       interiorBuilding: building,
       nearBuilding: null,
-      playerIso: { x: 19.4, y: 30.2 },
+      playerIso: { x: 18.6, y: ROAD.ySouth },
     }),
 
   /** Idempotent by design: duplicate proximity/E-key events cannot remount an interior. */
@@ -279,7 +279,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       gameStarted: false,
       interiorBuilding: null,
       nearBuilding: null,
-      playerIso: { x: 19.4, y: 30.2 },
+      playerIso: { x: 18.6, y: ROAD.ySouth },
       revivesRemaining: INITIAL_REVIVES,
       lastSafeSceneId: "library_intro" as StorySceneId,
       storyState: {

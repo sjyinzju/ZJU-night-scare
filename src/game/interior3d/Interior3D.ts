@@ -56,9 +56,9 @@ export interface Interior3DOptions {
 const PLAYER_RADIUS = 0.32;
 const EYE_HEIGHT = 1.6;
 const GUIDE_MAX_POINTS = 32;
-const INTERACT_RANGE = 2.5;
-/** ~22° cone in front of the camera. */
-const INTERACT_ALIGN = Math.cos(THREE.MathUtils.degToRad(22));
+const INTERACT_RANGE = 3.2;
+/** ~36° cone in front of the camera. */
+const INTERACT_ALIGN = Math.cos(THREE.MathUtils.degToRad(36));
 
 type InteriorFocus =
   | { kind: "door"; door: DoorComponent }
@@ -486,14 +486,25 @@ export class Interior3D {
 
   private async loadStaticInteriorAsset(buildingId: string): Promise<void> {
     this.onAssetStateChange?.("loading");
+    let settled = false;
+    const revealProcedural = (reason: "ready" | "failed") => {
+      if (this.disposed || settled) return;
+      settled = true;
+      this.setProceduralRoomVisualsVisible(true);
+      this.onAssetStateChange?.(reason);
+    };
+    const timeoutId = window.setTimeout(() => {
+      revealProcedural("ready");
+    }, 8000);
     try {
       const handle = await loadInteriorAsset({
         buildingId,
         roomKind: this.roomKind,
         isMobile: this.isMobile,
       });
+      window.clearTimeout(timeoutId);
       if (!handle) {
-        if (!this.disposed) this.onAssetStateChange?.("ready");
+        revealProcedural("ready");
         return;
       }
       if (this.disposed) {
@@ -505,6 +516,7 @@ export class Interior3D {
       this.scene.add(handle.root);
       this.bindInteriorAssetMetadata(handle);
       this.setProceduralRoomVisualsVisible(false);
+      settled = true;
       this.onAssetStateChange?.("ready");
       window.dispatchEvent(new CustomEvent("zju-horror-interior-asset-state", {
         detail: {
@@ -515,10 +527,10 @@ export class Interior3D {
         },
       }));
     } catch (err) {
+      window.clearTimeout(timeoutId);
       if (this.disposed) return;
       console.warn("[Interior3D] Failed to load static interior asset, using procedural fallback:", err);
-      this.setProceduralRoomVisualsVisible(true);
-      this.onAssetStateChange?.("failed");
+      revealProcedural("failed");
       window.dispatchEvent(new CustomEvent("zju-horror-interior-asset-state", {
         detail: { buildingId, roomKind: this.roomKind, loaded: false },
       }));
