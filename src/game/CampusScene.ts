@@ -23,6 +23,7 @@ import { audioManager } from "./audio/audioManager";
 import { useGameStore, getStore } from "./store";
 import { campusRoadGraph, type RoadProjection } from "./mapGraph";
 import { HORROR_POST_FX_KEY, HorrorPostFxPipeline } from "./visualFxPipeline";
+import { assetUrl } from "./assetPath";
 import {
   resolveStoryBuildingEntry,
   resolveStoryHotspotInteraction,
@@ -38,6 +39,12 @@ const ORIGIN_X = 980;
 const ORIGIN_Y = 120;
 const MAP_W = 42;
 const MAP_D = 34;
+const EXTERIOR_SPRITE_KEYS: Record<string, string> = {
+  "medical-library": "exterior-medical-library",
+  "medical-college": "exterior-medical-college",
+  "dorm-baisha": "exterior-dorm-baisha",
+  "little-theater": "exterior-little-theater",
+};
 // Old movement used 0.075 * speed per frame. Keep the 60fps feel while
 // making movement frame-rate independent.
 const PLAYER_SPEED = 18.9;
@@ -170,6 +177,7 @@ export class CampusScene extends Phaser.Scene {
   private warehouseShadow?: Phaser.GameObjects.Container;
   private lakeExtraFigure?: Phaser.GameObjects.Container;
   private baisha216Window?: Phaser.GameObjects.Rectangle;
+  private exteriorBuildingSprites = new Map<string, Phaser.GameObjects.Image>();
   private buildingLabels = new Map<string, Phaser.GameObjects.Text>();
   private storyStage: StoryStage = 1; // 由 React 层通过 handleMapState 动态更新
   private activeSceneId: StorySceneId | null = null; // 当前活跃的剧情场景（用于 distortionBoost）
@@ -232,6 +240,12 @@ export class CampusScene extends Phaser.Scene {
 
   constructor() {
     super("CampusScene");
+  }
+
+  preload() {
+    Object.entries(EXTERIOR_SPRITE_KEYS).forEach(([buildingId, textureKey]) => {
+      this.load.image(textureKey, assetUrl(`assets/exterior/${buildingId}/${buildingId}.png`));
+    });
   }
 
   create() {
@@ -1093,16 +1107,22 @@ export class CampusScene extends Phaser.Scene {
       }
 
       const theme = buildingThemes[building.id];
-      const g = this.add.graphics();
-      this.drawIsoPrism(g, building);
       const center = this.toScreen({
         x: building.x + building.w / 2,
         y: building.y + building.d / 2,
       });
-      g.setDepth(center.y + building.h * 26);
-      this.drawBuildingGeometryV2(building, center, center.y + building.h * 26 + 1);
-      if (building.id === "admin-center") {
-        this.drawAdminEyeRoof(building, center.y + building.h * 26 + 1);
+      const depth = center.y + building.h * 26 + 1;
+      const spriteKey = EXTERIOR_SPRITE_KEYS[building.id];
+      if (spriteKey && this.textures.exists(spriteKey)) {
+        this.drawBuildingSprite(building, center, depth, spriteKey);
+      } else {
+        const g = this.add.graphics();
+        this.drawIsoPrism(g, building);
+        g.setDepth(center.y + building.h * 26);
+        this.drawBuildingGeometryV2(building, center, depth);
+        if (building.id === "admin-center") {
+          this.drawAdminEyeRoof(building, depth);
+        }
       }
 
       const label = this.add
@@ -1158,6 +1178,27 @@ export class CampusScene extends Phaser.Scene {
         this.targetGlowTweens.set(building.id, tween);
       }
     });
+  }
+
+  /**
+   * Blender 只提供建筑的透明等距外观；道路、入口检测、碰撞和剧情仍由
+   * mapData / Phaser 负责。图片按建筑的游戏占地缩放，底边锚在同一个入口边，
+   * 因此替换外观不会改变玩家或红鬼的路线。
+   */
+  private drawBuildingSprite(building: CampusBuilding, center: IsoPoint, depth: number, textureKey: string) {
+    // The image is anchored on the south/front edge, the same edge used by
+    // drawIsoPrism for the building entrance.  `center` is still used for
+    // depth sorting and the atmospheric overlays below.
+    const anchor = this.toScreen({ x: building.x + building.w * 0.5, y: building.y + building.d });
+    const sprite = this.add.image(anchor.x, anchor.y + 1, textureKey).setOrigin(0.5, 1);
+    const footprintScreenWidth = (building.w + building.d) * (TILE_W / 2) + 18;
+    const expectedScreenHeight = building.h * 28 + (building.w + building.d) * (TILE_H / 2) + 18;
+    const aspect = sprite.width > 0 && sprite.height > 0 ? sprite.width / sprite.height : 1;
+    const width = Math.max(footprintScreenWidth, expectedScreenHeight * aspect);
+    sprite.setDisplaySize(width, expectedScreenHeight);
+    sprite.setDepth(depth + 1);
+    sprite.setData("buildingId", building.id);
+    this.exteriorBuildingSprites.set(building.id, sprite);
   }
 
   /**
