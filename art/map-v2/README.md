@@ -13,6 +13,16 @@
 - 农医馆、医学院、基础图书馆和东教学区的定位体块；
 - 固定正交相机、卡通材质、黑色轮廓、窗灯和少量悬疑红光。
 
+## 单栋建筑工作流
+
+`buildings/<id>/<id>.blend` 是单栋可编辑源文件；当前已生成农医馆、医学院、
+白沙宿舍区和小剧场四栋初稿。对应的透明 PNG 放在
+`public/assets/exterior/<id>/<id>.png`，由 `CampusScene` 贴回原来的建筑坐标。
+
+道路不进入 Blender，也不从 Blender 导出。这样不会再出现“路像水管”的问题：
+道路继续沿用游戏里的 `campusRoads`，建筑只替换外观，入口、碰撞、剧情和室内
+仍然使用原来的 ID 和坐标。
+
 ## 打开方式
 
 1. 用 Blender 打开 `zijingang-east-blockout.blend`。
