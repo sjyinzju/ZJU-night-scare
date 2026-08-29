@@ -1,6 +1,8 @@
 # 紫金港东区外景样板（Blender）
 
-这不是游戏运行时资源，也不改 `src/game`。这是外景地图的美术源文件样板。
+这是外景地图的几何源文件样板。当前游戏运行时仍由 `src/game/mapData.ts`
+提供路线、入口和建筑业务坐标；`CampusScene.ts` 只替换可见的几何绘制层，
+所以室内、剧情、碰撞和红鬼寻路不需要改接口。
 
 ## 这次样板包含
 
@@ -20,13 +22,18 @@
 
 ## 与游戏合并时交付什么
 
-最终不是把 `.blend` 直接塞进 Phaser。交付分三部分：
+不要把整张 `.blend` 直接塞进 Phaser。后续美术制作按“单栋建筑、单个透明
+等距素材”交付：
 
-- `.blend`：团队共同编辑的源文件；
-- `export/`：地面、建筑、窗灯和阴影的分层 WebP；
-- `map-contract.json`：建筑 ID、入口、出口、碰撞轮廓和道路锚点。
+- `art/exterior-buildings/<id>/<id>.blend`：单栋建筑的可编辑源文件；
+- `public/assets/exterior/<id>.webp`：正交相机渲染出的透明外观图；
+- `<id>.meta.json`：像素锚点、占地范围和版本信息。
 
-外景接入必须保留现有剧情 ID：`medical-library`、`dorm-baisha`、`medical-college`、`little-theater`。
+道路不另做一套坐标，直接沿用 `campusRoads`；这样红鬼和玩家仍然在同一张
+路网上移动。
+
+外景接入必须保留现有剧情 ID：`medical-library`（显示名是农医馆）、
+`dorm-baisha`、`medical-college`、`little-theater`。不要重命名这些 ID。
 
 数据来源：OpenStreetMap 建筑轮廓（ODbL），参考坐标中心为启真湖。游戏发布时须保留 `© OpenStreetMap contributors` 及许可证链接。
 
