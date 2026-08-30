@@ -498,17 +498,20 @@ export function buildRoom(kind: RoomKind): RoomBuildResult {
     addBox(1.2, 0.5, 2.0, 1.5, 0.35, -halfL + 6.6, metalMat);
     addBox(1.2, 0.5, 2.0, -1.5, 0.35, -halfL + 6.6, metalMat);
 
-    // ── 剧情触发区（医学院内景：鬼现形 + 苏婉照片）──
-    // 触发器碰撞区保持在地面，视觉改为天花板中式灯笼（不再悬空红球）
+    // B 车库靠近出生点；C 六层窗在主厅中段；F 仓库与苏婉在隔间内侧。
+    // 触发器碰撞区保持在地面，视觉改为天花板灯笼（不再悬空红球）。
     const medTriggerCountBefore = storyTriggers.length;
     getInteriorStoryTriggers("medical").forEach((trigger) => {
-      if (trigger.position === "ghost") {
-        addStoryTrigger(trigger.sceneId, 0, 0.7, -halfL + 3.4, trigger.action, trigger.activeSceneIds, trigger.radius);
-        addCeilingLantern(0, -halfL + 3.4, WALL_H);
-      } else if (trigger.position === "stand") {
-        addStoryTrigger(trigger.sceneId, 0, 0.7, 1.0, trigger.action, trigger.activeSceneIds, trigger.radius);
-        addCeilingLantern(0, 1.0, WALL_H);
-      }
+      const spot = {
+        garage: { x: 0, z: halfL - 2.2 },
+        window: { x: 0, z: 1.0 },
+        vault: { x: 0, z: -halfL + 3.8 },
+        ghost: { x: 0, z: -halfL + 2.6 },
+        stand: { x: 0, z: -halfL + 1.8 },
+      }[trigger.position];
+      if (!spot) return;
+      addStoryTrigger(trigger.sceneId, spot.x, 0.7, spot.z, trigger.action, trigger.activeSceneIds, trigger.radius);
+      addCeilingLantern(spot.x, spot.z, WALL_H);
     });
     // 隐藏医疗室触发器的浮空红球视觉（保留碰撞检测），用天花板灯笼替代
     for (let i = medTriggerCountBefore; i < storyTriggers.length; i++) {

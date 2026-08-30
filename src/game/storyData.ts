@@ -28,6 +28,9 @@ export type StorySceneId =
   | "ask_about_org"
   | "medical_entry"
   | "teaching_back"
+  | "medical_garage"
+  | "medical_window"
+  | "medical_vault"
   | "ghost_choice"
   | "stand_ground"
   | "report_findings"
@@ -186,7 +189,7 @@ export const storyHotspots: StoryHotspot[] = [
     id: "medical-college",
     title: "医学院入口",
     place: "医学院",
-    objective: "进入医学院调查地下仓库",
+    objective: "从地下车库进入，查六层坠楼窗和地下仓库",
     sceneId: "medical_entry",
     x: 12.5,
     y: 30.0,
@@ -699,18 +702,16 @@ export const storyScenes: Record<StorySceneId, StoryScene> = {
     locationId: "medical-college",
     setting: "outdoor",
     body: [
-      "你站在医学院教学楼楼下。农医馆在身后约三百米外，玻璃门已经合上；这里才是林伟最后跑来的地方。楼下的地下一层车库黑得像一口井，只有几排自行车把手从暗处反着冷光。",
-      "这栋楼在所有紫金港的地图里都显得很安静——没有社团海报，没有讲座横幅，连路灯都比别处暗两档。楼道里黑着，只有应急灯发出幽幽的绿光。空气里有股潮湿的消毒水味，像很久没通风的病房。",
-      "门口没有保安，只有一张被雨水泡皱的施工告示。落款日期却是三年前。玻璃门里，电梯数字停在 B2。封条上盖着学校保卫处的章，但印泥颜色很新，像刚刚补贴上去。封条边缘有新鲜裂口——像有人刚从里面出来。",
-      "你抬头数到六层。林伟坠下来的那扇窗黑着，窗框里却像垂着一缕长发；等你眨眼，它又只是被风吹歪的窗帘。地下一层传来轮子滚动的声音，很慢，像有人推着旧病床，从车库深处一寸一寸经过。",
-      "手机地图在这里开始失灵。所有道路都被重新规划到小剧场，但导航路线中间强行绕过了医学院后门和地下仓库。",
+      "你站在医学院教学楼楼下。农医馆在身后约三百米外，玻璃门已经合上；这里才是林伟最后跑来的地方。",
+      "楼下的地下一层车库黑得像一口井。教学楼共六层，廊灯全灭。门口没有保安，只有一张被雨水泡皱的施工告示，落款日期却是三年前。",
+      "封条上盖着学校保卫处的章，印泥颜色很新。你抬头数到六层。林伟坠下来的那扇窗黑着，窗框里像垂着一缕长发；等你眨眼，它又只是被风吹歪的窗帘。",
     ],
     choices: [
       {
         id: "front",
-        text: "从正门进入教学楼",
-        next: "ghost_choice",
-        statChanges: { sanity: -6, stamina: -5, clues: 5 },
+        text: "从地下一层车库进入",
+        next: "medical_garage",
+        statChanges: { sanity: -4, stamina: -4, clues: 4 },
         effect: "shake",
       },
       {
@@ -722,7 +723,7 @@ export const storyScenes: Record<StorySceneId, StoryScene> = {
       },
       {
         id: "back",
-        text: "绕到旧教学楼后面查看",
+        text: "先绕到教学楼后面查看",
         next: "teaching_back",
         statChanges: { sanity: -3, stamina: -5, clues: 8 },
       },
@@ -732,21 +733,18 @@ export const storyScenes: Record<StorySceneId, StoryScene> = {
     id: "teaching_back",
     title: "后门与黑猫",
     chapter: "第五章",
-    locationId: "east-teaching",
+    locationId: "medical-college",
     setting: "outdoor",
     body: [
-      "绕到教学楼后面。这里更偏僻，连路灯都没有，西侧未开发的沼泽田贴着围栏铺开，水洼和杂草在夜里挤成一片黑。原著里那些“西区古装女”的目击地点，大多就在这条后路和医学院楼上之间。",
-      "地上有烧过纸钱的痕迹，和一些用粉笔画的奇怪符号。角落里有一个被压扁的纸箱，掀开一看，里面是一只黑猫的尸体。猫的脖子被扭断了，眼睛还睁着。周围散落着一些黄纸符咒。",
-      "旁边堆着施工木板。你在地上捡到一支小手电——大概是之前施工队留下的。手电筒还有电。光束扫过墙面时，你看见一排很浅的抓痕，从地面一直延伸到门框上方。那不是人手能抓出来的高度。",
-      "黑猫毛发沾着干掉的血。你想起论坛里有人说，黑猫能看见不干净的东西，所以旧医学院附近从来养不活猫。你小心翼翼地从黑猫身上取了一小撮毛发，装进口袋。",
-      "楼道尽头传来拖拽声，像有人把沉重的木椅拖过水泥地。你举起手电，光圈里却什么都没有，只有一行新写上去的粉笔字：她不是凶手。更远处，六层窗口似乎有人背对着你站了一秒。",
-      "旧教学楼后门没有锁，门缝里塞着一张折过很多次的纸。纸上画着一个舞台，舞台中央是一把椅子，椅背后面绕着密密麻麻的绳子。",
+      "绕到教学楼后面。这里更偏僻，连路灯都没有，西侧未开发的沼泽田贴着围栏铺开。",
+      "地上有烧过纸钱的痕迹，和一些用粉笔画的奇怪符号。角落的纸箱里是一只脖子被扭断的黑猫，周围散落着黄纸符咒。旁边堆着施工木板，你捡到一支还有电的小手电。",
+      "墙根有一行新写的粉笔字：她不是凶手。六层窗口似乎有人背对着你站了一秒。后门没有锁，里面通向地下一层车库。",
     ],
     choices: [
       {
         id: "take",
-        text: "拿起手电和黑猫毛发，继续深入",
-        next: "ghost_choice",
+        text: "拿起手电和黑猫毛发，进入地下车库",
+        next: "medical_garage",
         statChanges: { sanity: -4, clues: 10, stamina: -3 },
         gainItems: ["flashlight", "cat_hair"],
         setFlag: "foundCatKiller",
@@ -754,20 +752,111 @@ export const storyScenes: Record<StorySceneId, StoryScene> = {
       },
     ],
   },
+  medical_garage: {
+    id: "medical_garage",
+    title: "地下一层",
+    chapter: "第五章",
+    locationId: "medical-college",
+    setting: "indoor",
+    deferInInterior: true,
+    distortionBoost: 0.12,
+    body: [
+      "你走进教学楼地下一层。这里是自行车库，也是停车场往里延伸的那一层。外面路灯只照到最外侧几排车把，再往里就是一口井似的黑。",
+      "林伟那晚就是从这里往上跑的。水泥柱后面传来轮子滚动的声音，很慢，像有人推着旧病床从车库深处经过。你把手电打过去，光圈里只有空地和一根还在轻轻晃的铁链。",
+      "更深处的车道没有尽头。小说里写过：这层地下车库连着东侧另外几幢楼，人或者别的什么，都可以从下面走掉。你听见自己的脚步被拉得很长，又在某一根柱子后面停住——那不是回声该停的地方。",
+      "你抬头。天井一样的坡道上方，六层那扇坠楼窗露出一条缝。缝里没有人。可你总觉得刚才有人背对着窗口站过。",
+    ],
+    choices: [
+      {
+        id: "follow-route",
+        text: "沿林伟的路线上楼，去六层走廊",
+        next: "medical_window",
+        statChanges: { sanity: -4, stamina: -5, clues: 6 },
+        setFlag: "entered_medical_garage",
+      },
+      {
+        id: "search-dark",
+        text: "先朝车库更深处走几步",
+        next: "medical_window",
+        statChanges: { sanity: -7, clues: 8, stamina: -3 },
+        setFlag: "searched_garage_dark",
+        effect: "whisper",
+      },
+    ],
+  },
+  medical_window: {
+    id: "medical_window",
+    title: "六层中间那扇窗",
+    chapter: "第五章",
+    locationId: "medical-college",
+    setting: "indoor",
+    deferInInterior: true,
+    body: [
+      "六层走廊空着。一侧是窗，一侧是三间锁死的防盗教室。窗帘拉着，门后没有影子。",
+      "林伟走到过的那扇窗还开着一条缝。窗框上有抓痕，地上有未干的鞋印，暖气片后的线头像被剪过。监控该对着这里，镜头却歪向死角。",
+      "戏腔只响了两三秒，含混，听不清词，随即停了。走廊尽头好像有人转过楼梯，等你看过去，那里什么都没有。",
+    ],
+    choices: [
+      {
+        id: "check-window",
+        text: "检查窗框、鞋印和被剪过的线",
+        next: "medical_vault",
+        statChanges: { sanity: -3, clues: 8 },
+        setFlag: "checked_fall_window",
+      },
+      {
+        id: "follow-song",
+        text: "顺着刚消失的声音往下走",
+        next: "medical_vault",
+        statChanges: { sanity: -5, stamina: -3, clues: 5 },
+        setFlag: "followed_sixth_floor_song",
+      },
+    ],
+  },
+  medical_vault: {
+    id: "medical_vault",
+    title: "地下仓库",
+    chapter: "第五章",
+    locationId: "medical-college",
+    setting: "indoor",
+    deferInInterior: true,
+    distortionBoost: 0.16,
+    body: [
+      "门禁卡在锁槽里响了一下。农医馆小票上的归还地点，原来是这间封存的地下仓库。",
+      "里面的空气比车库更冷。旧病床靠墙排着，床腿上缠着发黑的红绳。你在铁柜里找到一本 1953 年名册，索书号和那张空白借阅记录对得上：R-1953。夹页中有一张通向小剧场后台的旧设备通道图。",
+      "墙角鞋尖朝墙，摆着一双旧绣花鞋。鞋底磨出了洞，沾着沼泽地的泥。这不是新买的布鞋，也不像谁随手扔在这里。",
+      "仓库最里面还有一块空底座，像是放过很重的东西。底座旁边的墙上，水迹正一滴一滴往下走。",
+    ],
+    choices: [
+      {
+        id: "read-roster",
+        text: "核对名册、通道图和那双旧鞋",
+        next: "ghost_choice",
+        statChanges: { sanity: -5, clues: 10 },
+        setFlag: "searched_medical_vault",
+      },
+      {
+        id: "watch-water",
+        text: "跟着水迹往仓库深处走",
+        next: "ghost_choice",
+        statChanges: { sanity: -8, clues: 7 },
+        setFlag: "followed_vault_water",
+        effect: "whisper",
+      },
+    ],
+  },
   ghost_choice: {
     id: "ghost_choice",
-    title: "走廊尽头的女人",
+    title: "仓库里的女人",
     chapter: "第五章",
     locationId: "medical-college",
     setting: "indoor",
     distortionBoost: 0.25,
     body: [
-      "推开铁门，走进医学院教学楼。走廊很暗，只有应急灯发出幽幽的绿光。手电的光束扫过一排排紧闭的教室门，门后像都站着人，却没有任何影子贴到玻璃上。",
-      "你按原著里李伟豪最后的路线往上走：地下一层车库、二楼转角、三楼平台、六层走廊。每上一层，那个女声就近一点；可只要你停下，它又像从楼下传来，调子很老，像一段被反复剪碎的戏曲。",
-      "六层尽头的窗户边，站着一个穿白色古装的女人。她背对着你，长发披散，半个身子嵌在黑窗里。你以为自己会尖叫，但喉咙像被冰水灌满。她缓缓转过身来——惨白的皮肤，漆黑的眼瞳。你的眼睛在抗拒，拒绝把她看成一个完整的人。",
-      "手电照过去，她没有影子，脚边却有一滩水迹，一直延伸到启真湖的方向。你想起论坛上的话，一咬牙，冲上去伸手去抓她的肩膀。但手穿过了她的身体——像穿过了冰冷的雾气。",
-      "她的袖口还在滴水。每一滴落在地上，都会短暂映出一张不同的脸：林伟、白秋、张一诚、杜学民，还有一些你从未见过的学生。她开口时没有声音，只有手机屏幕自动亮起。备忘录里多出一句话：我没有在唱。是他们逼我唱。",
-      "你终于明白了——那歌声从来不是索命。是警告。只是听见它的人，往往已经站在陷阱边缘。",
+      "水迹在仓库尽头停住。一个穿白色古装的女人背对着你，长发披散，半个身子嵌在暗处。她缓缓转过身来——惨白的皮肤，漆黑的眼瞳。你的眼睛在抗拒，拒绝把她看成一个完整的人。",
+      "手电照过去，她没有影子。袖口还在滴水。每一滴落在地上，都会短暂映出一张不同的脸：林伟、白秋、张一诚，还有一些你从未见过的学生。",
+      "她开口时没有声音，只有手机屏幕自动亮起。备忘录里多出一句话：我没有在唱。是他们逼我唱。",
+      "那歌声从来不是索命。是警告。只是听见它的人，往往已经站在陷阱边缘。",
     ],
     effect: "jumpscare",
     choices: [
@@ -801,7 +890,7 @@ export const storyScenes: Record<StorySceneId, StoryScene> = {
     locationId: "medical-college",
     setting: "indoor",
     body: [
-      "你没有跑。那个女人看了你很久，脸上的表情从戒备慢慢变成了某种接近释然的东西。她抬手先指向六层坠楼窗，又指向地下二层，最后才指向小剧场的方向，身体像雾气一样一点点散去。她消失后，地上多了一张泛黄的老照片。",
+      "你没有跑。那个女人看了你很久，脸上的表情从戒备慢慢变成了某种接近释然的东西。她抬手先指向六层坠楼窗，又指向身边的名册和空底座，最后才指向小剧场的方向，身体像雾气一样一点点散去。她消失后，地上多了一张泛黄的老照片。",
       "照片里的女人站在旧医学院教学楼前，身后是临时搭起的舞台。她没有笑，眼睛看向镜头外，好像那里站着一个她真正害怕的人。照片背面写着：苏婉，1953 年摄于浙江医学院。",
       "翻到背面，除了姓名和年份，还有一行很淡的铅笔字：若我不能出去，就让他们也不能出去。你捏着照片的手指有点发抖——这张照片让杜学民的档案、论坛日记、门禁记录、农医馆小票上的 R-1953 终于连成一条线。",
       "楼道里的拖拽声停止了。地下一层车库里，那辆看不见的病床也停了。远处传来舞台幕布被拉开的声音，很轻，却足够让你确定方向。",
