@@ -8,7 +8,11 @@ import {
   type UIEvent,
 } from "react";
 import { assetUrl } from "../assetPath";
-import { playBaishaThunder, playBaishaWindowKnocks } from "../audio/proceduralAudio";
+import {
+  playBaishaThunder,
+  playBaishaWindowKnocks,
+  primeBaishaWindowKnocks,
+} from "../audio/proceduralAudio";
 import { useGameStore } from "../store";
 import type { BaishaGameplayPhase, BaishaGameplayTrigger, Interior3D } from "./Interior3D";
 
@@ -296,7 +300,10 @@ export default function BaishaDormExperience({
   }, [photosReady, stage]);
 
   const continuePhoto = useCallback(() => {
-    if (stage === "photo_ready") setStage("photo_dissolve");
+    if (stage === "photo_ready") {
+      primeBaishaWindowKnocks();
+      setStage("photo_dissolve");
+    }
   }, [stage]);
 
   const chooseBalcony = useCallback((choice: BalconyChoice) => {

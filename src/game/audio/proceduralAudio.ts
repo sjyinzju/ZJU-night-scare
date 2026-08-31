@@ -471,37 +471,112 @@ export function playBaishaThunder(): void {
   rumble.stop(now + 3.1);
 }
 
-/** Three glass knocks, each distinctly louder and heavier than the previous hit. */
+export const BAISHA_WINDOW_KNOCK_PROFILE = {
+  offsets: [0, 0.62, 1.42] as const,
+  strengths: [0.42, 0.68, 1] as const,
+  resonancesHz: [1780, 2710, 4260, 6380] as const,
+};
+
+function scheduleGlassKnock(
+  audioCtx: BaseAudioContext,
+  destination: AudioNode,
+  when: number,
+  strength: number,
+  hitIndex: number,
+): void {
+  const hitBus = audioCtx.createGain();
+  hitBus.gain.setValueAtTime(0.9, when);
+  hitBus.connect(destination);
+
+  // A very short, high-passed impact supplies the sharp contact against glass.
+  const noiseDuration = 0.065;
+  const noiseBuffer = audioCtx.createBuffer(
+    1,
+    Math.ceil(audioCtx.sampleRate * noiseDuration),
+    audioCtx.sampleRate,
+  );
+  const noiseData = noiseBuffer.getChannelData(0);
+  for (let index = 0; index < noiseData.length; index++) {
+    const envelope = Math.exp(-index / (audioCtx.sampleRate * 0.009));
+    noiseData[index] = (Math.random() * 2 - 1) * envelope;
+  }
+
+  const impact = audioCtx.createBufferSource();
+  impact.buffer = noiseBuffer;
+  const highpass = audioCtx.createBiquadFilter();
+  highpass.type = "highpass";
+  highpass.frequency.setValueAtTime(1450, when);
+  highpass.Q.setValueAtTime(0.75, when);
+  const impactFocus = audioCtx.createBiquadFilter();
+  impactFocus.type = "peaking";
+  impactFocus.frequency.setValueAtTime(3550, when);
+  impactFocus.Q.setValueAtTime(1.1, when);
+  impactFocus.gain.setValueAtTime(7, when);
+  const impactGain = audioCtx.createGain();
+  impactGain.gain.setValueAtTime(0.001, when);
+  impactGain.gain.linearRampToValueAtTime(0.52 * strength, when + 0.002);
+  impactGain.gain.exponentialRampToValueAtTime(0.001, when + noiseDuration);
+  impact.connect(highpass).connect(impactFocus).connect(impactGain).connect(hitBus);
+  impact.start(when);
+  impact.stop(when + noiseDuration);
+
+  // Several inharmonic high-frequency partials make the pane ring like glass,
+  // while the final hit lasts slightly longer and therefore feels heavier.
+  const pitchScale = [1.018, 1, 0.982][hitIndex] ?? 1;
+  const resonanceLevels = [0.24, 0.18, 0.115, 0.065];
+  BAISHA_WINDOW_KNOCK_PROFILE.resonancesHz.forEach((frequency, resonanceIndex) => {
+    const ring = audioCtx.createOscillator();
+    ring.type = "sine";
+    ring.frequency.setValueAtTime(frequency * pitchScale, when);
+    const ringGain = audioCtx.createGain();
+    const decay = 0.25 - resonanceIndex * 0.025 + hitIndex * 0.035;
+    ringGain.gain.setValueAtTime(0.001, when);
+    ringGain.gain.linearRampToValueAtTime(
+      resonanceLevels[resonanceIndex] * strength,
+      when + 0.0025,
+    );
+    ringGain.gain.exponentialRampToValueAtTime(0.001, when + decay);
+    ring.connect(ringGain).connect(hitBus);
+    ring.start(when);
+    ring.stop(when + decay + 0.015);
+  });
+}
+
+/** Schedule the three knocks; exported so the exact production sound can be rendered in audio QA. */
+export function scheduleBaishaWindowKnocks(
+  audioCtx: BaseAudioContext,
+  destination: AudioNode,
+  start = audioCtx.currentTime,
+): void {
+  const compressor = audioCtx.createDynamicsCompressor();
+  compressor.threshold.setValueAtTime(-18, start);
+  compressor.knee.setValueAtTime(8, start);
+  compressor.ratio.setValueAtTime(5, start);
+  compressor.attack.setValueAtTime(0.002, start);
+  compressor.release.setValueAtTime(0.16, start);
+  compressor.connect(destination);
+
+  BAISHA_WINDOW_KNOCK_PROFILE.offsets.forEach((offset, index) => {
+    scheduleGlassKnock(
+      audioCtx,
+      compressor,
+      start + offset,
+      BAISHA_WINDOW_KNOCK_PROFILE.strengths[index],
+      index,
+    );
+  });
+}
+
+/** Resume procedural audio from the player's photo-dismiss gesture, before the one-second delay. */
+export function primeBaishaWindowKnocks(): void {
+  const audioCtx = getCtx();
+  if (audioCtx.state === "suspended") void audioCtx.resume();
+}
+
+/** Three crisp glass knocks, each distinctly louder than the previous hit. */
 export function playBaishaWindowKnocks(): void {
   const audioCtx = getCtx();
-  const start = audioCtx.currentTime;
-  const offsets = [0, 0.58, 1.38];
-  const bodyLevels = [0.1, 0.2, 0.34];
-  const glassLevels = [0.038, 0.074, 0.13];
-  offsets.forEach((offset, index) => {
-    const when = start + offset;
-    const body = audioCtx.createOscillator();
-    body.type = "sine";
-    body.frequency.setValueAtTime(168 - index * 18, when);
-    body.frequency.exponentialRampToValueAtTime(62, when + 0.16);
-    const bodyGain = audioCtx.createGain();
-    bodyGain.gain.setValueAtTime(bodyLevels[index], when);
-    bodyGain.gain.exponentialRampToValueAtTime(0.001, when + 0.2);
-    body.connect(bodyGain).connect(audioCtx.destination);
-
-    const glass = audioCtx.createOscillator();
-    glass.type = "triangle";
-    glass.frequency.setValueAtTime(1120 - index * 95, when);
-    const glassGain = audioCtx.createGain();
-    glassGain.gain.setValueAtTime(glassLevels[index], when);
-    glassGain.gain.exponentialRampToValueAtTime(0.001, when + 0.11);
-    glass.connect(glassGain).connect(audioCtx.destination);
-
-    body.start(when);
-    body.stop(when + 0.22);
-    glass.start(when);
-    glass.stop(when + 0.13);
-  });
+  scheduleBaishaWindowKnocks(audioCtx, audioCtx.destination, audioCtx.currentTime + 0.015);
 }
 
 // ══════════════════════════════════════════════════
