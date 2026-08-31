@@ -1,0 +1,16 @@
+{
+  "assetVersion": 1,
+  "buildingId": "medical-college",
+  "roomKind": "medical",
+  "notes": [
+    "BCF story spots only. Coordinates match the procedural medical room fallback.",
+    "When B/C/F GLBs land, replace storySpots with authored positions. Do not change scene ids."
+  ],
+  "storySpots": {
+    "medical_garage": { "x": 0, "y": 0.7, "z": 5.3, "radius": 1.15 },
+    "medical_window": { "x": 0, "y": 0.7, "z": 1.0, "radius": 1.2 },
+    "medical_vault": { "x": 0, "y": 0.7, "z": -3.7, "radius": 1.15 },
+    "ghost_choice": { "x": 0, "y": 0.7, "z": -4.9, "radius": 1.1 },
+    "stand_ground": { "x": 0, "y": 0.7, "z": -5.7, "radius": 1.1 }
+  }
+}
