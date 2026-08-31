@@ -2160,6 +2160,34 @@ button {
     shockPulse 1.5s ease-in-out infinite;
 }
 
+.storyText p.storyHighlight {
+  margin: 8px 0 4px;
+  color: #ff4b43;
+  font-weight: 800;
+  font-style: normal;
+  letter-spacing: 0.12em;
+  text-align: center;
+  text-indent: 0;
+  text-shadow:
+    0 0 8px rgba(255, 45, 35, 0.72),
+    0 0 28px rgba(185, 0, 0, 0.5);
+  animation:
+    storyTextFade 0.5s ease-out var(--story-line-delay, 0ms) both,
+    storyWarningFlash 1.35s steps(2, end) calc(var(--story-line-delay, 0ms) + 0.55s) infinite;
+}
+
+@keyframes storyWarningFlash {
+  0%,
+  100% {
+    opacity: 0.64;
+    filter: brightness(0.78);
+  }
+  45% {
+    opacity: 1;
+    filter: brightness(1.35);
+  }
+}
+
 @keyframes shockPulse {
   0%,
   100% {

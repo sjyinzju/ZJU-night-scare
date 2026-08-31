@@ -33,6 +33,7 @@ import {
   type ItemId,
   type StatKey,
   type StoryChoice,
+  type StoryResultOption,
   type StorySceneId,
 } from "./game/storyData";
 import { useGameAudio } from "./game/audio/useGameAudio";
@@ -42,6 +43,7 @@ import { assetUrl } from "./game/assetPath";
 import { INITIAL_REVIVES, REVIVE_SANITY, useGameStore, type GameStore } from "./game/store";
 import { pickJumpscareText, contextForHotspot, textVariantClass, type JumpscareContext } from "./game/jumpscareTexts";
 import { JumpscarePipeline } from "./game/JumpscarePipeline";
+import {
   JUMPSCARE_SPRITE_IDS,
   jumpscareSpriteUrl,
   preloadJumpscareSprites,
@@ -335,6 +337,8 @@ function App() {
   const [assetLoadAttempt, setAssetLoadAttempt] = useState(0);
   const [documentView, setDocumentView] = useState<DocumentView | null>(null);
   const [selectedChoiceId, setSelectedChoiceId] = useState<string | null>(null);
+  const [pendingChoiceResult, setPendingChoiceResult] = useState<StoryChoice | null>(null);
+  const [pendingResultOption, setPendingResultOption] = useState<StoryResultOption | null>(null);
   const [storyClosing, setStoryClosing] = useState(false);
   const [jumpscareSprite, setJumpscareSprite] = useState<JumpscareSpriteId | null>(null);
   const [exitBlackout, setExitBlackout] = useState(false);
@@ -741,8 +745,8 @@ function App() {
               "借出地点：农医馆一层",
               "归还地点：医学院地下仓库",
               "打印时间：23:47",
-              "备注：湖边不要回头。",
-              "纸背压痕：听见唱名时，不要回答。",
+              "备注：　　　　",
+              "纸背：有不规则压痕，暂时无法辨清。",
             ],
           });
         }, 1480);
@@ -1112,18 +1116,55 @@ function App() {
   );
 
   const choose = useCallback((choice: StoryChoice) => {
-    if (selectedChoiceId || !activeScene || isChoiceLocked(choice, storyState)) return;
+    if (selectedChoiceId || pendingChoiceResult || !activeScene || isChoiceLocked(choice, storyState)) return;
     playChoice();
     setSelectedChoiceId(choice.id);
     window.setTimeout(() => setStoryClosing(true), 210);
     if (choiceTimerRef.current !== null) window.clearTimeout(choiceTimerRef.current);
     choiceTimerRef.current = window.setTimeout(() => {
       choiceTimerRef.current = null;
+      if (choice.result) {
+        setPendingResultOption(null);
+        setPendingChoiceResult(choice);
+      } else {
+        commitChoice(choice);
+      }
+      setSelectedChoiceId(null);
+      setStoryClosing(false);
+    }, 680);
+  }, [activeScene, commitChoice, pendingChoiceResult, playChoice, selectedChoiceId, storyState]);
+
+  const chooseResultOption = useCallback((option: StoryResultOption) => {
+    if (!pendingChoiceResult || pendingResultOption || selectedChoiceId) return;
+    playChoice();
+    setSelectedChoiceId(option.id);
+    window.setTimeout(() => setStoryClosing(true), 210);
+    if (choiceTimerRef.current !== null) window.clearTimeout(choiceTimerRef.current);
+    choiceTimerRef.current = window.setTimeout(() => {
+      choiceTimerRef.current = null;
+      setPendingResultOption(option);
+      setSelectedChoiceId(null);
+      setStoryClosing(false);
+    }, 680);
+  }, [pendingChoiceResult, pendingResultOption, playChoice, selectedChoiceId]);
+
+  const continueChoiceResult = useCallback(() => {
+    if (!pendingChoiceResult || selectedChoiceId) return;
+    if (pendingChoiceResult.result?.choices?.length && !pendingResultOption) return;
+    const choice = pendingChoiceResult;
+    playChoice();
+    setSelectedChoiceId(choice.id);
+    window.setTimeout(() => setStoryClosing(true), 210);
+    if (choiceTimerRef.current !== null) window.clearTimeout(choiceTimerRef.current);
+    choiceTimerRef.current = window.setTimeout(() => {
+      choiceTimerRef.current = null;
+      setPendingChoiceResult(null);
+      setPendingResultOption(null);
       commitChoice(choice);
       setSelectedChoiceId(null);
       setStoryClosing(false);
     }, 680);
-  }, [activeScene, commitChoice, playChoice, selectedChoiceId, storyState]);
+  }, [commitChoice, pendingChoiceResult, pendingResultOption, playChoice, selectedChoiceId]);
 
   useEffect(() => () => {
     if (choiceTimerRef.current !== null) window.clearTimeout(choiceTimerRef.current);
@@ -1142,7 +1183,10 @@ function App() {
   const talismanShield = storyState.inventory.includes("talisman") ? 1 : 0;
   const isBaishaDeath = Boolean(storyState.flags.baishaCaptured);
   const isBaishaDeathScene = Boolean(isBaishaDeath && activeScene?.id === "death_sanity");
-  const activeSceneTitle = isBaishaDeathScene ? "逃离失败" : activeScene?.title;
+  const displayedChoiceResult = pendingResultOption ?? pendingChoiceResult?.result;
+  const activeSceneTitle = isBaishaDeathScene
+    ? "逃离失败"
+    : displayedChoiceResult?.title ?? activeScene?.title;
   const activeScenePlace = isBaishaDeathScene
     ? "白沙宿舍"
     : activeScene
@@ -1153,7 +1197,11 @@ function App() {
         "瘦长的影子在走廊转角追上了你。红灯一盏盏沉进黑暗，最后只剩那阵贴近耳后的呼吸声。",
         "意识散去以前，你记得那条被白痕封住的捷径，也记得真正的出口仍在走廊另一侧。",
       ]
-    : activeScene?.body ?? [];
+    : displayedChoiceResult?.body ?? activeScene?.body ?? [];
+  const activeSceneHighlights = isBaishaDeathScene
+    ? []
+    : displayedChoiceResult?.highlights ?? activeScene?.highlights ?? [];
+  const activeStoryLineCount = activeSceneBody.length + activeSceneHighlights.length;
   const canReviveDeath = revivesRemaining > 0 || (isBaishaDeath && talismanShield > 0);
   const livesAvailable = revivesRemaining + (world === "dead" ? 0 : 1) + talismanShield;
   const maxLives = INITIAL_REVIVES + 1 + talismanShield;
@@ -1185,6 +1233,16 @@ function App() {
               {paragraph}
             </p>
           ))}
+          {activeSceneHighlights.map((paragraph, index) => (
+            <p
+              className="storyHighlight"
+              data-text={paragraph}
+              key={`${paragraph}-${index}`}
+              style={{ "--story-line-delay": `${180 + (activeSceneBody.length + index) * 260}ms` } as CSSProperties}
+            >
+              {paragraph}
+            </p>
+          ))}
         </div>
         {activeScene.ending ? (
           <div className="endingActions">
@@ -1201,6 +1259,39 @@ function App() {
             >
               重新开始游戏
             </button>
+          </div>
+        ) : pendingChoiceResult?.result ? (
+          <div
+            className="choiceList"
+            style={{ "--choice-list-delay": `${260 + activeStoryLineCount * 260}ms` } as CSSProperties}
+          >
+            {pendingChoiceResult.result.choices?.length && !pendingResultOption ? (
+              pendingChoiceResult.result.choices.map((option, optionIndex) => (
+                <button
+                  className={`choiceButton ${selectedChoiceId === option.id ? "selected" : ""}`}
+                  disabled={selectedChoiceId !== null}
+                  key={option.id}
+                  style={{ "--choice-delay": `${optionIndex * 100}ms` } as CSSProperties}
+                  onClick={() => chooseResultOption(option)}
+                  onFocus={playHover}
+                  onMouseEnter={playHover}
+                  type="button"
+                >
+                  <span>{option.text}</span>
+                </button>
+              ))
+            ) : (
+              <button
+                className={`choiceButton primary ${selectedChoiceId === pendingChoiceResult.id ? "selected" : ""}`}
+                disabled={selectedChoiceId !== null}
+                onClick={continueChoiceResult}
+                onFocus={playHover}
+                onMouseEnter={playHover}
+                type="button"
+              >
+                <span>{pendingResultOption?.continueText ?? pendingChoiceResult.result.continueText ?? "继续"}</span>
+              </button>
+            )}
           </div>
         ) : (
           <div

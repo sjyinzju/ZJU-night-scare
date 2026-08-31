@@ -97,7 +97,7 @@ export function getInteriorNpcRevealSceneIds(roomKind: string): StorySceneId[] {
 }
 
 const INTERIOR_EXIT_TRIGGER_AFTER: Partial<Record<StorySceneId, StorySceneId[]>> = {
-  library_fall: ["dorm_baiqiu"],
+  library_police: ["dorm_baiqiu"],
 };
 
 // ── StoryStage ↔ StorySceneId 联动 ──
