@@ -44,6 +44,11 @@ const EXTERIOR_SPRITE_KEYS: Record<string, string> = {
   "medical-college": "exterior-medical-college",
   "dorm-baisha": "exterior-dorm-baisha",
   "little-theater": "exterior-little-theater",
+  "linhu-canteen": "exterior-linhu-canteen",
+  "east-teaching-1": "exterior-east-teaching-1",
+  "east-teaching-2": "exterior-east-teaching-2",
+  "east-teaching-3": "exterior-east-teaching-3",
+  "east-teaching-4": "exterior-east-teaching-4",
 };
 // Old movement used 0.075 * speed per frame. Keep the 60fps feel while
 // making movement frame-rate independent.

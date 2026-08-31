@@ -16,8 +16,12 @@
 ## 单栋建筑工作流
 
 `buildings/<id>/<id>.blend` 是单栋可编辑源文件；当前已生成农医馆、医学院、
-白沙宿舍区和小剧场四栋初稿。对应的透明 PNG 放在
+白沙宿舍区、小剧场、临湖餐厅，以及东1到东4教学楼。对应的透明 PNG 放在
 `public/assets/exterior/<id>/<id>.png`，由 `CampusScene` 贴回原来的建筑坐标。
+
+其中 `create_remaining_story_buildings.py` 负责临湖餐厅和东教学区四栋楼。
+东教学区使用同一套白色面砖、深绿色构件和波浪连廊语言，单栋仍按原有
+`east-teaching-1` 到 `east-teaching-4` 的 ID 独立替换，避免改变剧情热点映射。
 
 道路不进入 Blender，也不从 Blender 导出。这样不会再出现“路像水管”的问题：
 道路继续沿用游戏里的 `campusRoads`，建筑只替换外观，入口、碰撞、剧情和室内
