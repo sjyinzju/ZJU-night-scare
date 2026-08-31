@@ -265,7 +265,7 @@ export default function BaishaDormExperience({
       const timer = window.setTimeout(() => {
         playBaishaWindowKnocks();
         setStage("balcony_target");
-      }, 780);
+      }, 1000);
       return () => window.clearTimeout(timer);
     }
     if (stage === "balcony_flash") {
@@ -464,7 +464,7 @@ export default function BaishaDormExperience({
                 <small>本页最后缓存于 2008-03-10 23:47　只读模式</small>
               </header>
               {FORUM_REPLIES.map((reply) => {
-                const alarmReply = stage === "forum_alarm" && reply.floor === "9楼";
+                const alarmReply = stage === "forum_alarm" && reply.floor === "10楼";
                 return (
                   <article className={`baishaForumReply${alarmReply ? " is-alarm" : ""}`} key={`${reply.floor}-${reply.time}`}>
                     <aside>

@@ -187,6 +187,8 @@ export class Interior3D {
     followPickup?: RoomBuildResult["pickups"][number];
   }> = [];
   private readonly assetCeilingLights: THREE.PointLight[] = [];
+  private readonly assetCeilingFixtures: THREE.Vector3[] = [];
+  private nextAssetCeilingPoolUpdateAt = Number.NEGATIVE_INFINITY;
   private readonly onPickup?: (itemId: string, name: string) => void;
   private readonly onStoryTrigger?: (sceneId: string) => void;
   private readonly onExitTrigger?: () => void;
@@ -404,10 +406,12 @@ export class Interior3D {
     this.camera.add(this.nearFillLight);
 
     this.bloodLight = new THREE.PointLight(0x6a0505, 0, 13, 2.2);
+    this.bloodLight.visible = false;
     this.bloodLight.position.set(-1.25, 3.05, -4.75);
     this.scene.add(this.bloodLight);
     this.scheduleBloodFlash(0);
     this.outsideRedLight = new THREE.PointLight(0x71030a, 0, 20, 1.55);
+    this.outsideRedLight.visible = false;
     this.outsideRedLight.position.set(2.4, 1.25, 34.5);
     this.scene.add(this.outsideRedLight);
 
@@ -419,16 +423,19 @@ export class Interior3D {
     // Invisible ceiling-sized source: reads as storm light leaking down from
     // above, without adding a visible lamp model to the authored courtyard.
     this.outsideCeilingLight = new THREE.RectAreaLight(0xe7efff, 0, 17, 43);
+    this.outsideCeilingLight.visible = false;
     this.outsideCeilingLight.position.set(4.3, 8.2, 36.5);
     this.outsideCeilingLight.lookAt(4.3, 0, 36.5);
     this.scene.add(this.outsideCeilingLight);
 
     this.libraryPursuitLight = new THREE.PointLight(0xff1025, 0, 7.5, 1.85);
     this.libraryPursuitLight.name = "library_return_pursuit_light";
+    this.libraryPursuitLight.visible = false;
     this.scene.add(this.libraryPursuitLight);
 
     // Flashlight follows the camera.
     this.flashlight = new THREE.SpotLight(0xfff2d0, 8.6, 23, Math.PI / 5.6, 0.42, 1.35);
+    this.flashlight.visible = false;
     this.flashlight.position.set(0, 0, 0);
     if (!this.isMobile) {
       this.flashlight.castShadow = true;
@@ -450,6 +457,7 @@ export class Interior3D {
     this.bloodLightEnabled = this.roomKind === "library";
     this.outsideRedLight.intensity = 0;
     this.outsideWhiteLight.intensity = this.roomKind === "library" ? 2.8 : 0;
+    this.outsideWhiteLight.visible = this.outsideWhiteLight.intensity > 0;
     if (this.roomKind === "dorm" && options.buildingId === "dorm-baisha") {
       this.scene.background = new THREE.Color(0x0b0103);
       this.scene.fog = new THREE.Fog(0x110104, 4, 30);
@@ -460,6 +468,7 @@ export class Interior3D {
       this.outsideRedLight.position.set(29.2, 1.7, 1.2);
       this.outsideRedLight.distance = 15;
       this.outsideRedLight.intensity = 2.1;
+      this.outsideRedLight.visible = true;
     }
     this.blueprint = getInteriorBlueprint(this.roomKind);
     this.room = buildRoom(this.roomKind);
@@ -1092,10 +1101,12 @@ export class Interior3D {
       // Warm shaders, textures and shadow programs while the Baisha entry veil
       // is still opaque. This preserves the exact render settings while
       // removing the first visible frame hitch after the choice closes.
-      try {
-        await this.renderer.compileAsync(this.scene, this.camera);
-      } catch (compileError) {
-        console.warn("[Interior3D] Shader warm-up was unavailable; continuing with the loaded asset:", compileError);
+      if (this.roomKind === "dorm" && handle.meta?.buildingId === "dorm-baisha") {
+        try {
+          await this.renderer.compileAsync(this.scene, this.camera);
+        } catch (compileError) {
+          console.warn("[Interior3D] Shader warm-up was unavailable; continuing with the loaded asset:", compileError);
+        }
       }
       if (this.disposed) return;
       if (this.roomKind === "dorm" && handle.meta?.buildingId === "dorm-baisha" && !this.isMobile) {
@@ -1377,6 +1388,7 @@ export class Interior3D {
     const add = (key: string, position: THREE.Vector3, intensity = 4.2, distance = 4.6): void => {
       const light = new THREE.PointLight(0xc70b18, 0, distance, 1.8);
       light.name = `scene01_target_${key.replace(":", "_")}`;
+      light.visible = false;
       light.position.set(position.x, Math.max(0.72, position.y + 0.42), position.z);
       light.userData.baseIntensity = intensity;
       this.scene.add(light);
@@ -1467,11 +1479,16 @@ export class Interior3D {
     this.scene.add(this.fallSpotlightTarget);
     this.fallSpotlight = new THREE.SpotLight(0xff101d, this.fallRevealed ? 120 : 0, 21, 0.31, 0.36, 1.38);
     this.fallSpotlight.name = "library_fall_crimson_spotlight";
+    this.fallSpotlight.visible = this.fallRevealed;
     this.fallSpotlight.position.copy(lampPosition);
     this.fallSpotlight.target = this.fallSpotlightTarget;
     if (!this.isMobile) {
       this.fallSpotlight.castShadow = true;
       this.fallSpotlight.shadow.mapSize.set(1024, 1024);
+      // The lamp, target, body and courtyard are all static. Render this exact
+      // 1024px shadow once at reveal instead of resubmitting the full library
+      // geometry to the shadow pass every frame while the player walks away.
+      this.fallSpotlight.shadow.autoUpdate = false;
     }
     this.scene.add(this.fallSpotlight);
 
@@ -1479,6 +1496,7 @@ export class Interior3D {
     // visually it belongs to the streetlamp pool and has no visible fixture.
     this.fallBodyFill = new THREE.PointLight(0xb90716, this.fallRevealed ? 4.2 : 0, 5.5, 1.9);
     this.fallBodyFill.name = "library_fall_body_bounce";
+    this.fallBodyFill.visible = this.fallRevealed;
     this.fallBodyFill.position.set(revealTarget.x, revealTarget.y + 0.9, revealTarget.z);
     this.scene.add(this.fallBodyFill);
   }
@@ -1489,11 +1507,19 @@ export class Interior3D {
     this.hasLeftShelfAfterFall = true;
     this.setFallenLinweiAppearance(true);
     this.outsideRedLight.intensity = 1.35;
+    this.outsideRedLight.visible = true;
     // Keep navigational storm light alive; the spotlight supplies the crimson
     // focus without switching the handheld beam or the courtyard off.
     this.outsideWhiteLight.intensity = 5.2;
-    if (this.fallSpotlight) this.fallSpotlight.intensity = 120;
-    if (this.fallBodyFill) this.fallBodyFill.intensity = 4.2;
+    if (this.fallSpotlight) {
+      this.fallSpotlight.visible = true;
+      this.fallSpotlight.intensity = 120;
+      this.fallSpotlight.shadow.needsUpdate = true;
+    }
+    if (this.fallBodyFill) {
+      this.fallBodyFill.visible = true;
+      this.fallBodyFill.intensity = 4.2;
+    }
     const reveal = this.assetHandle?.meta?.fallReveal;
     if (reveal) {
       // The root pivot sits near one limb in the authored GLB. Aim at the
@@ -1564,18 +1590,24 @@ export class Interior3D {
           standard.emissiveIntensity = Math.max(standard.emissiveIntensity ?? 0, 4.2);
         }
       }
+      this.assetCeilingFixtures.push(object.getWorldPosition(new THREE.Vector3()));
+    });
+
+    const poolSize = Math.min(6, this.assetCeilingFixtures.length);
+    for (let index = 0; index < poolSize; index++) {
       const light = new THREE.PointLight(0xa70d18, 4.9, 9.2, 1.65);
-      light.name = `${object.name}_light`;
-      light.position.copy(object.getWorldPosition(new THREE.Vector3()));
-      light.position.y -= 0.12;
+      light.name = `library_ceiling_light_pool_${index}`;
       this.scene.add(light);
       this.assetCeilingLights.push(light);
-    });
+    }
+    this.nextAssetCeilingPoolUpdateAt = Number.NEGATIVE_INFINITY;
   }
 
   private clearAssetCeilingLights(): void {
     for (const light of this.assetCeilingLights) this.scene.remove(light);
     this.assetCeilingLights.length = 0;
+    this.assetCeilingFixtures.length = 0;
+    this.nextAssetCeilingPoolUpdateAt = Number.NEGATIVE_INFINITY;
   }
 
   private setupBaishaGameplay(handle: InteriorAssetHandle): void {
@@ -2747,6 +2779,7 @@ export class Interior3D {
     this.fillLight.intensity = THREE.MathUtils.lerp(this.fillLight.intensity, targetFill, k);
     this.nearFillLight.intensity = THREE.MathUtils.lerp(this.nearFillLight.intensity, targetNear, k);
 
+    this.flashlight.visible = hasFlashlight || previewingUnmappedAsset;
     if (hasFlashlight || previewingUnmappedAsset) {
       this.flashlightSys.update(dt, t);
       if (previewingUnmappedAsset) this.flashlight.intensity *= 8;
@@ -2766,6 +2799,7 @@ export class Interior3D {
     this.updateLibraryCeilingLights(t);
     this.updateBaishaLighting(t);
     this.updateLibraryReturnPursuit(dt, t);
+    this.outsideRedLight.visible = this.outsideRedLight.intensity > 0.01;
   }
 
   private isInLibraryExterior(): boolean {
@@ -2802,6 +2836,7 @@ export class Interior3D {
     const ceilingTarget = exterior ? (lightning ? 11 : 2.7) : 0;
     this.outsideWhiteLight.intensity = THREE.MathUtils.lerp(this.outsideWhiteLight.intensity, whiteTarget, 0.18);
     this.outsideCeilingLight.intensity = THREE.MathUtils.lerp(this.outsideCeilingLight.intensity, ceilingTarget, 0.2);
+    this.outsideCeilingLight.visible = this.outsideCeilingLight.intensity > 0.01;
   }
 
   private updateLibraryCeilingLights(t: number): void {
@@ -2809,14 +2844,33 @@ export class Interior3D {
     if (this.fallRevealed && this.camera.position.z > 32) this.hasLeftShelfAfterFall = true;
     if (this.hasLeftShelfAfterFall && this.camera.position.z < 29.5) this.libraryReturnFlicker = true;
 
+    if (t >= this.nextAssetCeilingPoolUpdateAt) {
+      this.nextAssetCeilingPoolUpdateAt = t + 0.25;
+      const nearestFixtures = this.assetCeilingFixtures
+        .map((position, fixtureIndex) => ({
+          position,
+          fixtureIndex,
+          distanceSq: this.camera.position.distanceToSquared(position),
+        }))
+        .sort((a, b) => a.distanceSq - b.distanceSq);
+      for (let index = 0; index < this.assetCeilingLights.length; index++) {
+        const fixture = nearestFixtures[index];
+        const light = this.assetCeilingLights[index];
+        light.position.copy(fixture.position);
+        light.position.y -= 0.12;
+        light.userData.fixtureIndex = fixture.fixtureIndex;
+      }
+    }
+
     for (let index = 0; index < this.assetCeilingLights.length; index++) {
       const light = this.assetCeilingLights[index];
+      const fixtureIndex = Number(light.userData.fixtureIndex ?? index);
       if (!this.libraryReturnFlicker) {
-        light.intensity = 4.75 + Math.sin(t * 1.7 + index * 0.83) * 0.22;
+        light.intensity = 4.75 + Math.sin(t * 1.7 + fixtureIndex * 0.83) * 0.22;
         continue;
       }
-      const harsh = Math.sin(t * (13.5 + (index % 4) * 2.1) + index * 1.91);
-      const dropout = harsh > 0.58 || Math.sin(t * 3.3 + index * 2.7) > 0.86;
+      const harsh = Math.sin(t * (13.5 + (fixtureIndex % 4) * 2.1) + fixtureIndex * 1.91);
+      const dropout = harsh > 0.58 || Math.sin(t * 3.3 + fixtureIndex * 2.7) > 0.86;
       light.intensity = dropout ? 0.16 : 4.9 + Math.max(0, harsh) * 1.7;
     }
   }
@@ -2830,11 +2884,13 @@ export class Interior3D {
 
     if (!active) {
       this.libraryPursuitLight.intensity = THREE.MathUtils.lerp(this.libraryPursuitLight.intensity, 0, 0.18);
+      this.libraryPursuitLight.visible = false;
       this.lastPursuitZ = this.camera.position.z;
       this.pursuitDistance = 7.2;
       return;
     }
 
+    this.libraryPursuitLight.visible = true;
     const dz = this.camera.position.z - this.lastPursuitZ;
     this.lastPursuitZ = this.camera.position.z;
     const movingTowardExit = dz < -0.018;
@@ -2883,9 +2939,12 @@ export class Interior3D {
 
   private updateBloodLight(t: number): void {
     if (!this.bloodLightEnabled) {
+      this.bloodLight.visible = false;
       this.bloodLight.intensity = 0;
       return;
     }
+
+    this.bloodLight.visible = true;
 
     if (t >= this.nextBloodFlashAt) {
       this.bloodFlashUntil = t + 0.22 + Math.random() * 0.12;

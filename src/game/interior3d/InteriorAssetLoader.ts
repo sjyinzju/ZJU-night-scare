@@ -193,6 +193,8 @@ export interface InteriorAssetRequest {
 interface InteriorAssetSource {
   rootPath: string;
   model: string;
+  /** Bump whenever any file in this authored scene changes. */
+  cacheVersion?: string;
   lodModel?: string;
   additionalModels?: string[];
   metaFile?: string;
@@ -220,6 +222,7 @@ const ASSET_SOURCES: Record<string, InteriorAssetSource> = {
   "medical-library:library": {
     rootPath: "models/interiors/library",
     model: "library.glb",
+    cacheVersion: "library-scene01-v2",
     additionalModels: ["library-scene01-props.glb"],
     metaFile: "scene01.meta.json",
     viewpointName: "新页面",
@@ -228,11 +231,15 @@ const ASSET_SOURCES: Record<string, InteriorAssetSource> = {
   "dorm-baisha:dorm": {
     rootPath: "models/interiors/baisha",
     model: "baisha.glb",
+    cacheVersion: "baisha-scene01-v2",
+    additionalModels: ["baisha-dorm-props.glb", "baisha-corridor-props.glb", "baisha-chase-props.glb"],
     metaFile: "scene01.meta.json",
   },
 };
 
 let loader: import("three/examples/jsm/loaders/GLTFLoader.js").GLTFLoader | undefined;
+const binaryAssetPromises = new Map<string, Promise<ArrayBuffer>>();
+const metaAssetPromises = new Map<string, Promise<InteriorAssetMeta | undefined>>();
 
 async function getLoader(): Promise<import("three/examples/jsm/loaders/GLTFLoader.js").GLTFLoader> {
   if (!loader) {
@@ -246,14 +253,76 @@ function assetKey(req: InteriorAssetRequest): string {
   return `${req.buildingId}:${req.roomKind}`;
 }
 
-async function loadMeta(rootPath: string, metaFile: string): Promise<InteriorAssetMeta | undefined> {
-  try {
-    const response = await fetch(assetUrl(`${rootPath}/${metaFile}`));
-    if (!response.ok) return undefined;
-    return (await response.json()) as InteriorAssetMeta;
-  } catch {
-    return undefined;
-  }
+function sourceAssetUrl(source: InteriorAssetSource, file: string): string {
+  return assetUrl(`${source.rootPath}/${file}`, source.cacheVersion);
+}
+
+function fetchBinaryAsset(url: string): Promise<ArrayBuffer> {
+  const cached = binaryAssetPromises.get(url);
+  if (cached) return cached;
+
+  const request = fetch(url)
+    .then((response) => {
+      if (!response.ok) throw new Error(`Failed to preload ${url}: HTTP ${response.status}`);
+      return response.arrayBuffer();
+    })
+    .catch((error) => {
+      binaryAssetPromises.delete(url);
+      throw error;
+    });
+  binaryAssetPromises.set(url, request);
+  return request;
+}
+
+function loadMeta(source: InteriorAssetSource): Promise<InteriorAssetMeta | undefined> {
+  if (!source.metaFile) return Promise.resolve(undefined);
+  const url = sourceAssetUrl(source, source.metaFile);
+  const cached = metaAssetPromises.get(url);
+  if (cached) return cached;
+
+  const request = fetch(url)
+    .then(async (response) => {
+      if (!response.ok) throw new Error(`Failed to load ${url}: HTTP ${response.status}`);
+      return (await response.json()) as InteriorAssetMeta;
+    })
+    .catch(() => {
+      metaAssetPromises.delete(url);
+      return undefined;
+    });
+  metaAssetPromises.set(url, request);
+  return request;
+}
+
+function resolveModelFiles(
+  req: InteriorAssetRequest,
+  source: InteriorAssetSource,
+  meta?: InteriorAssetMeta,
+): string[] {
+  const preferredModel = req.isMobile
+    ? (source.lodModel ?? meta?.lodModel ?? source.model)
+    : (meta?.model ?? source.model);
+  const extraModels = meta?.additionalModels ?? source.additionalModels ?? [];
+  return [preferredModel, ...extraModels];
+}
+
+/**
+ * Download the next interior while the player is still on the campus map.
+ * ArrayBuffers are cached at module scope and consumed by loadInteriorAsset,
+ * so this never starts a second request when the building is entered.
+ */
+export async function preloadInteriorAsset(req: InteriorAssetRequest): Promise<void> {
+  const source = ASSET_SOURCES[assetKey(req)];
+  if (!source) return;
+
+  const knownFiles = resolveModelFiles(req, source);
+  const metaPromise = loadMeta(source);
+  await Promise.all([
+    getLoader(),
+    ...knownFiles.map((file) => fetchBinaryAsset(sourceAssetUrl(source, file))),
+  ]);
+  const meta = await metaPromise;
+  const resolvedFiles = resolveModelFiles(req, source, meta);
+  await Promise.all(resolvedFiles.map((file) => fetchBinaryAsset(sourceAssetUrl(source, file))));
 }
 
 function getAuthoredViewpoint(root: THREE.Group, name?: string): InteriorAssetHandle["viewpoint"] {
@@ -445,52 +514,79 @@ function prepareBaishaTrueExitVisuals(
 }
 
 /**
- * Baisha is a fully static SketchUp export: hundreds of separate meshes share
- * only ~110 materials. Flattening transforms and merging meshes that use the
- * exact same material preserves every vertex, texture and shadow flag while
- * reducing both the colour and shadow render passes from hundreds of submits.
+ * Flatten transforms and merge compatible static meshes that use the exact
+ * same material. Large scenes can opt into spatial cells so batching keeps
+ * useful frustum culling while still removing redundant colour/shadow submits.
+ * Named gameplay visuals and incompatible animated/multi-material subtrees are
+ * retained verbatim.
  */
-function batchStaticScene(root: THREE.Group, preserveNames: string[] = []): THREE.Group {
+function batchStaticScene(
+  root: THREE.Group,
+  preserveNames: string[] = [],
+  options: { name?: string; spatialCellSize?: number } = {},
+): THREE.Group {
   root.updateMatrixWorld(true);
   const preservedObjects = preserveNames
     .map((name) => getInteriorAssetObject(root, name))
     .filter((object): object is THREE.Object3D => Boolean(object));
   const preservedMeshes = new Set<THREE.Object3D>();
   for (const object of preservedObjects) object.traverse((child) => preservedMeshes.add(child));
+  const incompatibleRoots = new Set<THREE.Object3D>();
+  root.traverse((object) => {
+    const mesh = object as THREE.Mesh;
+    if (!mesh.isMesh || preservedMeshes.has(mesh)) return;
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    if (
+      materials.length !== 1
+      || mesh.geometry.groups.length > 1
+      || (mesh as THREE.SkinnedMesh).isSkinnedMesh
+      || Object.keys(mesh.morphTargetDictionary ?? {}).length > 0
+    ) incompatibleRoots.add(mesh);
+  });
+  const incompatibleObjects = new Set<THREE.Object3D>();
+  for (const object of incompatibleRoots) object.traverse((child) => incompatibleObjects.add(child));
+  const retainedGeometries = new Set<THREE.BufferGeometry>();
+  for (const object of [...preservedMeshes, ...incompatibleObjects]) {
+    const mesh = object as THREE.Mesh;
+    if (mesh.isMesh) retainedGeometries.add(mesh.geometry);
+  }
   const batches = new Map<string, { material: THREE.Material; geometries: THREE.BufferGeometry[] }>();
   const sourceGeometries = new Set<THREE.BufferGeometry>();
-  let compatible = true;
 
   root.traverse((object) => {
     const mesh = object as THREE.Mesh;
     if (!mesh.isMesh) return;
-    if (preservedMeshes.has(mesh)) return;
+    if (preservedMeshes.has(mesh) || incompatibleObjects.has(mesh)) return;
     const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-    if (materials.length !== 1 || mesh.geometry.groups.length > 1 || (mesh as THREE.SkinnedMesh).isSkinnedMesh) {
-      compatible = false;
-      return;
-    }
     const material = materials[0];
-    // The dorm is small enough that the full authored model is already inside
-    // the camera/flashlight pass from the playable room. Grouping by exact
-    // material therefore removes redundant colour + shadow submissions without
-    // changing any vertex, texture, material or light/shadow setting.
-    const batchKey = material.uuid;
+    // Grouping uses the exact material object and geometry layout. For large
+    // models, the spatial key retains useful frustum culling boundaries.
     const geometry = mesh.geometry.clone();
     geometry.applyMatrix4(mesh.matrixWorld);
+    geometry.computeBoundingBox();
+    const center = geometry.boundingBox?.getCenter(new THREE.Vector3()) ?? new THREE.Vector3();
+    const cellSize = options.spatialCellSize;
+    const spatialKey = cellSize
+      ? `${Math.floor(center.x / cellSize)}:${Math.floor(center.z / cellSize)}`
+      : "all";
+    const attributeKey = Object.entries(geometry.attributes)
+      .map(([name, attribute]) => `${name}:${attribute.itemSize}:${attribute.normalized}:${attribute.array.constructor.name}`)
+      .sort()
+      .join(",");
+    const batchKey = `${material.uuid}|${spatialKey}|${geometry.index ? "indexed" : "plain"}|${attributeKey}`;
     const batch = batches.get(batchKey) ?? { material, geometries: [] };
     batch.geometries.push(geometry);
     batches.set(batchKey, batch);
     sourceGeometries.add(mesh.geometry);
   });
 
-  if (!compatible || batches.size === 0) {
+  if (batches.size === 0) {
     for (const batch of batches.values()) for (const geometry of batch.geometries) geometry.dispose();
     return root;
   }
 
   const batchedRoot = new THREE.Group();
-  batchedRoot.name = "baisha-static-batches";
+  batchedRoot.name = options.name ?? "static-batches";
   let index = 0;
   for (const { material, geometries } of batches.values()) {
     const merged = mergeGeometries(geometries, false);
@@ -500,7 +596,7 @@ function batchStaticScene(root: THREE.Group, preserveNames: string[] = []): THRE
       return root;
     }
     const mesh = new THREE.Mesh(merged, material);
-    mesh.name = `baisha_static_batch_${index++}`;
+    mesh.name = `${batchedRoot.name}_${index++}`;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     merged.computeBoundingBox();
@@ -510,9 +606,20 @@ function batchStaticScene(root: THREE.Group, preserveNames: string[] = []): THRE
     batchedRoot.add(mesh);
   }
 
-  for (const geometry of sourceGeometries) geometry.dispose();
+  const retainedCandidates = [...new Set([...preservedObjects, ...incompatibleRoots])];
+  const retainedRoots = retainedCandidates.filter((object) => {
+    let parent = object.parent;
+    while (parent) {
+      if (retainedCandidates.includes(parent)) return false;
+      parent = parent.parent;
+    }
+    return true;
+  });
+  for (const geometry of sourceGeometries) {
+    if (!retainedGeometries.has(geometry)) geometry.dispose();
+  }
   root.clear();
-  for (const object of preservedObjects) batchedRoot.attach(object);
+  for (const object of retainedRoots) batchedRoot.attach(object);
   batchedRoot.matrixAutoUpdate = false;
   batchedRoot.updateMatrix();
   return batchedRoot;
@@ -546,16 +653,21 @@ export async function loadInteriorAsset(req: InteriorAssetRequest): Promise<Inte
   const source = ASSET_SOURCES[assetKey(req)];
   if (!source) return null;
 
-  const meta = source.metaFile ? await loadMeta(source.rootPath, source.metaFile) : undefined;
-  const preferredModel = req.isMobile
-    ? (source.lodModel ?? meta?.lodModel ?? source.model)
-    : (meta?.model ?? source.model);
-  const gltfLoader = await getLoader();
-  const extraModels = meta?.additionalModels ?? source.additionalModels ?? [];
-  const [gltf, ...extras] = await Promise.all([
-    gltfLoader.loadAsync(assetUrl(`${source.rootPath}/${preferredModel}`)),
-    ...extraModels.map((model) => gltfLoader.loadAsync(assetUrl(`${source.rootPath}/${model}`))),
-  ]);
+  const [meta, gltfLoader] = await Promise.all([loadMeta(source), getLoader()]);
+  const modelFiles = resolveModelFiles(req, source, meta);
+  const modelUrls = modelFiles.map((file) => sourceAssetUrl(source, file));
+  const buffers = await Promise.all(modelUrls.map(fetchBinaryAsset));
+  let parsedModels: Awaited<ReturnType<typeof gltfLoader.parseAsync>>[];
+  try {
+    parsedModels = await Promise.all(
+      buffers.map((buffer) => gltfLoader.parseAsync(buffer, assetUrl(`${source.rootPath}/`))),
+    );
+  } finally {
+    // Parsed geometry and textures own their runtime memory now. Release the
+    // large transport buffers instead of retaining an extra ~82 MB for Baisha.
+    for (const url of modelUrls) binaryAssetPromises.delete(url);
+  }
+  const [gltf, ...extras] = parsedModels;
   const authoredBaseRoot = gltf.scene as THREE.Group;
   tuneLoadedScene(authoredBaseRoot);
   const bounds = new THREE.Box3().setFromObject(authoredBaseRoot);
@@ -572,9 +684,23 @@ export async function loadInteriorAsset(req: InteriorAssetRequest): Promise<Inte
     ...(meta?.baishaGameplay?.computer.visualNames ?? []),
     ...(meta?.baishaGameplay?.chase?.trueExit.visualNames ?? []),
   ];
+  const libraryPreserveNames = [
+    meta?.fallReveal?.fallenName,
+    meta?.fallReveal?.streetlampName,
+  ].filter((name): name is string => Boolean(name));
+  authoredBaseRoot.traverse((object) => {
+    if (/^legacy_crimson_fluorescent_\d+_tube$/.test(object.name)) {
+      libraryPreserveNames.push(object.name);
+    }
+  });
   const baseRoot = req.buildingId === "dorm-baisha" && req.roomKind === "dorm"
-    ? batchStaticScene(authoredBaseRoot, baishaPreserveNames)
-    : authoredBaseRoot;
+    ? batchStaticScene(authoredBaseRoot, baishaPreserveNames, { name: "baisha-static-batches" })
+    : req.buildingId === "medical-library" && req.roomKind === "library"
+      ? batchStaticScene(authoredBaseRoot, libraryPreserveNames, {
+          name: "library-static-batches",
+          spatialCellSize: 10,
+        })
+      : authoredBaseRoot;
   const root = new THREE.Group();
   root.name = "medical-library-asset";
   root.add(baseRoot);

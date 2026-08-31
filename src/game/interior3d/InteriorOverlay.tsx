@@ -35,6 +35,7 @@ function libraryProgressIndex(sceneId: string, inventory: string[]): number {
   if (sceneId === "library_talisman") return 3;
   if (sceneId === "library_shelf") return 4;
   if (sceneId === "library_fall") return 5;
+  if (sceneId === "library_police") return 6;
   if (sceneId === "dorm_baiqiu") return 6;
   return 0;
 }
@@ -93,6 +94,7 @@ export default function InteriorOverlay({
     && new URLSearchParams(window.location.search).get("baishaGameplayDebug") === "1";
   const baishaChaseOnly = building.id === "dorm-baisha"
     && shouldUseBaishaDirectChaseTest();
+  const concealBaishaUntilReady = building.id === "dorm-baisha" && assetState !== "ready";
 
   useEffect(() => {
     if (!baishaChaseOnly || assetState !== "ready") return;
@@ -565,6 +567,27 @@ export default function InteriorOverlay({
         }}
       />
 
+      {/*
+       * The authored Baisha scene is large enough that its procedural room can
+       * otherwise be visible for several seconds on a cold network load. Keep
+       * this veil owned by the interior itself so a stale outer loading state
+       * can never expose the fallback room or its provisional minimap.
+       */}
+      {concealBaishaUntilReady && (
+        <div
+          className="interiorAssetCurtain"
+          style={styles.assetCurtain}
+          role="status"
+          aria-live="polite"
+        >
+          <span style={styles.assetCurtainText}>
+            {assetState === "failed"
+              ? "白沙宿舍 / 场景读取失败，请刷新后重试"
+              : "白沙宿舍 / 正在适应黑暗"}
+          </span>
+        </div>
+      )}
+
       {/* 氛围叠层：暗角 + 轻微冷调，与外层地图的恐怖质感统一。 */}
       <div style={styles.vignette} aria-hidden="true" />
       <div style={styles.scanline} aria-hidden="true" />
@@ -786,6 +809,22 @@ const styles: Record<string, CSSProperties> = {
   },
   hostBlocked: {
     visibility: "hidden",
+  },
+  assetCurtain: {
+    position: "absolute",
+    inset: 0,
+    zIndex: 20,
+    display: "grid",
+    placeItems: "center",
+    pointerEvents: "auto",
+    background:
+      "radial-gradient(circle at 50% 46%, rgba(71, 4, 10, 0.12), transparent 42%), rgba(0, 0, 0, 0.985)",
+  },
+  assetCurtainText: {
+    color: "rgba(223, 202, 192, 0.58)",
+    fontSize: 12,
+    letterSpacing: "0.28em",
+    animation: "baishaLoadingPulse 1.8s ease-in-out infinite",
   },
   // 暗角：四周压暗，聚焦画面中心，和外层 .vignette 呼应。
   vignette: {

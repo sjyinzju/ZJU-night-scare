@@ -18,6 +18,7 @@ import {
 import { CampusScene, type GameHudEvent, type GameMiniMapEvent } from "./game/CampusScene";
 import InteriorOverlay from "./game/interior3d/InteriorOverlay";
 import type { InteriorAssetState } from "./game/interior3d/Interior3D";
+import { preloadInteriorAsset } from "./game/interior3d/InteriorAssetLoader";
 import { shouldUseBaishaDirectChaseTest } from "./game/interior3d/baishaDebug";
 import LaunchSequence, { type LaunchSequenceMode } from "./LaunchSequence";
 import { campusBuildings, campusRoads, type IsoPoint } from "./game/mapData";
@@ -1003,6 +1004,21 @@ function App() {
       const { nextState, nextScene, nextHotspot, changesLocation, effect } = transition;
       const inInterior = Boolean(interiorBuilding);
 
+      // The first chapter is complete once the police sequence starts. Use
+      // that reading/transition time to download Baisha's authored GLBs. The
+      // loader reuses these exact ArrayBuffers on entry, so this does not make
+      // a second request and it deliberately postpones CPU/GPU parsing until
+      // the player actually enters the dorm.
+      if (nextScene.id === "library_police" || nextScene.id === "dorm_baiqiu") {
+        void preloadInteriorAsset({
+          buildingId: "dorm-baisha",
+          roomKind: "dorm",
+          isMobile,
+        }).catch((error) => {
+          console.warn("[App] Baisha background preload was unavailable; entry will retry.", error);
+        });
+      }
+
       setStoryState(() => nextState);
       triggerNarrativeEffect(effect, contextForHotspot(nextScene.locationId));
       if (activeScene.id === "library_shelf") {
@@ -1035,7 +1051,7 @@ function App() {
       }
 
     },
-    [activeScene, closeInterior, interiorBuilding, openInterior, placePlayerAtInteriorExit, setActiveSceneId, setPlayerIso, storyState, triggerNarrativeEffect],
+    [activeScene, closeInterior, interiorBuilding, isMobile, openInterior, placePlayerAtInteriorExit, setActiveSceneId, setPlayerIso, storyState, triggerNarrativeEffect],
   );
 
   const choose = useCallback((choice: StoryChoice) => {

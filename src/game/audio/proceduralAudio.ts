@@ -471,11 +471,13 @@ export function playBaishaThunder(): void {
   rumble.stop(now + 3.1);
 }
 
-/** Three glass knocks: two close taps followed by a slower, heavier third hit. */
+/** Three glass knocks, each distinctly louder and heavier than the previous hit. */
 export function playBaishaWindowKnocks(): void {
   const audioCtx = getCtx();
-  const start = audioCtx.currentTime + 0.08;
-  const offsets = [0, 0.55, 1.45];
+  const start = audioCtx.currentTime;
+  const offsets = [0, 0.58, 1.38];
+  const bodyLevels = [0.1, 0.2, 0.34];
+  const glassLevels = [0.038, 0.074, 0.13];
   offsets.forEach((offset, index) => {
     const when = start + offset;
     const body = audioCtx.createOscillator();
@@ -483,7 +485,7 @@ export function playBaishaWindowKnocks(): void {
     body.frequency.setValueAtTime(168 - index * 18, when);
     body.frequency.exponentialRampToValueAtTime(62, when + 0.16);
     const bodyGain = audioCtx.createGain();
-    bodyGain.gain.setValueAtTime(0.16 + index * 0.07, when);
+    bodyGain.gain.setValueAtTime(bodyLevels[index], when);
     bodyGain.gain.exponentialRampToValueAtTime(0.001, when + 0.2);
     body.connect(bodyGain).connect(audioCtx.destination);
 
@@ -491,7 +493,7 @@ export function playBaishaWindowKnocks(): void {
     glass.type = "triangle";
     glass.frequency.setValueAtTime(1120 - index * 95, when);
     const glassGain = audioCtx.createGain();
-    glassGain.gain.setValueAtTime(0.055 + index * 0.022, when);
+    glassGain.gain.setValueAtTime(glassLevels[index], when);
     glassGain.gain.exponentialRampToValueAtTime(0.001, when + 0.11);
     glass.connect(glassGain).connect(audioCtx.destination);
 
