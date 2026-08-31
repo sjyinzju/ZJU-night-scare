@@ -49,6 +49,21 @@ const EXTERIOR_SPRITE_KEYS: Record<string, string> = {
   "east-teaching-3": "exterior-east-teaching-3",
   "east-teaching-4": "exterior-east-teaching-4",
 };
+
+// Blender exports keep transparent breathing room around each render.  Anchor
+// the visible pixels (rather than the full 1280x960 canvas) to the building's
+// front edge so the model actually sits on the map.
+const EXTERIOR_SPRITE_ORIGINS: Record<string, { x: number; y: number }> = {
+  "medical-library": { x: 0.5, y: 0.8833 },
+  "medical-college": { x: 0.5, y: 0.899 },
+  "dorm-baisha": { x: 0.5, y: 0.8896 },
+  "little-theater": { x: 0.5, y: 0.8729 },
+  "linhu-canteen": { x: 0.5121, y: 0.9427 },
+  "east-teaching-1": { x: 0.4746, y: 0.9885 },
+  "east-teaching-2": { x: 0.477, y: 0.9896 },
+  "east-teaching-3": { x: 0.4754, y: 0.9854 },
+  "east-teaching-4": { x: 0.4777, y: 0.9813 },
+};
 // Old movement used 0.075 * speed per frame. Keep the 60fps feel while
 // making movement frame-rate independent.
 const PLAYER_SPEED = 18.9;
@@ -1191,7 +1206,27 @@ export class CampusScene extends Phaser.Scene {
     // drawIsoPrism for the building entrance.  `center` is still used for
     // depth sorting and the atmospheric overlays below.
     const anchor = this.toScreen({ x: building.x + building.w * 0.5, y: building.y + building.d });
-    const sprite = this.add.image(anchor.x, anchor.y + 1, textureKey).setOrigin(0.5, 1);
+    const origin = EXTERIOR_SPRITE_ORIGINS[building.id] ?? { x: 0.5, y: 1 };
+
+    // A low isometric contact shadow hides the seam between the rendered
+    // facade and the procedural ground. It is visual only: collision and all
+    // story/entry coordinates still come from mapData.
+    const nw = this.toScreen({ x: building.x, y: building.y });
+    const ne = this.toScreen({ x: building.x + building.w, y: building.y });
+    const se = this.toScreen({ x: building.x + building.w, y: building.y + building.d });
+    const sw = this.toScreen({ x: building.x, y: building.y + building.d });
+    const contactShadow = this.add.graphics();
+    contactShadow.fillStyle(0x010405, 0.3);
+    contactShadow.beginPath();
+    contactShadow.moveTo(nw.x, nw.y + 3);
+    contactShadow.lineTo(ne.x, ne.y + 3);
+    contactShadow.lineTo(se.x, se.y + 5);
+    contactShadow.lineTo(sw.x, sw.y + 5);
+    contactShadow.closePath();
+    contactShadow.fillPath();
+    contactShadow.setDepth(anchor.y - 1);
+
+    const sprite = this.add.image(anchor.x, anchor.y + 3, textureKey).setOrigin(origin.x, origin.y);
     const footprintScreenWidth = (building.w + building.d) * (TILE_W / 2) + 18;
     const expectedScreenHeight = building.h * 28 + (building.w + building.d) * (TILE_H / 2) + 18;
     const aspect = sprite.width > 0 && sprite.height > 0 ? sprite.width / sprite.height : 1;
