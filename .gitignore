@@ -1,6 +1,7 @@
 ﻿node_modules/
 dist/
 .dist/
+.r2-upload/
 review_assets/
 *.tsbuildinfo
 vite.config.js

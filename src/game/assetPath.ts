@@ -10,13 +10,18 @@
  *   const url = assetUrl("models/interiors/medical-library/scene.glb");
  *   const audio = assetUrl("audio/bgm/score-1.mp3");
  */
-export function assetUrl(relativePath: string): string {
+export function assetUrl(relativePath: string, version?: string | number): string {
   const cdn: string | undefined = import.meta.env.VITE_ASSET_CDN_URL;
+  let url: string;
   if (cdn) {
     // 去除首尾多余斜杠，拼接 CDN 基础 URL 和相对路径
-    return `${cdn.replace(/\/+$/, "")}/${relativePath.replace(/^\/+/, "")}`;
+    url = `${cdn.replace(/\/+$/, "")}/${relativePath.replace(/^\/+/, "")}`;
+  } else {
+    // 本地开发或默认 GitHub Pages 路径
+    const base = (import.meta.env.BASE_URL || "/").replace(/\/+$/, "");
+    url = `${base}/${relativePath.replace(/^\/+/, "")}`;
   }
-  // 本地开发或默认 GitHub Pages 路径
-  const base = (import.meta.env.BASE_URL || "/").replace(/\/+$/, "");
-  return `${base}/${relativePath.replace(/^\/+/, "")}`;
+  if (version === undefined || version === "") return url;
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}v=${encodeURIComponent(String(version))}`;
 }
