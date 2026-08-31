@@ -33,8 +33,11 @@ import {
   type StoryHotspotInteraction,
 } from "./storyEngine";
 
-const TILE_W = 96;
-const TILE_H = 48;
+// Stretch the visual projection without touching the logical map coordinates.
+// Roads, entrances, collisions and ghost routing continue to use mapData's
+// original IsoPoint values, while the campus gets a less cramped silhouette.
+const TILE_W = 112;
+const TILE_H = 50;
 const ORIGIN_X = 980;
 const ORIGIN_Y = 120;
 const MAP_W = 42;
@@ -72,7 +75,7 @@ const ROAD_SNAP_RADIUS = 0.9;
 const JUNCTION_RADIUS = 1.2;
 // 玩家中心距离可进入建筑中心小于此值时，判定为"可进入"。
 const ENTER_RADIUS = 2.6;
-const WORLD_BOUNDS = { x: -1200, y: 0, width: 4300, height: 2200 };
+const WORLD_BOUNDS = { x: -1500, y: 0, width: 5200, height: 2300 };
 // The red ghost is a relentless pursuer. It is still slightly slower than a
 // player running flat-out (PLAYER_SPEED), but it never wastes time patrolling.
 const GHOST_CHASE_SPEED = 16;
@@ -822,7 +825,7 @@ export class CampusScene extends Phaser.Scene {
   private drawRoads() {
     campusRoads.forEach((road) => {
       const kind = road.kind ?? (road.id === "south-main-axis" ? "main" : "branch");
-      const widthScale = (road.width ?? (kind === "main" ? 1.1 : kind === "ring" ? 0.96 : 0.72)) * 1.22;
+      const widthScale = road.width ?? (kind === "main" ? 1.1 : kind === "ring" ? 0.96 : 0.72);
       const isMainAxis = kind === "main";
       const isWetLoop = kind === "ring";
       const points = road.points.map((p) => this.toScreen(p));
@@ -835,65 +838,54 @@ export class CampusScene extends Phaser.Scene {
         graphics.strokePath();
       };
       const shadow = this.add.graphics();
-      shadow.lineStyle(Math.round(13 * widthScale), 0x010303, isMainAxis ? 0.54 : 0.42);
-      stroke(shadow, 4);
+      shadow.lineStyle(Math.round(12 * widthScale), 0x010303, isMainAxis ? 0.42 : 0.32);
+      stroke(shadow, 3);
       shadow.setDepth(15);
 
-      const dampEdge = this.add.graphics();
-      dampEdge.lineStyle(Math.round(8 * widthScale), isMainAxis ? 0x3d2024 : isWetLoop ? 0x173634 : 0x101a18, 0.88);
-      stroke(dampEdge);
-      dampEdge.setDepth(15.5);
+      const roadBed = this.add.graphics();
+      roadBed.lineStyle(
+        Math.max(5, Math.round(9 * widthScale)),
+        isMainAxis ? 0x392b2c : isWetLoop ? 0x1a302e : 0x17211f,
+        0.98,
+      );
+      stroke(roadBed);
+      roadBed.setDepth(15.5);
 
       const g = this.add.graphics();
-      g.lineStyle(Math.max(3, Math.round(5 * widthScale)), isMainAxis ? 0x56383a : this.shade(road.color, isWetLoop ? -38 : -58), 0.95);
+      g.lineStyle(
+        Math.max(3, Math.round(6 * widthScale)),
+        isMainAxis ? 0x4a3334 : this.shade(road.color, isWetLoop ? -32 : -48),
+        0.96,
+      );
       stroke(g);
       g.setDepth(16);
 
-      const stripe = this.add.graphics();
-      stripe.lineStyle(1, isMainAxis ? 0xd17a6d : isWetLoop ? 0xb5d8d2 : 0x9cb2aa, isMainAxis ? 0.24 : 0.18);
-      stroke(stripe);
-      stripe.setDepth(17);
-
-      const grit = this.add.graphics();
-      grit.setDepth(17.2);
-      for (let i = 0; i < points.length - 1; i += 1) {
-        const a = points[i];
-        const b = points[i + 1];
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-        const len = Math.hypot(dx, dy);
-        const count = Math.max(1, Math.floor(len / (isMainAxis ? 62 : 78)));
-        for (let j = 1; j <= count; j += 1) {
-          const t = (j - 0.35 + ((i + j) % 4) * 0.16) / (count + 0.2);
-          const x = a.x + dx * t + Math.sin(i * 8.1 + j * 2.7) * 5;
-          const y = a.y + dy * t + Math.cos(i * 4.6 + j * 3.2) * 2;
-          const w = (isMainAxis ? 14 : 9) * widthScale;
-          grit.fillStyle(isWetLoop ? 0x153332 : 0x050807, isWetLoop ? 0.18 : 0.14);
-          grit.fillEllipse(x, y + 1, w, Math.max(2, w * 0.22));
-          if ((i + j) % 3 === 0) {
-            grit.lineStyle(1, isWetLoop ? 0xa8cfc8 : 0x87978e, isWetLoop ? 0.13 : 0.08);
-            grit.beginPath();
-            grit.moveTo(x - w * 0.35, y);
-            grit.lineTo(x + w * 0.35, y + 1);
-            grit.strokePath();
-          }
-        }
+      // Only the main axis keeps a faint guide line. Branch roads stay flat so
+      // they read as campus paving instead of raised pipes.
+      if (isMainAxis) {
+        const centerLine = this.add.graphics();
+        centerLine.lineStyle(1, 0xc77a70, 0.16);
+        stroke(centerLine);
+        centerLine.setDepth(17);
       }
     });
 
     // 路口节点和桥头用统一的小标记强调，位置直接来自 campusRoads，便于
     // 玩家辨认路线，也方便后续把这层替换为美术绘制的道路贴图。
-    const junctions = new Map<string, IsoPoint>();
+    const junctions = new Map<string, { point: IsoPoint; count: number }>();
     campusRoads.forEach((road) => {
-      road.points.forEach((point) => junctions.set(`${point.x.toFixed(2)},${point.y.toFixed(2)}`, point));
+      road.points.forEach((point) => {
+        const key = `${point.x.toFixed(2)},${point.y.toFixed(2)}`;
+        const junction = junctions.get(key);
+        junctions.set(key, { point, count: (junction?.count ?? 0) + 1 });
+      });
     });
     const nodes = this.add.graphics();
-    junctions.forEach((point) => {
+    junctions.forEach(({ point, count }) => {
+      if (count < 2) return;
       const p = this.toScreen(point);
-      nodes.fillStyle(0x8ea99f, 0.24);
-      nodes.fillCircle(p.x, p.y, 3.5);
-      nodes.lineStyle(1, 0xadc4b9, 0.22);
-      nodes.strokeCircle(p.x, p.y, 8);
+      nodes.fillStyle(0x6f8b82, 0.28);
+      nodes.fillCircle(p.x, p.y, 3);
     });
     nodes.setDepth(17.35);
   }
@@ -1136,10 +1128,23 @@ export class CampusScene extends Phaser.Scene {
       if (spriteKey && this.textures.exists(spriteKey)) {
         this.drawBuildingSprite(building, center, depth, spriteKey);
       } else {
+        // Baisha and Lantian overlap slightly in the legacy logical footprint.
+        // Keep Lantian's gameplay rectangle intact, but retract only its visible
+        // south wing so the new Baisha facade is not drawn over old geometry.
+        const visualBuilding = building.id === "dorm-lantian"
+          ? {
+              ...building,
+              d: 1.25,
+              massing: [
+                { dx: 0.1, dy: 0, w: 1.6, d: 1.2, h: 2.2, bodyShade: 2 },
+                { dx: 4.35, dy: 0, w: 1.35, d: 1.2, h: 2.4, bodyShade: 8, roofShade: 6 },
+              ],
+            }
+          : building;
         const g = this.add.graphics();
-        this.drawIsoPrism(g, building);
+        this.drawIsoPrism(g, visualBuilding);
         g.setDepth(center.y + building.h * 26);
-        this.drawBuildingGeometryV2(building, center, depth);
+        this.drawBuildingGeometryV2(visualBuilding, center, depth);
         if (building.id === "admin-center") {
           this.drawAdminEyeRoof(building, depth);
         }
