@@ -1,4 +1,5 @@
 import type { JumpscareContext } from "./jumpscareTexts";
+import type { JumpscareSpriteId } from "./jumpscareAssets";
 
 /**
  * Descriptor for a single jumpscare event, dispatched from any source
@@ -18,7 +19,7 @@ export interface JumpscareEvent {
   /** Optional custom message (overrides the pool lookup). */
   customMessage?: string;
   /** Optional visual sprite selected by the same central state-machine event. */
-  spriteId?: "library-shelf" | "library-fall";
+  spriteId?: JumpscareSpriteId;
 }
 
 /**
@@ -28,8 +29,9 @@ export interface JumpscareEvent {
  * - Cooldown gating (no spam — minimum gap between scares)
  * - Intensity-driven scaling (shake, flash, overlay duration)
  * - Recent-event tracking for variety in text selection
- * - Integration with existing `App.tsx` effect system via
- *   `zju-horror-effect` and `zju-horror-jumpscare` custom events
+ * - Integration with the `App.tsx` effect system via one
+ *   `zju-horror-jumpscare` event. App starts visuals and audio together after
+ *   any authored sprite has decoded.
  *
  * Usage:
  * ```ts
@@ -57,10 +59,6 @@ export class JumpscarePipeline {
     if (JumpscarePipeline.recent.length > 5) JumpscarePipeline.recent.shift();
 
     const sanityCost = sanityCostOverride ?? Math.round(intensity * 6);
-
-    window.dispatchEvent(new CustomEvent("zju-horror-effect", {
-      detail: { effect: "jumpscare" },
-    }));
 
     window.dispatchEvent(new CustomEvent("zju-horror-jumpscare", {
       detail: {
@@ -107,14 +105,8 @@ export class JumpscarePipeline {
     const duration = event.duration ?? Math.round(900 + event.intensity * 500);
     const sanityCost = event.sanityCost ?? Math.round(event.intensity * 6);
 
-    // Dispatch the jumpscare through the existing event bus.
-    // `zju-horror-effect` drives screen shake / flash (already wired in CampusScene + App).
-    window.dispatchEvent(new CustomEvent("zju-horror-effect", {
-      detail: { effect: "jumpscare" },
-    }));
-
-    // `zju-horror-jumpscare` carries the full payload so App.tsx can
-    // pick the right text + overlay + sanity hit.
+    // One event carries the complete beat. App.tsx dispatches the camera
+    // effect only when its text, sprite and audio can start together.
     window.dispatchEvent(new CustomEvent("zju-horror-jumpscare", {
       detail: {
         context: event.context,

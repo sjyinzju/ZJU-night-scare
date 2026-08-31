@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import Phaser from "phaser";
 import {
   Backpack,
@@ -36,11 +36,18 @@ import {
   type StorySceneId,
 } from "./game/storyData";
 import { useGameAudio } from "./game/audio/useGameAudio";
+import { audioManager } from "./game/audio/audioManager";
 import { playImpactBang } from "./game/audio/proceduralAudio";
 import { assetUrl } from "./game/assetPath";
 import { INITIAL_REVIVES, REVIVE_SANITY, useGameStore, type GameStore } from "./game/store";
 import { pickJumpscareText, contextForHotspot, textVariantClass, type JumpscareContext } from "./game/jumpscareTexts";
 import { JumpscarePipeline } from "./game/JumpscarePipeline";
+  JUMPSCARE_SPRITE_IDS,
+  jumpscareSpriteUrl,
+  preloadJumpscareSprites,
+  prepareJumpscareSprite,
+  type JumpscareSpriteId,
+} from "./game/jumpscareAssets";
 import {
   advanceStory,
   applyGhostDamage,
@@ -70,7 +77,6 @@ type MiniMapSnapshot = {
   ghostVisible: boolean;
 };
 
-type JumpscareSpriteId = "library-shelf" | "library-fall";
 type DocumentView = { title: string; lines: string[] };
 
 // Normal development follows the complete story from scene 01. Keep Baisha's
@@ -318,6 +324,9 @@ function App() {
   const miniMapFrameRef = useRef<number | null>(null);
   const choiceTimerRef = useRef<number | null>(null);
   const receiptRevealTimerRef = useRef<number | null>(null);
+  const effectClearTimerRef = useRef<number | null>(null);
+  const effectStartFrameRef = useRef<number | null>(null);
+  const jumpscareRequestRef = useRef(0);
   const [hud, setHud] = useState<GameHudEvent>(initialHud);
   const [gameSessionId, setGameSessionId] = useState(0);
   const [phaserReady, setPhaserReady] = useState(false);
@@ -332,13 +341,16 @@ function App() {
   const isMobile = useIsMobile();
 
   useEffect(() => {
-    // Both story scares must be decoded before their one-shot state-machine
-    // events fire; otherwise a cold browser can spend most of the 900 ms beat
-    // downloading the transparent PNG.
-    for (const file of ["library-shelf-ghost.png", "library-fall-ghost.png"]) {
-      const preload = new Image();
-      preload.src = assetUrl(`images/jumpscares/${file}`);
-    }
+    // Start downloads at app mount and retain the decoded images for the whole
+    // session. Howler also preloads, but this gives the jumpscare coordinator a
+    // concrete readiness promise before it starts a one-shot beat.
+    void preloadJumpscareSprites();
+    void audioManager.prepareJumpscare();
+  }, []);
+
+  useEffect(() => () => {
+    if (effectClearTimerRef.current !== null) window.clearTimeout(effectClearTimerRef.current);
+    if (effectStartFrameRef.current !== null) window.cancelAnimationFrame(effectStartFrameRef.current);
   }, []);
 
   // ── Zustand is the single source of truth for the playable session. ──
@@ -409,23 +421,58 @@ function App() {
       context?: JumpscareContext,
       spriteId?: JumpscareSpriteId,
       customMessage?: string,
+      durationMs?: number,
     ) => {
       if (!effect) return;
-      if (effect === "jumpscare") setJumpscareSprite(spriteId ?? null);
-      setScreenEffect(effect);
-      playEffect(effect);
-      if (effect === "jumpscare" || effect === "shake") {
-        const ctx = context ?? contextForHotspot(targetHotspotId);
-        const text = customMessage ?? pickJumpscareText(ctx, storyState.stats.sanity);
-        useGameStore.getState().setJumpscareText(text);
+      if (effectClearTimerRef.current !== null) {
+        window.clearTimeout(effectClearTimerRef.current);
+        effectClearTimerRef.current = null;
       }
-      window.dispatchEvent(new CustomEvent("zju-horror-effect", { detail: { effect } }));
-      window.setTimeout(() => {
+      if (effectStartFrameRef.current !== null) {
+        window.cancelAnimationFrame(effectStartFrameRef.current);
+        effectStartFrameRef.current = null;
+      }
+
+      const currentStoryState = useGameStore.getState().storyState;
+      const effectContext = context ?? contextForHotspot(getSceneHotspot(currentStoryState.currentSceneId));
+      const text = effect === "jumpscare" || effect === "shake"
+        ? customMessage ?? pickJumpscareText(effectContext, currentStoryState.stats.sanity)
+        : null;
+
+      if (effect !== "jumpscare") {
+        setScreenEffect(effect);
+        playEffect(effect);
+        if (text) useGameStore.getState().setJumpscareText(text);
+        window.dispatchEvent(new CustomEvent("zju-horror-effect", { detail: { effect } }));
+        effectClearTimerRef.current = window.setTimeout(() => {
+          effectClearTimerRef.current = null;
+          setScreenEffect("");
+        }, durationMs ?? 520);
+        return;
+      }
+
+      // Commit the complete inactive frame first. This makes repeated scares
+      // restart their CSS animations and ensures text/sprite exist before the
+      // sound and camera effect begin.
+      flushSync(() => {
         setScreenEffect("");
-        if (effect === "jumpscare") setJumpscareSprite(null);
-      }, effect === "jumpscare" ? 1300 : 520);
+        setJumpscareSprite(spriteId ?? null);
+        if (text) useGameStore.getState().setJumpscareText(text);
+      });
+
+      effectStartFrameRef.current = window.requestAnimationFrame(() => {
+        effectStartFrameRef.current = null;
+        flushSync(() => setScreenEffect("jumpscare"));
+        playEffect("jumpscare");
+        window.dispatchEvent(new CustomEvent("zju-horror-effect", { detail: { effect: "jumpscare" } }));
+        effectClearTimerRef.current = window.setTimeout(() => {
+          effectClearTimerRef.current = null;
+          setScreenEffect("");
+          setJumpscareSprite(null);
+        }, durationMs ?? 1300);
+      });
     },
-    [playEffect, storyState.stats.sanity, targetHotspotId],
+    [playEffect],
   );
 
   /** Story beats use the central jumpscare pipeline so sanity is charged once. */
@@ -947,14 +994,23 @@ function App() {
     const handleJumpscare = (event: Event) => {
       const detail = (event as CustomEvent<{
         context: string; intensity: number;
-        sanityCost: number; customMessage?: string; spriteId?: JumpscareSpriteId;
+        sanityCost: number; duration?: number; customMessage?: string; spriteId?: JumpscareSpriteId;
       }>).detail;
-      triggerEffect(
-        "jumpscare",
-        detail.context as JumpscareContext,
-        detail.spriteId,
-        detail.customMessage,
-      );
+      const requestId = ++jumpscareRequestRef.current;
+      const visualReady = detail.spriteId
+        ? prepareJumpscareSprite(detail.spriteId)
+        : Promise.resolve(true);
+
+      void Promise.all([visualReady, audioManager.prepareJumpscare()]).then(([spriteReady]) => {
+        if (requestId !== jumpscareRequestRef.current) return;
+        triggerEffect(
+          "jumpscare",
+          detail.context as JumpscareContext,
+          spriteReady ? detail.spriteId : undefined,
+          detail.customMessage,
+          detail.duration,
+        );
+      });
     };
     const handleSanityHit = (event: Event) => {
       const detail = (event as CustomEvent<{ amount: number; source: string }>).detail;
@@ -974,10 +1030,11 @@ function App() {
     window.addEventListener("zju-horror-jumpscare", handleJumpscare);
     window.addEventListener("zju-horror-sanity-hit", handleSanityHit);
     return () => {
+      jumpscareRequestRef.current += 1;
       window.removeEventListener("zju-horror-jumpscare", handleJumpscare);
       window.removeEventListener("zju-horror-sanity-hit", handleSanityHit);
     };
-  }, [setWorld, storyState.stats.sanity, triggerEffect]);
+  }, [setWorld, triggerEffect]);
 
   const useInventoryItem = useCallback(
     (itemId: ItemId) => {
@@ -1301,20 +1358,22 @@ function App() {
         <div className={screenEffect === "low-sanity" ? "sanityEdgePulse active" : "sanityEdgePulse"} />
         <div className="lensDirt" />
         <div className={screenEffect === "jumpscare" ? "jumpscareOverlay active" : "jumpscareOverlay"} />
-        {jumpscareSprite ? (
+        {JUMPSCARE_SPRITE_IDS.map((spriteId) => (
           <img
-            className={`jumpscareSprite jumpscareSprite--${jumpscareSprite} ${screenEffect === "jumpscare" ? "active" : ""}`}
-            src={assetUrl(`images/jumpscares/${jumpscareSprite === "library-shelf" ? "library-shelf-ghost.png" : "library-fall-ghost.png"}`)}
+            key={spriteId}
+            className={`jumpscareSprite jumpscareSprite--${spriteId} ${jumpscareSprite === spriteId && screenEffect === "jumpscare" ? "active" : ""}`}
+            src={jumpscareSpriteUrl(spriteId)}
             alt=""
             aria-hidden="true"
           />
-        ) : (
+        ))}
+        {!jumpscareSprite ? (
           <div className={screenEffect === "jumpscare" ? "jumpscareFace active" : "jumpscareFace"} aria-hidden="true">
             <span className="faceEye left" />
             <span className="faceEye right" />
             <span className="faceMouth" />
           </div>
-        )}
+        ) : null}
         <div className={screenEffect === "jumpscare" ? "bloodDripOverlay active" : "bloodDripOverlay"} aria-hidden="true">
           <i /><i /><i /><i /><i />
         </div>
@@ -1415,13 +1474,14 @@ function App() {
       {interiorBuilding && (
         <div className="interiorScareLayer" aria-hidden="true">
           <div className={screenEffect === "jumpscare" ? "jumpscareOverlay active" : "jumpscareOverlay"} />
-          {jumpscareSprite ? (
+          {JUMPSCARE_SPRITE_IDS.map((spriteId) => (
             <img
-              className={`jumpscareSprite jumpscareSprite--${jumpscareSprite} ${screenEffect === "jumpscare" ? "active" : ""}`}
-              src={assetUrl(`images/jumpscares/${jumpscareSprite === "library-shelf" ? "library-shelf-ghost.png" : "library-fall-ghost.png"}`)}
+              key={spriteId}
+              className={`jumpscareSprite jumpscareSprite--${spriteId} ${jumpscareSprite === spriteId && screenEffect === "jumpscare" ? "active" : ""}`}
+              src={jumpscareSpriteUrl(spriteId)}
               alt=""
             />
-          ) : null}
+          ))}
           <div className={screenEffect === "jumpscare" ? "bloodDripOverlay active" : "bloodDripOverlay"}>
             <i /><i /><i /><i /><i />
           </div>

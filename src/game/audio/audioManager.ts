@@ -90,6 +90,29 @@ let mainBgmStopTimer: number | undefined;
 let pageTurnIndex = 0;
 let lastPageTurnAt = 0;
 const lastPlayedAt = new Map<OneShotKey, number>();
+let jumpscareAudioReady: Promise<boolean> | null = null;
+
+function prepareJumpscareAudio(): Promise<boolean> {
+  if (oneShots.jumpscare.state() === "loaded") return Promise.resolve(true);
+  if (jumpscareAudioReady) return jumpscareAudioReady;
+
+  jumpscareAudioReady = new Promise<boolean>((resolve) => {
+    const howl = oneShots.jumpscare;
+    const finish = (loaded: boolean) => {
+      howl.off("load", handleLoad);
+      howl.off("loaderror", handleLoadError);
+      if (!loaded) jumpscareAudioReady = null;
+      resolve(loaded);
+    };
+    const handleLoad = () => finish(true);
+    const handleLoadError = () => finish(false);
+    howl.once("load", handleLoad);
+    howl.once("loaderror", handleLoadError);
+    if (howl.state() === "unloaded") howl.load();
+  });
+
+  return jumpscareAudioReady;
+}
 
 // ── BGM 链式播放: score-1 播完自动切 score-2 ──
 mainBgmTracks.forEach((track, index) => {
@@ -181,6 +204,13 @@ function playPageTurn() {
 }
 
 export const audioManager = {
+  prepareJumpscare(timeoutMs = 1600) {
+    return Promise.race([
+      prepareJumpscareAudio(),
+      new Promise<boolean>((resolve) => window.setTimeout(() => resolve(false), timeoutMs)),
+    ]);
+  },
+
   unlock() {
     if (unlocked) return;
     unlocked = true;
