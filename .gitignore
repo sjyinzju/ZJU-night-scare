@@ -20,6 +20,12 @@ vite.config.d.ts
 !site/assets/characters/*.png
 !site/assets/characters/*.jpg
 
+# Small exterior preview sprites are bundled with the map demo so the Phaser
+# layer can display the Blender-authored silhouettes locally and on Pages.
+!public/assets/
+!public/assets/exterior/
+!public/assets/exterior/**/*.png
+
 # 3D 模型与音频 — 生产环境走 Cloudflare R2，不纳入 Git
 public/models/**/*.glb
 public/audio/**/*.wav
