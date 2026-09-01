@@ -1283,7 +1283,9 @@ button {
 }
 
 .jumpscareSprite.active {
-  animation: libraryGhostLunge 1.16s cubic-bezier(0.12, 0.8, 0.2, 1) forwards;
+  /* Match the pipeline's 1.3–1.4 s beat so the decoded sprite never finishes
+     fading before the text/flash layer. */
+  animation: libraryGhostLunge 1.34s cubic-bezier(0.12, 0.8, 0.2, 1) forwards;
 }
 
 .jumpscareSprite--library-fall.active {
@@ -1295,6 +1297,7 @@ button {
   10% { opacity: 1; transform: translate(calc(-50% - 18px), calc(-50% + 5px)) scale(1.05) rotate(-1deg); filter: blur(0) contrast(1.55) saturate(0.72); }
   22% { transform: translate(calc(-50% + 17px), calc(-50% - 9px)) scale(1.28) rotate(1.2deg); }
   42% { opacity: 0.95; transform: translate(calc(-50% - 11px), calc(-50% + 4px)) scale(1.5) rotate(-0.8deg); }
+  78% { opacity: 0.88; transform: translate(-50%, -50%) scale(1.72); filter: blur(1px) contrast(1.7); }
   100% { opacity: 0; transform: translate(-50%, -50%) scale(1.9); filter: blur(4px) contrast(1.8); }
 }
 
@@ -1303,6 +1306,7 @@ button {
   11% { opacity: 1; transform: translate(-51%, -50%) scale(1.12) rotate(2deg); filter: blur(0) contrast(1.65) saturate(0.7); }
   25% { transform: translate(calc(-50% + 23px), calc(-50% - 5px)) scale(1.34) rotate(-1.5deg); }
   48% { opacity: 0.9; transform: translate(calc(-50% - 16px), calc(-50% + 8px)) scale(1.57) rotate(1deg); }
+  78% { opacity: 0.9; transform: translate(-50%, -50%) scale(1.82); filter: blur(1px) contrast(1.8); }
   100% { opacity: 0; transform: translate(-50%, -50%) scale(2.02); filter: blur(5px) contrast(1.9); }
 }
 
@@ -2158,6 +2162,144 @@ button {
   animation:
     storyTextFade 0.5s ease-out both,
     shockPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes interiorLoadingPulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
+@keyframes medicalBlackout {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Medical documents deliberately reuse the same borderless story language as
+   every other narrative beat. Only the actual CCTV feed keeps a framed UI. */
+.medicalStoryBackdrop {
+  z-index: 70;
+  user-select: text;
+}
+
+.storyModal.medicalStoryModal {
+  z-index: 71;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.storyModal.medicalRulesModal {
+  height: min(88vh, 840px);
+}
+
+.storyText.medicalRulesScroll,
+.storyText.medicalRecordBody {
+  width: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 18px;
+}
+
+.storyText.medicalRulesScroll {
+  flex: 1;
+  display: block;
+}
+
+.storyText p.medicalRule {
+  display: grid;
+  grid-template-columns: 2.2em minmax(0, 1fr);
+  gap: 0;
+  margin: 0 0 18px;
+  text-indent: 0;
+}
+
+.medicalRuleNumber {
+  color: rgba(232, 218, 198, 0.78);
+  font-family: Inter, "Microsoft YaHei", sans-serif;
+  font-weight: 650;
+}
+
+.medicalRuleLines,
+.medicalRuleLine {
+  display: block;
+}
+
+.medicalRuleLine + .medicalRuleLine {
+  margin-top: 5px;
+}
+
+.medicalRuleLine--red {
+  color: #e63b48;
+  font-weight: 750;
+  text-shadow: 0 0 16px rgba(206, 0, 24, 0.52);
+}
+
+.medicalRuleLine--struck {
+  color: rgba(186, 171, 161, 0.46);
+  text-decoration: line-through 2px rgba(188, 15, 31, 0.82);
+  text-decoration-skip-ink: none;
+}
+
+.medicalRuleLine--faded {
+  color: rgba(218, 202, 182, 0.56);
+  font-size: 0.94em;
+}
+
+.medicalRuleLine--corrupt {
+  color: #e2bcc0;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-shadow: -3px 0 rgba(153, 0, 18, 0.7), 3px 0 rgba(86, 0, 12, 0.48);
+  animation: medicalRuleCorrupt 1.9s steps(2, end) infinite;
+}
+
+@keyframes medicalRuleCorrupt {
+  0%, 82%, 100% { transform: translateX(0); filter: blur(0); }
+  86% { transform: translateX(-2px); filter: blur(0.5px); }
+  91% { transform: translateX(3px); filter: blur(0); }
+}
+
+.storyText p.medicalRulesBottomMark {
+  margin: 38px 0 64px;
+  text-align: center;
+  text-indent: 0;
+  letter-spacing: 0.14em;
+}
+
+.choiceButton.medicalStoryContinue {
+  flex: 0 0 auto;
+  width: min(320px, 100%);
+  margin: 20px auto 0;
+}
+
+.storyText p.medicalBleedingName,
+.storyText p.medicalSpecimenCode {
+  text-indent: 0;
+  font-family: "Noto Serif SC", "Songti SC", serif;
+  letter-spacing: 0.1em;
+}
+
+.storyText p.medicalBleedingName {
+  animation: storyTextFade 0.5s ease-out both, medicalTextBleed 1.8s ease both;
+}
+
+.storyModal.medicalCctvTruth {
+  background: transparent;
+}
+
+.medicalCctvChoices {
+  width: min(880px, 100%);
+}
+
+@keyframes medicalTextBleed {
+  from { color: inherit; letter-spacing: 0; filter: blur(1px); }
+  to { color: #d20622; letter-spacing: 0.18em; filter: blur(0); }
+}
+
+@keyframes medicalCctvRoll {
+  from { transform: translateY(-2px); }
+  to { transform: translateY(2px); }
 }
 
 .storyText p.storyHighlight {

@@ -26,10 +26,22 @@ const scenes = {
       "public/models/interiors/baisha/baisha-chase-props.glb",
     ],
   },
+  medical: {
+    version: "medical-top-gameplay-v7",
+    files: [
+      "public/models/interiors/medical-school/medical-top.glb",
+      "public/models/interiors/medical-school/medical-garage.glb",
+      "public/models/interiors/medical-school/medical-basement.glb",
+      "public/models/interiors/medical-school/medical-top-601.glb",
+      "public/models/interiors/medical-school/medical-top-603.glb",
+      "public/models/interiors/medical-school/medical-top-605.glb",
+      "public/models/interiors/medical-school/medical-top-props.glb",
+    ],
+  },
 };
 
 if (requestedScene !== "all" && !(requestedScene in scenes)) {
-  throw new Error(`Unknown scene "${requestedScene}". Use --scene=library, --scene=baisha, or --scene=all.`);
+  throw new Error(`Unknown scene "${requestedScene}". Use --scene=library, --scene=baisha, --scene=medical, or --scene=all.`);
 }
 
 const selectedScenes = requestedScene === "all"

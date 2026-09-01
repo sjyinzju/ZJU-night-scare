@@ -8,6 +8,8 @@ import { useGameStore } from "../store";
 import { JumpscarePipeline } from "../JumpscarePipeline";
 import BaishaDormExperience, { type BaishaDormStage } from "./BaishaDormExperience";
 import { shouldUseBaishaDirectChaseTest } from "./baishaDebug";
+import MedicalTopExperience from "./MedicalTopExperience";
+import type { MedicalTopModal, MedicalTopSnapshot } from "./medicalTopData";
 
 export interface InteriorOverlayProps {
   building: { id: string; name: string; zone?: string };
@@ -22,11 +24,13 @@ export interface InteriorOverlayProps {
   /** Keeps the renderer hidden until authored static visuals are attached. */
   blockUntilAssetReady?: boolean;
   onAssetStateChange?: (state: InteriorAssetState) => void;
+  onMedicalTopComplete?: (detail: { hasFuse: boolean; evidence?: string }) => void;
 }
 
 const JOYSTICK_RADIUS = 56;
 const LIBRARY_STEPS = ["寻找手电筒", "笔记本", "借阅小票", "拾取符咒", "书架异响", "灯下的人", "离开图书馆"];
 const BAISHA_STEPS = ["调查桌上相框", "照片发生异变", "查看阳台", "玻璃外的人影", "浏览校园论坛", "离开寝室"];
+const MEDICAL_TOP_STEPS = ["阅读六层守则", "为病床让行", "核对601记录", "检查603标本", "查看605录像", "返回电梯"];
 type PickupToast = { name: string; detail?: string };
 
 function libraryProgressIndex(sceneId: string, inventory: string[]): number {
@@ -49,6 +53,18 @@ function baishaProgressIndex(stage: BaishaDormStage): number {
   return 5;
 }
 
+function medicalTopStepState(snapshot: MedicalTopSnapshot, index: number): { active: boolean; complete: boolean } {
+  const afterRules = !["notice", "rules"].includes(snapshot.stage);
+  const afterBed = ["rooms", "escape-warning", "escape", "transition"].includes(snapshot.stage);
+  if (index === 0) return { active: ["notice", "rules"].includes(snapshot.stage), complete: afterRules };
+  if (index === 1) return { active: ["bed-blackout", "bed"].includes(snapshot.stage), complete: afterBed };
+  if (index === 2) return { active: snapshot.currentTarget === "601", complete: snapshot.rooms["601"] === "complete" && snapshot.currentTarget !== "601" };
+  if (index === 3) return { active: snapshot.currentTarget === "603" || snapshot.currentTarget === "602", complete: snapshot.rooms["603"] === "complete" && snapshot.currentTarget !== "603" };
+  if (index === 4) return { active: snapshot.currentTarget === "605", complete: snapshot.rooms["605"] === "complete" && snapshot.currentTarget !== "605" };
+  const active = snapshot.currentTarget === "elevator" || (snapshot.stage === "rooms" && snapshot.currentTarget === undefined);
+  return { active, complete: snapshot.stage === "transition" };
+}
+
 /**
  * Full-screen overlay hosting a first-person interior exploration scene.
  * Owns the Interior3D lifecycle: creates it on mount, disposes on unmount.
@@ -63,6 +79,7 @@ export default function InteriorOverlay({
   isMobile = false,
   blockUntilAssetReady = false,
   onAssetStateChange,
+  onMedicalTopComplete,
 }: InteriorOverlayProps): React.ReactElement {
   const hostRef = useRef<HTMLDivElement>(null);
   const floorPlanRef = useRef<HTMLCanvasElement>(null);
@@ -72,6 +89,7 @@ export default function InteriorOverlay({
   const onExitRef = useRef(onExit);
   const onExitTriggerRef = useRef(onExitTrigger);
   const onAssetStateChangeRef = useRef(onAssetStateChange);
+  const onMedicalTopCompleteRef = useRef(onMedicalTopComplete);
   // WebGL 初始化失败（部分低端/受限浏览器无法创建 WebGL 上下文）时降级为提示。
   const [failed, setFailed] = useState(false);
   const [assetState, setAssetState] = useState<InteriorAssetState>("loading");
@@ -87,6 +105,8 @@ export default function InteriorOverlay({
   const [baishaTrigger, setBaishaTrigger] = useState<BaishaGameplayTrigger | null>(null);
   const [baishaStage, setBaishaStage] = useState<BaishaDormStage>("photo_target");
   const [baishaChaseStarted, setBaishaChaseStarted] = useState(false);
+  const [medicalTopSnapshot, setMedicalTopSnapshot] = useState<MedicalTopSnapshot | null>(null);
+  const [medicalTopModal, setMedicalTopModal] = useState<MedicalTopModal | null>(null);
   const baishaEnergyBoost = useGameStore((state) => Boolean(state.storyState.flags.baishaEnergyBoost));
   const scene01Debug = building.id === "medical-library"
     && new URLSearchParams(window.location.search).get("debugScene01") === "1";
@@ -94,6 +114,8 @@ export default function InteriorOverlay({
     && new URLSearchParams(window.location.search).get("baishaGameplayDebug") === "1";
   const baishaChaseOnly = building.id === "dorm-baisha"
     && shouldUseBaishaDirectChaseTest();
+  const medicalGameplayDebug = building.id === "medical-college"
+    && new URLSearchParams(window.location.search).get("medicalGameplayDebug") === "1";
   const concealUntilAuthoredAssetReady = (
     building.id === "dorm-baisha" || building.id === "medical-college"
   ) && assetState !== "ready";
@@ -125,7 +147,8 @@ export default function InteriorOverlay({
 
   useEffect(() => {
     onAssetStateChangeRef.current = onAssetStateChange;
-  }, [onAssetStateChange]);
+    onMedicalTopCompleteRef.current = onMedicalTopComplete;
+  }, [onAssetStateChange, onMedicalTopComplete]);
 
   useEffect(() => {
     onExitRef.current = onExit;
@@ -205,6 +228,15 @@ export default function InteriorOverlay({
         onBaishaExit: () => {
           engineRef.current?.exitPointerLock();
           (onExitTriggerRef.current ?? onExitRef.current)();
+        },
+        onMedicalTopStateChange: setMedicalTopSnapshot,
+        onMedicalTopModal: (modal) => {
+          engineRef.current?.exitPointerLock();
+          setMedicalTopModal(modal);
+        },
+        onMedicalTopComplete: (detail) => {
+          engineRef.current?.exitPointerLock();
+          onMedicalTopCompleteRef.current?.(detail);
         },
       });
       engineRef.current = engine;
@@ -287,7 +319,11 @@ export default function InteriorOverlay({
   }, []);
 
   useEffect(() => {
-    if (building.id !== "medical-library" && building.id !== "dorm-baisha") return;
+    if (
+      building.id !== "medical-library"
+      && building.id !== "dorm-baisha"
+      && building.id !== "medical-college"
+    ) return;
     let frame = 0;
     let lastDraw = 0;
     const draw = (time: number): void => {
@@ -297,8 +333,8 @@ export default function InteriorOverlay({
       const canvas = floorPlanRef.current;
       const snapshot = engineRef.current?.getInteriorMapSnapshot();
       if (!canvas) return;
-      const width = 154;
-      const height = 250;
+      const width = building.id === "medical-college" ? 280 : 154;
+      const height = building.id === "medical-college" ? 150 : 250;
       const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
       if (canvas.width !== width * pixelRatio || canvas.height !== height * pixelRatio) {
         canvas.width = width * pixelRatio;
@@ -393,6 +429,30 @@ export default function InteriorOverlay({
         context.shadowBlur = 10;
         context.fill();
         context.shadowBlur = 0;
+      }
+
+      if (snapshot.labels?.length) {
+        context.save();
+        context.font = "700 11px Microsoft YaHei, sans-serif";
+        context.textAlign = "center";
+        context.textBaseline = "bottom";
+        for (const label of snapshot.labels) {
+          const x = mapX(label.x);
+          const y = mapY(label.z) - 5;
+          context.fillStyle = label.state === "target"
+            ? "#ff2537"
+            : label.state === "complete"
+              ? "#b99a57"
+              : label.state === "abnormal"
+                ? "#ff001d"
+                : "#cbd3d3";
+          context.shadowColor = label.state === "target" || label.state === "abnormal"
+            ? "rgba(255,0,28,.95)"
+            : "rgba(0,0,0,.9)";
+          context.shadowBlur = label.state === "target" || label.state === "abnormal" ? 7 : 3;
+          context.fillText(label.label, x, y);
+        }
+        context.restore();
       }
 
       if (snapshot.ghost?.state === "chase") {
@@ -605,6 +665,53 @@ export default function InteriorOverlay({
         onStageChange={setBaishaStage}
       />
 
+      <MedicalTopExperience
+        active={building.id === "medical-college" && currentSceneId !== "medical_garage"}
+        engineRef={engineRef}
+        snapshot={medicalTopSnapshot}
+        modal={medicalTopModal}
+        onModalClosed={() => setMedicalTopModal(null)}
+      />
+
+      {building.id === "medical-college" && medicalTopSnapshot && (
+        <>
+          <aside style={styles.inventoryRail} aria-label="医学院道具栏">
+            <strong style={styles.sideRailTitle}>道具</strong>
+            {([
+              ["sedative", "蓝色镇静剂", "药", medicalTopSnapshot.sedativeShield, "可抵消一次致命违规"],
+              ["fuse", "备用保险丝", "电", medicalTopSnapshot.hasFuse, "延缓走廊熄灯"],
+            ] as const).map(([id, label, icon, owned, detail]) => (
+              <div key={id} style={{ ...styles.inventorySlot, ...(owned ? styles.inventorySlotOwned : undefined) }}>
+                <i style={styles.inventoryIcon}>{owned ? icon : "·"}</i>
+                <span>
+                  {label}
+                  {owned && <small style={styles.inventorySlotStatus}>{detail}</small>}
+                </span>
+              </div>
+            ))}
+          </aside>
+          <aside style={{ ...styles.storyChain, ...styles.medicalStoryChain }} aria-label="医学院顶层剧情链">
+            <strong style={styles.sideRailTitle}>剧情链</strong>
+            {MEDICAL_TOP_STEPS.map((label, index) => {
+              const state = medicalTopStepState(medicalTopSnapshot, index);
+              return (
+                <div
+                  key={label}
+                  style={{
+                    ...styles.storyStep,
+                    ...(state.complete ? styles.storyStepComplete : undefined),
+                    ...(state.active ? styles.storyStepActive : undefined),
+                  }}
+                >
+                  <i style={styles.storyStepDot} />
+                  <span>{label}</span>
+                </div>
+              );
+            })}
+          </aside>
+        </>
+      )}
+
       {/* Mobile look surface covers the right half of the screen. */}
       {isMobile && (
         <div
@@ -617,16 +724,36 @@ export default function InteriorOverlay({
       )}
 
       {/* Top-right authored floor plan. Hidden story/scare points are never previewed. */}
-      {(building.id === "medical-library" || building.id === "dorm-baisha") && (
-        <div style={styles.floorPlan} aria-label={`${building.name}平面图`}>
+      {(building.id === "medical-library" || building.id === "dorm-baisha" || building.id === "medical-college") && (
+        <div
+          style={{
+            ...styles.floorPlan,
+            ...(building.id === "medical-college" ? styles.medicalFloorPlan : undefined),
+          }}
+          aria-label={`${building.name}平面图`}
+        >
           <div style={styles.floorPlanTitle}>
-            <strong>{building.id === "medical-library" ? "农医馆" : "白沙宿舍"}</strong>
-            <span>平面图</span>
+            <strong>
+              {building.id === "medical-library"
+                ? "农医馆"
+                : building.id === "dorm-baisha"
+                  ? "白沙宿舍"
+                  : "医学院"}
+            </strong>
+            <span>{building.id === "medical-college" ? "当前层平面图" : "平面图"}</span>
           </div>
-          <canvas ref={floorPlanRef} style={styles.floorPlanCanvas} />
+          <canvas
+            ref={floorPlanRef}
+            style={{
+              ...styles.floorPlanCanvas,
+              ...(building.id === "medical-college" ? styles.medicalFloorPlanCanvas : undefined),
+            }}
+          />
           <div style={styles.floorPlanLegend}>
             <span><i style={{ ...styles.legendSwatch, background: "#d2dce0" }} />墙体</span>
-            <span><i style={{ ...styles.legendSwatch, background: "#a68b5a" }} />{building.id === "medical-library" ? "书架" : "家具"}</span>
+            <span><i style={{ ...styles.legendSwatch, background: "#a68b5a" }} />
+              {building.id === "medical-library" ? "书架" : building.id === "medical-college" ? "障碍" : "家具"}
+            </span>
             <span><i style={styles.legendDot} />你</span>
           </div>
         </div>
@@ -719,9 +846,14 @@ export default function InteriorOverlay({
           </aside>
         </>
       )}
-      {building.id !== "medical-library" && building.id !== "dorm-baisha" && (
+      {building.id !== "medical-library" && building.id !== "dorm-baisha" && building.id !== "medical-college" && (
         <button
-          style={{ ...styles.exitBtn, ...styles.exitBtnBelowMap, ...(canExit ? undefined : styles.exitBtnDisabled) }}
+          style={{
+            ...styles.exitBtn,
+            ...styles.exitBtnBelowMap,
+            ...(building.id === "medical-college" ? styles.medicalExitBtnBelowMap : undefined),
+            ...(canExit ? undefined : styles.exitBtnDisabled),
+          }}
           onClick={handleExit}
           disabled={!canExit}
         >
@@ -729,13 +861,15 @@ export default function InteriorOverlay({
         </button>
       )}
 
-      {(scene01Debug || baishaGameplayDebug) && (
+      {(scene01Debug || baishaGameplayDebug || medicalGameplayDebug) && (
         <button
           type="button"
           style={styles.debugTargetButton}
           aria-label="调试前往当前目标"
           onClick={() => setDebugMessage(
-            (baishaGameplayDebug
+            (medicalGameplayDebug
+              ? engineRef.current?.debugTeleportToMedicalTarget()
+              : baishaGameplayDebug
               ? engineRef.current?.debugTeleportToBaishaTarget()
               : engineRef.current?.debugTeleportToActiveTarget())
               ?? "场景仍在加载",
@@ -921,6 +1055,17 @@ const styles: Record<string, CSSProperties> = {
     width: 154,
     height: 250,
   },
+  medicalFloorPlan: {
+    width: 304,
+    height: 212,
+  },
+  medicalFloorPlanCanvas: {
+    width: 280,
+    height: 150,
+  },
+  medicalExitBtnBelowMap: {
+    top: 244,
+  },
   floorPlanLegend: {
     height: 17,
     display: "flex",
@@ -995,6 +1140,10 @@ const styles: Record<string, CSSProperties> = {
     background: "rgba(5, 8, 11, 0.78)",
     boxShadow: "0 12px 30px rgba(0,0,0,0.48)",
     backdropFilter: "blur(7px)",
+  },
+  medicalStoryChain: {
+    top: 244,
+    width: 196,
   },
   storyStep: {
     position: "relative",

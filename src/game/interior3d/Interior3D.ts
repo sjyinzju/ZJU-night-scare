@@ -20,15 +20,36 @@ import {
   getMedicalInteriorSegment,
   getInteriorAssetObject,
   loadInteriorAsset,
+  loadMedicalTopAuxiliary,
+  preloadMedicalTopAuxiliary,
   preloadNextMedicalInteriorSegment,
   type InteriorAssetHandle,
   type InteriorAssetMeta,
+  type MedicalTopAuxiliaryHandle,
+  type MedicalTopGameplayMeta,
+  type MedicalTopRoomId,
   type MedicalInteriorSegment,
 } from "./InteriorAssetLoader";
 import type { InteriorCollisionMap, InteriorMapObstacle } from "./InteriorCollisionMap";
-import { playBaishaThunder, playLibraryThunder, startLibraryStorm, stopLibraryStorm } from "../audio/proceduralAudio";
+import {
+  playBaishaThunder,
+  playLibraryThunder,
+  playMedicalBedPass,
+  playMedicalElevatorChime,
+  playMedicalKnocks,
+  playMedicalLightBurst,
+  startLibraryStorm,
+  stopLibraryStorm,
+} from "../audio/proceduralAudio";
 import { JumpscarePipeline } from "../JumpscarePipeline";
 import { pickSeeded } from "./seededRandom";
+import {
+  rollMedicalTop,
+  type MedicalTopModal,
+  type MedicalTopRoomState,
+  type MedicalTopSnapshot,
+  type MedicalTopStage,
+} from "./medicalTopData";
 
 export type InteriorAssetState = "loading" | "ready" | "failed";
 export type BaishaGameplayPhase = "photo" | "balcony" | "computer" | "paused" | "complete";
@@ -60,6 +81,33 @@ function cutObstacleByClearZone(obstacle: InteriorMapObstacle, zone: NavigationC
   return pieces;
 }
 
+function segmentHitsObstacleBeforeTarget(
+  fromX: number,
+  fromZ: number,
+  toX: number,
+  toZ: number,
+  obstacle: AABB,
+  targetCutoff = 0.94,
+): boolean {
+  if (obstacle.isActive && !obstacle.isActive()) return false;
+  const dx = toX - fromX;
+  const dz = toZ - fromZ;
+  let minT = 0;
+  let maxT = targetCutoff;
+  const clipAxis = (origin: number, delta: number, min: number, max: number): boolean => {
+    if (Math.abs(delta) < 1e-6) return origin >= min && origin <= max;
+    const first = (min - origin) / delta;
+    const second = (max - origin) / delta;
+    minT = Math.max(minT, Math.min(first, second));
+    maxT = Math.min(maxT, Math.max(first, second));
+    return minT <= maxT;
+  };
+  return clipAxis(fromX, dx, obstacle.minX, obstacle.maxX)
+    && clipAxis(fromZ, dz, obstacle.minZ, obstacle.maxZ)
+    && maxT >= 0
+    && minT <= targetCutoff;
+}
+
 export interface InteriorMapSnapshot {
   bounds: InteriorCollisionMap["bounds"];
   obstacles: InteriorMapObstacle[];
@@ -69,7 +117,21 @@ export interface InteriorMapSnapshot {
   fallenPerson?: { x: number; z: number };
   exitSegment?: { minX: number; maxX: number; z: number; color?: "red" | "green" };
   layoutPaths?: Array<Array<{ x: number; z: number }>>;
+  labels?: Array<{
+    id: string;
+    label: string;
+    x: number;
+    z: number;
+    state: "normal" | "target" | "complete" | "abnormal";
+  }>;
 }
+
+const MEDICAL_TOP_INTERIOR_MAP_BOUNDS: InteriorCollisionMap["bounds"] = {
+  minX: -19.4,
+  maxX: 19.4,
+  minZ: -4.8,
+  maxZ: 7.4,
+};
 
 export interface Interior3DOptions {
   /** Element the WebGL canvas is appended into. Sized to fill it. */
@@ -106,6 +168,12 @@ export interface Interior3DOptions {
   onBaishaCapture?: () => void;
   /** Reports that the player crossed the two-door true exit. */
   onBaishaExit?: () => void;
+  /** Reports the complete top-floor rules-game state for HUD/minimap rendering. */
+  onMedicalTopStateChange?: (snapshot: MedicalTopSnapshot) => void;
+  /** Opens an authored rules/document/CCTV presentation in React. */
+  onMedicalTopModal?: (modal: MedicalTopModal) => void;
+  /** The elevator was reached before the last lamp died. */
+  onMedicalTopComplete?: (detail: { hasFuse: boolean; evidence?: string }) => void;
 }
 
 const DEFAULT_PLAYER_RADIUS = 0.32;
@@ -208,6 +276,9 @@ export class Interior3D {
   private readonly onBaishaChaseStart?: () => void;
   private readonly onBaishaCapture?: () => void;
   private readonly onBaishaExit?: () => void;
+  private readonly onMedicalTopStateChange?: (snapshot: MedicalTopSnapshot) => void;
+  private readonly onMedicalTopModal?: (modal: MedicalTopModal) => void;
+  private readonly onMedicalTopComplete?: (detail: { hasFuse: boolean; evidence?: string }) => void;
   private runtimeStamina = 100;
   private persistedStamina = 100;
   private staminaStoreSyncElapsed = 0;
@@ -295,6 +366,66 @@ export class Interior3D {
   private readonly baishaShadowCameraQuaternion = new THREE.Quaternion(Number.NaN, Number.NaN, Number.NaN, Number.NaN);
   private gameplayPaused = false;
 
+  private medicalTopMeta?: MedicalTopGameplayMeta;
+  private medicalTopStage: MedicalTopStage = "notice";
+  private medicalTopStageStartedAt = 0;
+  private medicalTopViolations = 0;
+  private medicalTopSedativeShield = false;
+  private medicalTopHasFuse = false;
+  private medicalTopCurrentTarget: MedicalTopSnapshot["currentTarget"] = "notice";
+  private medicalTopRoomStates: Record<MedicalTopRoomId, MedicalTopRoomState> = {
+    "601": "sealed",
+    "603": "sealed",
+    "605": "sealed",
+  };
+  private medicalTopRoomLabels: Record<MedicalTopRoomId, string> = {
+    "601": "601",
+    "603": "603",
+    "605": "605",
+  };
+  private medicalTopRolls?: ReturnType<typeof rollMedicalTop>;
+  private readonly medicalTopRoomAssets = new Map<MedicalTopRoomId, MedicalTopAuxiliaryHandle>();
+  private readonly medicalTopRoomLoads = new Map<MedicalTopRoomId, Promise<void>>();
+  private readonly medicalTopRoomColliders = new Map<MedicalTopRoomId, InteriorMapObstacle[]>();
+  private medicalTopPropsAsset?: MedicalTopAuxiliaryHandle;
+  private medicalTopBed?: THREE.Object3D;
+  private medicalTopBoardGlow?: THREE.PointLight;
+  private medicalTopBedLight?: THREE.PointLight;
+  private medicalTopRoomShell?: THREE.Group;
+  private readonly medicalTopDoorPlates = new Map<MedicalTopRoomId, THREE.Mesh>();
+  private readonly medicalTopDoorBlockers = new Map<MedicalTopRoomId, THREE.Mesh>();
+  private readonly medicalTopClueGlows = new Map<string, { group: THREE.Group; light: THREE.PointLight }>();
+  private readonly medicalTopFixtures: Array<{
+    object: THREE.Object3D;
+    materials: THREE.MeshStandardMaterial[];
+    light: THREE.PointLight;
+    x: number;
+    active?: boolean;
+    bedPulse?: boolean;
+  }> = [];
+  private medicalTopLampOn?: boolean;
+  private medicalTopLampOffCount = -1;
+  private medicalTopLampBedPulse?: boolean;
+  private medicalTopBaseColliders?: AABB[];
+  private medicalTopBaseMapObstacles?: InteriorMapObstacle[];
+  private medicalTopBedSampled = -1;
+  private medicalTopLastBedVisibleIndex = -1;
+  private medicalTop601KnockResolved = false;
+  private medicalTop601KnockPending?: { count: 2 | 3; resolveAt: number };
+  private medicalTopForced601 = false;
+  private medicalTop601Visits = 0;
+  private medicalTopSkullChecked = false;
+  private medicalTopSedativeTaken = false;
+  private medicalTopFuseTaken = false;
+  private medicalTopDoorScareArmed = false;
+  private medicalTopDoorScareTriggered = false;
+  private medicalTopAwaitingCorridor = false;
+  private medicalTopLoadingText?: string;
+  private medicalTopPendingOpen?: MedicalTopRoomId;
+  private medicalTopRecovery?: { at: number; checkpoint: "bed" | "escape" | "rooms"; action?: "force601" };
+  private medicalTopEscapeOffCount = 0;
+  private medicalTopEvidence?: string;
+
   // ── New movement architecture ──
   private readonly inputManager: InputManager;
   private readonly cameraController: CameraController;
@@ -318,6 +449,8 @@ export class Interior3D {
   private perfStaminaWrites = 0;
   private perfCollisionCalls = 0;
   private perfPenetrationScans = 0;
+  private perfMedicalLampTransitions = 0;
+  private perfMedicalLampWrites = 0;
 
   // Bound handlers (kept so they can be removed on dispose).
   private readonly onResize = () => this.resize();
@@ -363,6 +496,9 @@ export class Interior3D {
     this.onBaishaChaseStart = options.onBaishaChaseStart;
     this.onBaishaCapture = options.onBaishaCapture;
     this.onBaishaExit = options.onBaishaExit;
+    this.onMedicalTopStateChange = options.onMedicalTopStateChange;
+    this.onMedicalTopModal = options.onMedicalTopModal;
+    this.onMedicalTopComplete = options.onMedicalTopComplete;
     // Review-only noclip remains available for inspecting the Baisha asset.
     // The medical school used to need it because the teaching floor plate sat
     // inside the collision slice; the loader now shifts the asset down 0.5 m
@@ -579,6 +715,64 @@ export class Interior3D {
     this.ePressed = false;
   }
 
+  /** Called by the rules overlay after bottom + hidden three-second hold. */
+  completeMedicalTopRules(): void {
+    if (!this.medicalTopMeta || this.medicalTopStage !== "rules") return;
+    this.medicalTopStage = "bed-blackout";
+    this.medicalTopStageStartedAt = this.clock.elapsedTime;
+    this.medicalTopBedSampled = -1;
+    this.medicalTopLastBedVisibleIndex = -1;
+    if (this.medicalTopBed) this.medicalTopBed.visible = false;
+    this.setGameplayPaused(false);
+    this.emitMedicalTopState();
+  }
+
+  /** Close the current 601/603 document and advance its authoritative phase. */
+  completeMedicalTopDocument(kind: "record" | "skull"): void {
+    if (!this.medicalTopMeta || this.medicalTopStage !== "rooms") return;
+    if (kind === "record" && this.medicalTopCurrentTarget === "601") {
+      this.medicalTop601Visits++;
+      this.medicalTopRoomStates["601"] = "complete";
+      this.advanceMedicalAfter601();
+    } else if (kind === "skull" && this.medicalTopCurrentTarget === "603") {
+      this.medicalTopSkullChecked = true;
+      if (this.medicalTopRolls?.abnormalTag) this.medicalTopDoorScareArmed = true;
+      this.tryCompleteMedical603();
+    }
+    this.setGameplayPaused(false);
+    this.updateMedicalTopTargets();
+    this.emitMedicalTopState();
+  }
+
+  /** Complete the non-skippable CCTV sequence and persist its chosen evidence. */
+  completeMedicalTopCctv(evidence: string): void {
+    if (!this.medicalTopMeta || this.medicalTopStage !== "rooms" || this.medicalTopCurrentTarget !== "605") return;
+    this.medicalTopEvidence = evidence;
+    this.medicalTopRoomStates["605"] = "complete";
+    this.setGameplayPaused(false);
+    this.advanceMedicalAfter605();
+    this.updateMedicalTopTargets();
+    this.emitMedicalTopState();
+  }
+
+  getMedicalTopSnapshot(): MedicalTopSnapshot | null {
+    if (!this.medicalTopRolls || !this.medicalTopMeta || this.medicalSegment !== "top") return null;
+    return {
+      stage: this.medicalTopStage,
+      route: this.medicalTopRolls.route,
+      violations: this.medicalTopViolations,
+      sedativeShield: this.medicalTopSedativeShield,
+      hasFuse: this.medicalTopHasFuse,
+      currentTarget: this.medicalTopCurrentTarget,
+      rooms: { ...this.medicalTopRoomStates },
+      roomLabels: { ...this.medicalTopRoomLabels },
+      abnormalTag: this.medicalTopRolls.abnormalTag,
+      fuseAvailable: this.medicalTopRolls.fuseAvailable,
+      cctvPack: this.medicalTopRolls.cctvPack,
+      loadingText: this.medicalTopLoadingText,
+    };
+  }
+
   setBaishaGameplayPhase(phase: BaishaGameplayPhase): void {
     if (this.baishaGameplayPhase === phase) return;
     this.baishaGameplayPhase = phase;
@@ -675,7 +869,10 @@ export class Interior3D {
   /** Live position plus the authored model's floor-plan obstacles. */
   getInteriorMapSnapshot(): InteriorMapSnapshot | null {
     const collisionMap = this.assetHandle?.collisionMap;
-    if (!collisionMap || (this.roomKind !== "library" && this.roomKind !== "dorm")) return null;
+    if (
+      !collisionMap
+      || (this.roomKind !== "library" && this.roomKind !== "dorm" && this.roomKind !== "medical")
+    ) return null;
     const sceneId = this.getStorySceneId?.();
     let objective: InteriorMapSnapshot["objective"];
     if (this.roomKind === "library" && sceneId === "library_intro") {
@@ -703,6 +900,16 @@ export class Interior3D {
             ? gameplay?.computer
             : undefined;
       if (target) objective = { x: target.x, z: target.z };
+    } else if (this.roomKind === "medical" && this.medicalSegment === "top" && this.medicalTopMeta) {
+      const target = this.medicalTopCurrentTarget;
+      if (target === "notice") {
+        objective = { x: this.medicalTopMeta.noticeBoard.x, z: this.medicalTopMeta.noticeBoard.z };
+      } else if (target === "elevator") {
+        objective = { x: this.medicalTopMeta.elevator.x, z: this.medicalTopMeta.elevator.z };
+      } else if (target === "601" || target === "603" || target === "605" || target === "602") {
+        const roomId: MedicalTopRoomId = target === "602" ? "603" : target;
+        objective = { x: this.medicalTopMeta.rooms[roomId].door.x, z: this.medicalTopMeta.rooms[roomId].door.z };
+      }
     }
     const fallReveal = this.assetHandle?.meta?.fallReveal;
     const baishaMinimap = this.roomKind === "dorm"
@@ -713,9 +920,18 @@ export class Interior3D {
         ? { ...baishaMinimap.trueExitSegment, color: "red" as const }
         : { ...baishaMinimap.falseExitSegment, color: "green" as const }
       : undefined;
+    const mapBounds = this.medicalSegment === "top"
+      ? MEDICAL_TOP_INTERIOR_MAP_BOUNDS
+      : collisionMap.bounds;
+    const mapObstacles = (this.interiorMapObstacles ?? collisionMap.obstacles).filter((obstacle) => (
+      obstacle.maxX >= mapBounds.minX
+      && obstacle.minX <= mapBounds.maxX
+      && obstacle.maxZ >= mapBounds.minZ
+      && obstacle.minZ <= mapBounds.maxZ
+    ));
     return {
-      bounds: collisionMap.bounds,
-      obstacles: this.interiorMapObstacles ?? collisionMap.obstacles,
+      bounds: mapBounds,
+      obstacles: mapObstacles,
       player: { x: this.camera.position.x, z: this.camera.position.z },
       objective,
       ghost: this.baishaGhostState === "chase"
@@ -731,6 +947,21 @@ export class Interior3D {
       exitSegment: baishaExitSegment
         ?? (sceneId === "dorm_baiqiu" ? this.assetHandle?.meta?.exitSegment : undefined),
       layoutPaths: baishaMinimap?.paths,
+      labels: this.roomKind === "medical" && this.medicalSegment === "top" && this.medicalTopMeta
+        ? (["601", "603", "605"] as const).map((roomId) => {
+            const target = this.medicalTopCurrentTarget === roomId
+              || (roomId === "603" && this.medicalTopCurrentTarget === "602");
+            const complete = this.medicalTopRoomStates[roomId] === "complete" && !target;
+            const abnormal = roomId === "603" && this.medicalTopRoomLabels[roomId] === "602";
+            return {
+              id: roomId,
+              label: this.medicalTopRoomLabels[roomId],
+              x: this.medicalTopMeta!.rooms[roomId].door.x,
+              z: this.medicalTopMeta!.rooms[roomId].door.z,
+              state: abnormal ? "abnormal" as const : target ? "target" as const : complete ? "complete" as const : "normal" as const,
+            };
+          })
+        : undefined,
     };
   }
 
@@ -817,6 +1048,63 @@ export class Interior3D {
       this.cameraController.setLook(Math.atan2(-dx, -dz), -0.08);
     }
     return `已前往：${label}`;
+  }
+
+  debugTeleportToMedicalTarget(): string {
+    const meta = this.medicalTopMeta;
+    if (!meta || this.medicalSegment !== "top") return "当前场景不是医学院顶层";
+    let x = this.camera.position.x;
+    let z = this.camera.position.z;
+    let targetX = x;
+    let targetZ = z - 1;
+    const target = this.medicalTopCurrentTarget;
+    if (this.medicalTopStage === "notice" || this.medicalTopStage === "rules") {
+      x = meta.noticeBoard.x;
+      z = meta.noticeBoard.z + 0.95;
+      targetX = meta.noticeBoard.x;
+      targetZ = meta.noticeBoard.z;
+    } else if (this.medicalTopStage === "bed" || this.medicalTopStage === "bed-blackout") {
+      x = 0;
+      z = meta.corridor.minZ + 0.28;
+      targetX = 0;
+      targetZ = 0;
+    } else if (target === "elevator") {
+      x = meta.elevator.x + 0.9;
+      z = meta.elevator.z;
+      targetX = meta.elevator.x;
+      targetZ = meta.elevator.z;
+    } else if (this.medicalTopStage === "rooms" && this.medicalTopAwaitingCorridor) {
+      const checkpoint = meta.checkpoints.escape;
+      x = checkpoint.x;
+      z = checkpoint.z;
+      targetX = meta.elevator.x;
+      targetZ = meta.elevator.z;
+    } else if (target === "601" || target === "603" || target === "605" || target === "602") {
+      const roomId: MedicalTopRoomId = target === "602" ? "603" : target;
+      const room = meta.rooms[roomId];
+      const firstIncomplete = room.clueSpots.find((clue) => {
+        if (roomId === "601") return true;
+        if (roomId === "605") return true;
+        if (clue.id === "skull") return !this.medicalTopSkullChecked;
+        if (clue.id === "sedative") return !this.medicalTopSedativeTaken;
+        return this.medicalTopRolls?.fuseAvailable && !this.medicalTopFuseTaken;
+      });
+      if (this.medicalTopRoomStates[roomId] === "open" && firstIncomplete) {
+        x = firstIncomplete.x;
+        z = firstIncomplete.z - 0.55;
+        targetX = firstIncomplete.x;
+        targetZ = firstIncomplete.z;
+      } else {
+        x = room.door.x;
+        z = room.door.z - 0.9;
+        targetX = room.door.x;
+        targetZ = room.door.z;
+      }
+    }
+    this.camera.position.set(x, this.room.floorHeightAt(x, z) + this.crouchState.eyeHeight, z);
+    this.cameraController.setLook(Math.atan2(-(targetX - x), -(targetZ - z)), -0.06);
+    this.resolvePenetration();
+    return `已前往医学院目标：${target ?? this.medicalTopStage}`;
   }
 
   debugTeleportToBaishaTarget(): string {
@@ -965,6 +1253,7 @@ export class Interior3D {
 
   /** Nearest door interaction hint text, or "" when nothing is in range. */
   get doorHint(): string {
+    if (this.medicalTopMeta && this.medicalSegment === "top") return this.medicalTopInteractionHint();
     const door = this.findNearestDoor();
     if (!door) return "";
     return door.interactionLabel + " — 按 E";
@@ -1035,6 +1324,51 @@ export class Interior3D {
     this.exitPointerLock();
 
     if (this.debugColliders) this.toggleColliderDebug();
+    for (const handle of this.medicalTopRoomAssets.values()) handle.dispose();
+    this.medicalTopRoomAssets.clear();
+    this.medicalTopPropsAsset?.dispose();
+    this.medicalTopPropsAsset = undefined;
+    if (this.medicalTopBedLight) {
+      this.scene.remove(this.medicalTopBedLight);
+      this.medicalTopBedLight.dispose();
+      this.medicalTopBedLight = undefined;
+    }
+    for (const plate of this.medicalTopDoorPlates.values()) {
+      const material = plate.material as THREE.MeshStandardMaterial;
+      material.map?.dispose();
+      material.dispose();
+      plate.geometry.dispose();
+    }
+    this.medicalTopDoorPlates.clear();
+    for (const blocker of this.medicalTopDoorBlockers.values()) {
+      blocker.geometry.dispose();
+      const materials = Array.isArray(blocker.material) ? blocker.material : [blocker.material];
+      materials.forEach((material) => material.dispose());
+    }
+    this.medicalTopDoorBlockers.clear();
+    if (this.medicalTopRoomShell) {
+      this.medicalTopRoomShell.traverse((object) => {
+        const mesh = object as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        mesh.geometry.dispose();
+        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        materials.forEach((material) => material.dispose());
+      });
+      this.scene.remove(this.medicalTopRoomShell);
+      this.medicalTopRoomShell = undefined;
+    }
+    for (const glow of this.medicalTopClueGlows.values()) {
+      glow.group.traverse((object) => {
+        const mesh = object as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        mesh.geometry.dispose();
+        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        materials.forEach((material) => material.dispose());
+      });
+    }
+    this.medicalTopClueGlows.clear();
+    for (const fixture of this.medicalTopFixtures) this.scene.remove(fixture.light);
+    this.medicalTopFixtures.length = 0;
     this.assetHandle?.dispose();
     this.assetHandle = undefined;
     this.assetPickupVisuals.clear();
@@ -1112,6 +1446,7 @@ export class Interior3D {
       this.applyAssetPresentation(handle);
       this.bindInteriorAssetMetadata(handle);
       this.addAssetCeilingLights(handle);
+      this.setupMedicalTopGameplay(handle);
       this.addBaishaLighting(handle);
       this.setupBaishaGameplay(handle);
       this.suppressLegacyGuidance = this.roomKind === "library" || !handle.meta;
@@ -1237,6 +1572,47 @@ export class Interior3D {
     this.cameraController.setLook(handle.viewpoint.yaw, playablePitch);
   }
 
+  private medicalTopInteractionHint(): string {
+    const meta = this.medicalTopMeta;
+    if (!meta || this.gameplayPaused) return "";
+    const p = this.camera.position;
+    const near = (x: number, z: number, radius: number) => (p.x - x) ** 2 + (p.z - z) ** 2 <= radius ** 2;
+    if (this.medicalTopStage === "notice" && near(meta.noticeBoard.x, meta.noticeBoard.z, meta.noticeBoard.radius)) {
+      return "阅读医学院守则 — 按 E";
+    }
+    if (this.medicalTopStage !== "rooms") return "";
+    for (const roomId of ["601", "603", "605"] as const) {
+      const room = meta.rooms[roomId];
+      if (near(room.door.x, room.door.z, room.door.radius)) {
+        if (this.medicalTopRoomStates[roomId] === "open") continue;
+        if (this.medicalTopCurrentTarget === roomId) {
+          return this.medicalTopRoomStates[roomId] === "loading"
+            ? `${this.medicalTopRoomLabels[roomId]}室 / 门后正在加载`
+            : `靠近${this.medicalTopRoomLabels[roomId]}室，门会自行开启`;
+        }
+        return `检查${this.medicalTopRoomLabels[roomId]}室 — 按 E`;
+      }
+    }
+    const target = this.medicalTopCurrentTarget;
+    if (target === "601" && this.medicalTopRoomStates["601"] === "open") {
+      const clue = meta.rooms["601"].clueSpots[0];
+      if (near(clue.x, clue.z, clue.radius)) return "巡查记录上的红光正在渗开";
+    }
+    if ((target === "603" || (this.medicalTopSkullChecked && !this.medicalTopFuseTaken)) && this.medicalTopRoomStates["603"] !== "sealed") {
+      for (const clue of meta.rooms["603"].clueSpots) {
+        if (!near(clue.x, clue.z, clue.radius)) continue;
+        if (clue.id === "skull" && !this.medicalTopSkullChecked) return "标签上的入库时间是今晚";
+        if (clue.id === "sedative" && this.medicalTopSkullChecked && !this.medicalTopSedativeTaken) return "蓝色镇静剂已进入随身道具";
+        if (clue.id === "fuse" && this.medicalTopSkullChecked && this.medicalTopRolls?.fuseAvailable && !this.medicalTopFuseTaken) return "备用保险丝已进入随身道具";
+      }
+    }
+    if (target === "605" && this.medicalTopRoomStates["605"] === "open") {
+      const clue = meta.rooms["605"].clueSpots[0];
+      if (near(clue.x, clue.z, clue.radius)) return "放映机自行转动起来";
+    }
+    return "";
+  }
+
   private preloadMedicalSegmentAfter(current: MedicalInteriorSegment): void {
     if (this.medicalPreloadsStarted.has(current)) return;
     this.medicalPreloadsStarted.add(current);
@@ -1248,6 +1624,978 @@ export class Interior3D {
       this.medicalPreloadsStarted.delete(current);
       console.warn(`[Interior3D] Medical ${current} follow-up preload was unavailable; entry will retry.`, error);
     });
+  }
+
+  private setupMedicalTopGameplay(handle: InteriorAssetHandle): void {
+    if (this.medicalSegment !== "top" || !handle.meta?.medicalTopGameplay) return;
+    this.medicalTopMeta = handle.meta.medicalTopGameplay;
+    this.medicalTopRolls = rollMedicalTop(this.getSessionSeed?.() ?? 1);
+    this.renderer.toneMappingExposure = 0.82;
+    this.ambientLight.color.setHex(0x32070c);
+    this.fillLight.color.setHex(0x401017);
+    this.fillLight.groundColor.setHex(0x080204);
+    this.nearFillLight.color.setHex(0x8c2631);
+    this.medicalTopStage = "notice";
+    this.medicalTopStageStartedAt = this.clock.elapsedTime;
+    this.medicalTopCurrentTarget = "notice";
+    this.configureMedicalTopDoorPortals(handle.root);
+
+    const board = this.medicalTopMeta.noticeBoard;
+    this.medicalTopBoardGlow = new THREE.PointLight(0x8d0010, 7.2, 5.4, 1.8);
+    this.medicalTopBoardGlow.position.set(board.x, board.y + 0.35, board.z + 0.25);
+    this.scene.add(this.medicalTopBoardGlow);
+    this.medicalTopBedLight = new THREE.PointLight(0xb81020, 10.5, 8.5, 1.45);
+    this.medicalTopBedLight.visible = false;
+    this.scene.add(this.medicalTopBedLight);
+
+    for (const roomId of ["601", "603", "605"] as const) {
+      const door = this.medicalTopMeta.rooms[roomId].door;
+      const blocker = new THREE.Mesh(
+        new THREE.BoxGeometry(1.08, 2.2, 0.1),
+        new THREE.MeshStandardMaterial({ color: 0x2b120d, roughness: 0.72, metalness: 0.02 }),
+      );
+      blocker.name = `medical_room_${roomId}_sealed_door`;
+      blocker.position.set(door.x, 1.1, door.z);
+      // The authored GLB already owns the visible door. This mesh is collision
+      // bookkeeping only; rendering both caused the thin/doubled door artefact.
+      blocker.visible = false;
+      this.scene.add(blocker);
+      this.medicalTopDoorBlockers.set(roomId, blocker);
+      const sealedDoorCollider: InteriorMapObstacle = {
+        minX: door.x - 0.54,
+        maxX: door.x + 0.54,
+        minZ: door.z - 0.13,
+        maxZ: door.z + 0.13,
+        kind: "wall",
+      };
+      this.colliders.push(sealedDoorCollider);
+      this.interiorMapObstacles = this.interiorMapObstacles ?? [...handle.collisionMap.obstacles];
+      this.interiorMapObstacles.push(sealedDoorCollider);
+      const plate = this.createMedicalDoorPlate(roomId);
+      plate.position.set(door.x, 2.42, door.z - 0.09);
+      this.scene.add(plate);
+      this.medicalTopDoorPlates.set(roomId, plate);
+      const authoredDoor = getInteriorAssetObject(handle.root, this.medicalTopMeta.rooms[roomId].doorVisualName);
+      if (authoredDoor) authoredDoor.visible = true;
+      for (const clue of this.medicalTopMeta.rooms[roomId].clueSpots) {
+        this.medicalTopClueGlows.set(`${roomId}:${clue.id}`, this.createMedicalClueGlow(clue.x, clue.y, clue.z));
+      }
+    }
+    this.createMedicalTopRoomShell();
+    // The restart checkpoint must include the authored corridor plus our three
+    // sealed-room collision proxies and metadata-authored room separators.
+    this.medicalTopBaseColliders = [...this.colliders];
+    this.medicalTopBaseMapObstacles = [...(this.interiorMapObstacles ?? handle.collisionMap.obstacles)];
+    this.staticColliderSet = false;
+
+    const fixtureEntries: typeof this.medicalTopFixtures = [];
+    for (const name of this.medicalTopMeta.fixtureNames) {
+      const object = getInteriorAssetObject(handle.root, name);
+      if (!object) continue;
+      const materials: THREE.MeshStandardMaterial[] = [];
+      object.traverse((child) => {
+        const mesh = child as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        const sourceMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        const cloned = sourceMaterials.map((source) => {
+          const material = source.clone() as THREE.MeshStandardMaterial;
+          material.color.setHex(0x4b0007);
+          material.emissive = new THREE.Color(0x8e000d);
+          material.emissiveIntensity = 2.65;
+          material.needsUpdate = true;
+          materials.push(material);
+          return material;
+        });
+        mesh.material = Array.isArray(mesh.material) ? cloned : cloned[0];
+      });
+      const position = object.getWorldPosition(new THREE.Vector3());
+      const light = new THREE.PointLight(0x8f000d, 2.15, 5.8, 1.95);
+      light.position.set(position.x, Math.max(2.2, position.y - 0.2), position.z);
+      this.scene.add(light);
+      fixtureEntries.push({ object, materials, light, x: position.x });
+    }
+    fixtureEntries.sort((left, right) => right.x - left.x);
+    this.medicalTopFixtures.push(...fixtureEntries);
+    this.medicalTopLampOn = undefined;
+    this.medicalTopLampOffCount = -1;
+    this.medicalTopLampBedPulse = undefined;
+    this.setMedicalTopLampState(true, 0);
+
+    void this.loadMedicalTopProps();
+    this.updateMedicalTopTargets();
+    this.emitMedicalTopState();
+  }
+
+  private createMedicalDoorPlate(label: string): THREE.Mesh {
+    const canvas = document.createElement("canvas");
+    canvas.width = 384;
+    canvas.height = 160;
+    const context = canvas.getContext("2d");
+    if (context) {
+      context.fillStyle = "#150306";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.strokeStyle = "#7d111d";
+      context.lineWidth = 10;
+      context.strokeRect(8, 8, canvas.width - 16, canvas.height - 16);
+      context.fillStyle = "#e4d6c2";
+      context.font = "700 82px Microsoft YaHei, sans-serif";
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillText(label, canvas.width / 2, canvas.height / 2 + 2);
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const material = new THREE.MeshStandardMaterial({
+      map: texture,
+      emissiveMap: texture,
+      emissive: new THREE.Color(0x520008),
+      emissiveIntensity: 0.5,
+      roughness: 0.72,
+    });
+    const plate = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.24, 0.035), material);
+    plate.name = `medical_room_plate_${label}`;
+    return plate;
+  }
+
+  private updateMedicalDoorPlate(roomId: MedicalTopRoomId, label: string): void {
+    const previous = this.medicalTopDoorPlates.get(roomId);
+    const room = this.medicalTopMeta?.rooms[roomId];
+    if (!previous || !room) return;
+    const replacement = this.createMedicalDoorPlate(label);
+    replacement.position.copy(previous.position);
+    replacement.visible = previous.visible;
+    this.scene.remove(previous);
+    const material = previous.material as THREE.MeshStandardMaterial;
+    material.map?.dispose();
+    material.dispose();
+    previous.geometry.dispose();
+    this.scene.add(replacement);
+    this.medicalTopDoorPlates.set(roomId, replacement);
+  }
+
+  private createMedicalClueGlow(x: number, y: number, z: number): { group: THREE.Group; light: THREE.PointLight } {
+    const group = new THREE.Group();
+    group.position.set(x, y + 0.16, z);
+    const orb = new THREE.Mesh(
+      new THREE.SphereGeometry(0.055, 10, 8),
+      new THREE.MeshBasicMaterial({ color: 0xff1025 }),
+    );
+    const light = new THREE.PointLight(0xe50019, 4.6, 2.8, 1.8);
+    group.add(orb, light);
+    group.visible = false;
+    this.scene.add(group);
+    return { group, light };
+  }
+
+  /**
+   * The room streams contain Blender-authored furniture, while `roomBounds`
+   * defines the actual playable shells. Materialising the two missing shared
+   * walls here keeps the 3D geometry, collision and minimap on the same data.
+   */
+  private createMedicalTopRoomShell(): void {
+    const meta = this.medicalTopMeta;
+    if (!meta || this.medicalTopRoomShell) return;
+    const group = new THREE.Group();
+    group.name = "medical_top_room_shell";
+    const wallMaterial = new THREE.MeshStandardMaterial({ color: 0x57514b, roughness: 0.94, metalness: 0 });
+    const frameMaterial = new THREE.MeshStandardMaterial({ color: 0x2a211d, roughness: 0.82, metalness: 0.01 });
+    const wallHeight = 3.12;
+    const frontZ = Math.min(...(["601", "603", "605"] as const).map((id) => meta.rooms[id].roomBounds.minZ));
+    const backZ = Math.max(...(["601", "603", "605"] as const).map((id) => meta.rooms[id].roomBounds.maxZ));
+    const partitionXs = [
+      (meta.rooms["601"].roomBounds.maxX + meta.rooms["603"].roomBounds.minX) * 0.5,
+      (meta.rooms["603"].roomBounds.maxX + meta.rooms["605"].roomBounds.minX) * 0.5,
+    ];
+    const obstacles: InteriorMapObstacle[] = [];
+    for (const [index, x] of partitionXs.entries()) {
+      const wall = new THREE.Mesh(new THREE.BoxGeometry(0.14, wallHeight, backZ - frontZ), wallMaterial);
+      wall.name = `medical_room_partition_${index + 1}`;
+      wall.position.set(x, wallHeight * 0.5, (frontZ + backZ) * 0.5);
+      wall.castShadow = true;
+      wall.receiveShadow = true;
+      group.add(wall);
+      obstacles.push({ minX: x - 0.07, maxX: x + 0.07, minZ: frontZ, maxZ: backZ, kind: "wall" });
+    }
+
+    // The frame remains after the active door disappears, making the opening
+    // read as a real doorway from both the corridor and the room interior.
+    for (const roomId of ["601", "603", "605"] as const) {
+      const door = meta.rooms[roomId].door;
+      const addFrame = (name: string, x: number, y: number, width: number, height: number): void => {
+        const part = new THREE.Mesh(new THREE.BoxGeometry(width, height, 0.16), frameMaterial);
+        part.name = name;
+        part.position.set(x, y, door.z + 0.01);
+        part.castShadow = true;
+        group.add(part);
+      };
+      addFrame(`medical_${roomId}_frame_left`, door.x - 0.61, 1.17, 0.12, 2.34);
+      addFrame(`medical_${roomId}_frame_right`, door.x + 0.61, 1.17, 0.12, 2.34);
+      addFrame(`medical_${roomId}_frame_top`, door.x, 2.29, 1.34, 0.16);
+    }
+
+    this.medicalTopRoomShell = group;
+    this.scene.add(group);
+    this.colliders.push(...obstacles);
+    this.interiorMapObstacles = this.interiorMapObstacles ?? [];
+    this.interiorMapObstacles.push(...obstacles);
+    this.staticColliderSet = false;
+  }
+
+  /**
+   * The purchased corridor shell places its door meshes on an uncut wall. Its
+   * collision can be opened, but without these material apertures the player
+   * still sees a blank wall. Clip only the three metadata-authored rectangles
+   * in world space. The authored doors continue to cover them while sealed.
+   */
+  private configureMedicalTopDoorPortals(root: THREE.Object3D): void {
+    const meta = this.medicalTopMeta;
+    if (!meta) return;
+    const cutExpression = (["601", "603", "605"] as const)
+      .map((roomId) => meta.rooms[roomId].door)
+      .map((door) => `(abs(vMedicalWorldPosition.x - ${door.x.toFixed(4)}) < 0.59 && abs(vMedicalWorldPosition.z - ${door.z.toFixed(4)}) < 0.48)`)
+      .join(" || ");
+    for (const visualName of meta.portalWallVisualNames) {
+      const visual = getInteriorAssetObject(root, visualName);
+      if (!visual) continue;
+      visual.traverse((child) => {
+        const mesh = child as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        const sourceMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        const clippedMaterials = sourceMaterials.map((source) => {
+          const material = source.clone();
+          const previousHook = material.onBeforeCompile;
+          material.onBeforeCompile = (shader, renderer) => {
+            previousHook.call(material, shader, renderer);
+            shader.vertexShader = `varying vec3 vMedicalWorldPosition;\n${shader.vertexShader}`;
+            shader.vertexShader = shader.vertexShader.replace(
+              "#include <project_vertex>",
+              "#include <project_vertex>\nvMedicalWorldPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;",
+            );
+            shader.fragmentShader = `varying vec3 vMedicalWorldPosition;\n${shader.fragmentShader}`;
+            shader.fragmentShader = shader.fragmentShader.replace(
+              "#include <clipping_planes_fragment>",
+              `#include <clipping_planes_fragment>\nif (vMedicalWorldPosition.y > -0.04 && vMedicalWorldPosition.y < 2.37 && (${cutExpression})) discard;`,
+            );
+          };
+          material.customProgramCacheKey = () => "medical-top-door-portals-v1";
+          material.needsUpdate = true;
+          return material;
+        });
+        mesh.material = Array.isArray(mesh.material) ? clippedMaterials : clippedMaterials[0];
+      });
+    }
+  }
+
+  private async loadMedicalTopProps(): Promise<void> {
+    const meta = this.medicalTopMeta;
+    if (!meta || this.medicalTopPropsAsset) return;
+    try {
+      const handle = await loadMedicalTopAuxiliary(meta.bed.model);
+      if (this.disposed) {
+        handle.dispose();
+        return;
+      }
+      this.medicalTopPropsAsset = handle;
+      this.scene.add(handle.root);
+      const bed = getInteriorAssetObject(handle.root, meta.bed.objectName) ?? handle.root;
+      bed.visible = false;
+      this.medicalTopBed = bed;
+      if (this.medicalTopRoomStates["603"] !== "sealed") this.placeMedical603Bed();
+    } catch (error) {
+      console.warn("[Interior3D] Medical corridor-bed asset failed to load:", error);
+    }
+  }
+
+  private async startMedicalRoomLoad(roomId: MedicalTopRoomId): Promise<void> {
+    if (this.medicalTopRoomAssets.has(roomId)) return;
+    const current = this.medicalTopRoomLoads.get(roomId);
+    if (current) return current;
+    const room = this.medicalTopMeta?.rooms[roomId];
+    if (!room) return;
+    const promise = loadMedicalTopAuxiliary(room.model).then((handle) => {
+      if (this.disposed) {
+        handle.dispose();
+        return;
+      }
+      this.medicalTopRoomAssets.set(roomId, handle);
+      this.medicalTopRoomColliders.set(roomId, handle.collisionMap.obstacles);
+      handle.root.visible = true;
+      this.scene.add(handle.root);
+      if (roomId === "603") {
+        const fuse = getInteriorAssetObject(handle.root, "medical_603_fuse");
+        if (fuse) fuse.visible = Boolean(this.medicalTopRolls?.fuseAvailable);
+      }
+      if (this.medicalTopPendingOpen === roomId) {
+        this.medicalTopPendingOpen = undefined;
+        this.medicalTopLoadingText = undefined;
+        this.openMedicalRoom(roomId);
+      }
+      this.emitMedicalTopState();
+    }).catch((error) => {
+      if (this.medicalTopPendingOpen === roomId) {
+        this.medicalTopPendingOpen = undefined;
+        this.medicalTopRoomStates[roomId] = "sealed";
+      }
+      this.medicalTopLoadingText = `${roomId} / 房间读取失败，请稍后重试`;
+      console.warn(`[Interior3D] Medical room ${roomId} failed to load:`, error);
+      this.emitMedicalTopState();
+      throw error;
+    }).finally(() => {
+      this.medicalTopRoomLoads.delete(roomId);
+    });
+    this.medicalTopRoomLoads.set(roomId, promise);
+    return promise;
+  }
+
+  private primeMedicalRooms(): void {
+    void this.startMedicalRoomLoad("601");
+    const order: MedicalTopRoomId[] = this.medicalTopRolls?.route === "normal"
+      ? ["603", "605"]
+      : ["603", "605"];
+    let chain = Promise.resolve();
+    for (const roomId of order) {
+      chain = chain.then(() => preloadMedicalTopAuxiliary(this.medicalTopMeta!.rooms[roomId].model));
+    }
+    void chain.catch((error) => console.warn("[Interior3D] Medical room background preload unavailable:", error));
+  }
+
+  private emitMedicalTopState(): void {
+    const snapshot = this.getMedicalTopSnapshot();
+    if (snapshot) this.onMedicalTopStateChange?.(snapshot);
+  }
+
+  private setMedicalTopLampState(on: boolean, offCount: number): void {
+    const normalizedOffCount = THREE.MathUtils.clamp(Math.floor(offCount), 0, this.medicalTopFixtures.length);
+    const bedPulse = on && this.medicalTopStage === "bed";
+    if (
+      this.medicalTopLampOn === on
+      && this.medicalTopLampOffCount === normalizedOffCount
+      && this.medicalTopLampBedPulse === bedPulse
+    ) return;
+    this.medicalTopLampOn = on;
+    this.medicalTopLampOffCount = normalizedOffCount;
+    this.medicalTopLampBedPulse = bedPulse;
+    if (this.perfEnabled) this.perfMedicalLampTransitions++;
+    for (let index = 0; index < this.medicalTopFixtures.length; index++) {
+      const active = on && index >= normalizedOffCount;
+      const entry = this.medicalTopFixtures[index];
+      if (entry.active === active && entry.bedPulse === bedPulse) continue;
+      entry.active = active;
+      entry.bedPulse = bedPulse;
+      // Keep every authored corridor light in Three.js' light set. Toggling
+      // Object3D.visible changes the number of active lights and forces a new
+      // shader variant for each escape step, which previously froze input.
+      entry.light.visible = true;
+      entry.light.intensity = active ? bedPulse ? 5.2 : 2.65 : 0;
+      for (const material of entry.materials) {
+        material.color.setHex(active ? 0x4b0007 : 0x070304);
+        material.emissive.setHex(active ? 0x8e000d : 0x000000);
+        material.emissiveIntensity = active ? bedPulse ? 4.4 : 2.9 : 0;
+      }
+      if (this.perfEnabled) this.perfMedicalLampWrites++;
+    }
+  }
+
+  private updateMedicalTopTargets(): void {
+    const stage = this.medicalTopStage;
+    if (this.medicalTopBoardGlow) this.medicalTopBoardGlow.visible = stage === "notice";
+    for (const [key, glow] of this.medicalTopClueGlows) {
+      let visible = false;
+      if (stage === "rooms") {
+        if (key === "601:record") visible = this.medicalTopCurrentTarget === "601" && this.medicalTopRoomStates["601"] === "open";
+        if (key === "603:skull") visible = this.medicalTopCurrentTarget === "603" && this.medicalTopRoomStates["603"] === "open" && !this.medicalTopSkullChecked;
+        if (key === "603:sedative") visible = this.medicalTopCurrentTarget === "603" && this.medicalTopSkullChecked && !this.medicalTopSedativeTaken;
+        if (key === "603:fuse") visible = this.medicalTopRoomStates["603"] !== "sealed" && this.medicalTopSkullChecked && Boolean(this.medicalTopRolls?.fuseAvailable) && !this.medicalTopFuseTaken;
+        if (key === "605:monitor") visible = this.medicalTopCurrentTarget === "605" && this.medicalTopRoomStates["605"] === "open";
+      }
+      glow.group.visible = visible;
+    }
+  }
+
+  private updateMedicalTopGameplay(_dt: number): void {
+    const meta = this.medicalTopMeta;
+    if (!meta || this.medicalSegment !== "top") return;
+    const now = this.clock.elapsedTime;
+
+    if (this.medicalTop601KnockPending && now >= this.medicalTop601KnockPending.resolveAt) {
+      const { count } = this.medicalTop601KnockPending;
+      this.medicalTop601KnockPending = undefined;
+      if (count === 3) {
+        this.medicalTop601KnockResolved = true;
+        this.medicalTopCurrentTarget = "603";
+        void this.startMedicalRoomLoad("603");
+        this.updateMedicalTopTargets();
+        this.emitMedicalTopState();
+      } else {
+        this.requestOpenMedicalRoom("601");
+      }
+    }
+
+    if (this.medicalTopStage === "notice") {
+      if (this.ePressed && !this.gameplayPaused) {
+        const board = meta.noticeBoard;
+        const dx = this.camera.position.x - board.x;
+        const dz = this.camera.position.z - board.z;
+        if (dx * dx + dz * dz <= board.radius * board.radius) {
+          this.ePressed = false;
+          this.medicalTopStage = "rules";
+          this.medicalTopStageStartedAt = now;
+          this.setGameplayPaused(true);
+          this.primeMedicalRooms();
+          this.onMedicalTopModal?.({ kind: "rules" });
+          this.updateMedicalTopTargets();
+          this.emitMedicalTopState();
+        }
+      }
+      return;
+    }
+    if (this.medicalTopStage === "rules") return;
+
+    if (this.medicalTopRecovery && now >= this.medicalTopRecovery.at) {
+      const recovery = this.medicalTopRecovery;
+      this.medicalTopRecovery = undefined;
+      this.setGameplayPaused(false);
+      if (recovery.checkpoint === "bed") this.resetMedicalBedCheckpoint();
+      else if (recovery.checkpoint === "escape") this.resetMedicalEscapeCheckpoint();
+      if (recovery.action === "force601") {
+        this.medicalTopForced601 = true;
+        this.medicalTopCurrentTarget = "601";
+        this.requestOpenMedicalRoom("601");
+      }
+      this.updateMedicalTopTargets();
+      this.emitMedicalTopState();
+    }
+
+    if (this.medicalTopStage === "bed-blackout") {
+      this.setMedicalTopLampState(false, 0);
+      if (this.medicalTopBedLight) this.medicalTopBedLight.visible = false;
+      if (now - this.medicalTopStageStartedAt >= 2) {
+        this.medicalTopStage = "bed";
+        this.medicalTopStageStartedAt = now;
+        this.medicalTopBedSampled = -1;
+        this.medicalTopLastBedVisibleIndex = -1;
+        this.emitMedicalTopState();
+      }
+      return;
+    }
+    if (this.medicalTopStage === "bed") {
+      const elapsed = now - this.medicalTopStageStartedAt;
+      const index = Math.min(5, Math.floor(elapsed / 2));
+      const bright = elapsed % 2 < 1 && elapsed < 12;
+      this.setMedicalTopLampState(bright, 0);
+      if (this.medicalTopBed) {
+        this.medicalTopBed.visible = bright;
+        this.medicalTopBed.rotation.y = 0;
+        const position = meta.bed.positions[index];
+        if (position) this.medicalTopBed.position.set(position.x, position.y, position.z);
+      }
+      if (this.medicalTopBedLight) {
+        const position = meta.bed.positions[index];
+        this.medicalTopBedLight.visible = bright;
+        if (position) this.medicalTopBedLight.position.set(position.x, 1.85, position.z - 0.15);
+      }
+      if (bright && index !== this.medicalTopLastBedVisibleIndex) {
+        this.medicalTopLastBedVisibleIndex = index;
+        playMedicalBedPass(index / 5);
+      }
+      if (bright && elapsed % 2 >= 0.78 && this.medicalTopBedSampled !== index) {
+        this.medicalTopBedSampled = index;
+        if (!this.isPlayerSafeForMedicalBed(index)) {
+          this.registerMedicalViolation(11, "你阻挡了亡魂。", "bed");
+          return;
+        }
+      }
+      if (elapsed >= 12) {
+        if (this.medicalTopBed) this.medicalTopBed.visible = false;
+        if (this.medicalTopBedLight) this.medicalTopBedLight.visible = false;
+        this.medicalTopStage = "rooms";
+        this.setMedicalTopLampState(true, 0);
+        this.medicalTopStageStartedAt = now;
+        this.medicalTopCurrentTarget = "601";
+        this.primeMedicalRooms();
+        this.updateMedicalTopTargets();
+        this.emitMedicalTopState();
+      }
+      return;
+    }
+
+    if (this.medicalTopStage === "rooms") {
+      this.updateMedicalDoorViewScare();
+      if (this.medicalTopAwaitingCorridor && this.camera.position.z <= meta.corridor.maxZ) {
+        this.beginMedicalEscape();
+        return;
+      }
+      if (!this.gameplayPaused) this.handleMedicalTopProximity();
+      if (this.ePressed && !this.gameplayPaused) this.handleMedicalTopInteraction();
+      return;
+    }
+
+    if (this.medicalTopStage === "escape-warning") {
+      const elapsed = now - this.medicalTopStageStartedAt;
+      const segment = Math.floor(elapsed / 0.35);
+      this.setMedicalTopLampState(segment % 2 === 0, 0);
+      if (elapsed >= 2.1) {
+        this.medicalTopStage = "escape";
+        this.medicalTopStageStartedAt = now;
+        this.medicalTopEscapeOffCount = 0;
+        this.setMedicalTopLampState(true, 0);
+        this.emitMedicalTopState();
+      }
+      return;
+    }
+
+    if (this.medicalTopStage === "escape") {
+      const elevator = meta.elevator;
+      const dx = this.camera.position.x - elevator.x;
+      const dz = this.camera.position.z - elevator.z;
+      if (dx * dx + dz * dz <= elevator.radius * elevator.radius) {
+        this.medicalTopStage = "transition";
+        this.medicalTopCurrentTarget = undefined;
+        this.setGameplayPaused(true);
+        playMedicalElevatorChime();
+        this.emitMedicalTopState();
+        this.onMedicalTopComplete?.({ hasFuse: this.medicalTopHasFuse, evidence: this.medicalTopEvidence });
+        return;
+      }
+      const intervals = this.medicalEscapeIntervals();
+      const elapsed = now - this.medicalTopStageStartedAt;
+      let cumulative = 0;
+      let count = 0;
+      for (const interval of intervals) {
+        cumulative += interval;
+        if (elapsed >= cumulative) count++;
+      }
+      if (count !== this.medicalTopEscapeOffCount) {
+        for (let index = this.medicalTopEscapeOffCount; index < count; index++) playMedicalLightBurst(index / 11);
+        this.medicalTopEscapeOffCount = count;
+        this.setMedicalTopLampState(true, count);
+      }
+      if (count >= 12) this.registerMedicalViolation(24, "最后一盏灯已经替你进入电梯。", "escape");
+    }
+  }
+
+  private isPlayerSafeForMedicalBed(index: number): boolean {
+    const meta = this.medicalTopMeta;
+    if (!meta) return true;
+    const corridor = meta.corridor;
+    const z = this.camera.position.z;
+    const inSafeStrip = z <= corridor.minZ + corridor.safeStripWidth
+      || z >= corridor.maxZ - corridor.safeStripWidth;
+    const position = meta.bed.positions[index];
+    const overlapsBed = Math.abs(this.camera.position.x - position.x) <= meta.bed.size.x * 0.5 + this.playerRadius
+      && Math.abs(this.camera.position.z - position.z) <= meta.bed.size.z * 0.5 + this.playerRadius;
+    return inSafeStrip && !overlapsBed;
+  }
+
+  private handleMedicalTopInteraction(): void {
+    const meta = this.medicalTopMeta;
+    if (!meta) return;
+    const p = this.camera.position;
+    const distanceSquared = (x: number, z: number) => (p.x - x) ** 2 + (p.z - z) ** 2;
+    for (const roomId of ["601", "603", "605"] as const) {
+      const room = meta.rooms[roomId];
+      if (distanceSquared(room.door.x, room.door.z) <= room.door.radius ** 2) {
+        this.ePressed = false;
+        this.interactMedicalDoor(roomId);
+        return;
+      }
+    }
+  }
+
+  private handleMedicalTopProximity(): void {
+    const meta = this.medicalTopMeta;
+    if (!meta || this.gameplayPaused) return;
+    const p = this.camera.position;
+    const distanceSquared = (x: number, z: number) => (p.x - x) ** 2 + (p.z - z) ** 2;
+    const target = this.medicalTopCurrentTarget;
+    if (target === "601" || target === "603" || target === "605") {
+      const room = meta.rooms[target];
+      if (
+        this.medicalTopRoomStates[target] === "sealed"
+        && distanceSquared(room.door.x, room.door.z) <= room.door.radius ** 2
+      ) {
+        this.interactMedicalDoor(target);
+        return;
+      }
+    }
+    if (target === "601" && this.medicalTopRoomStates["601"] === "open") {
+      const clue = meta.rooms["601"].clueSpots[0];
+      if (distanceSquared(clue.x, clue.z) <= clue.radius ** 2) {
+        this.ePressed = false;
+        this.setGameplayPaused(true);
+        this.onMedicalTopModal?.({ kind: "record", revisit: this.medicalTop601Visits > 0 });
+        return;
+      }
+    }
+    if ((target === "603" || (this.medicalTopSkullChecked && !this.medicalTopFuseTaken)) && this.medicalTopRoomStates["603"] !== "sealed") {
+      for (const clue of meta.rooms["603"].clueSpots) {
+        if (distanceSquared(clue.x, clue.z) > clue.radius ** 2) continue;
+        if (clue.id === "skull" && !this.medicalTopSkullChecked) {
+          this.ePressed = false;
+          this.setGameplayPaused(true);
+          this.onMedicalTopModal?.({ kind: "skull", abnormal: Boolean(this.medicalTopRolls?.abnormalTag) });
+          return;
+        }
+        if (clue.id === "sedative" && this.medicalTopSkullChecked && !this.medicalTopSedativeTaken) {
+          this.ePressed = false;
+          this.medicalTopSedativeTaken = true;
+          this.medicalTopSedativeShield = true;
+          const object = this.medicalTopRoomAssets.get("603")?.root.getObjectByName("medical_603_sedative");
+          if (object) object.visible = false;
+          this.tryCompleteMedical603();
+          this.updateMedicalTopTargets();
+          this.emitMedicalTopState();
+          return;
+        }
+        if (clue.id === "fuse" && this.medicalTopSkullChecked && this.medicalTopRolls?.fuseAvailable && !this.medicalTopFuseTaken) {
+          this.ePressed = false;
+          this.medicalTopFuseTaken = true;
+          this.medicalTopHasFuse = true;
+          const object = this.medicalTopRoomAssets.get("603")?.root.getObjectByName("medical_603_fuse");
+          if (object) object.visible = false;
+          this.updateMedicalTopTargets();
+          this.emitMedicalTopState();
+          return;
+        }
+      }
+    }
+    if (target === "605" && this.medicalTopRoomStates["605"] === "open") {
+      const clue = meta.rooms["605"].clueSpots[0];
+      if (distanceSquared(clue.x, clue.z) <= clue.radius ** 2) {
+        this.ePressed = false;
+        this.setGameplayPaused(true);
+        this.onMedicalTopModal?.({ kind: "cctv", pack: this.medicalTopRolls?.cctvPack ?? "A" });
+      }
+    }
+  }
+
+  private interactMedicalDoor(roomId: MedicalTopRoomId): void {
+    const target = this.medicalTopCurrentTarget;
+    if (roomId === "601" && this.medicalTop601KnockPending) return;
+    if (roomId === "601" && this.medicalTopRolls?.route === "third-knock" && this.medicalTop601Visits === 0 && !this.medicalTop601KnockResolved) {
+      playMedicalKnocks(3);
+      this.medicalTop601KnockPending = { count: 3, resolveAt: this.clock.elapsedTime + 1.34 };
+      return;
+    }
+    if (
+      roomId === "601"
+      && this.medicalTopRolls?.route === "third-knock"
+      && this.medicalTop601Visits === 0
+      && this.medicalTop601KnockResolved
+      && !this.medicalTopForced601
+      && (this.medicalTopRoomStates["603"] !== "complete" || this.medicalTopRoomStates["605"] !== "complete")
+    ) {
+      this.registerMedicalViolation(7, "你没有遵守601门内的敲门信号。", "rooms", "force601");
+      return;
+    }
+    if (roomId === "603" && this.medicalTopRoomLabels["603"] === "602") {
+      this.registerMedicalViolation(2, "六层从未设置602室。", "rooms");
+      return;
+    }
+    if (target !== roomId) {
+      window.dispatchEvent(new CustomEvent("zju-horror-door-message", { detail: { message: `${this.medicalTopRoomLabels[roomId]}门内没有回应。` } }));
+      return;
+    }
+    if (roomId === "601") {
+      playMedicalKnocks(2);
+      this.medicalTop601KnockPending = { count: 2, resolveAt: this.clock.elapsedTime + 0.86 };
+      return;
+    }
+    this.requestOpenMedicalRoom(roomId);
+  }
+
+  private requestOpenMedicalRoom(roomId: MedicalTopRoomId): void {
+    if (this.medicalTopRoomStates[roomId] === "open" || this.medicalTopRoomStates[roomId] === "complete") return;
+    if (this.medicalTopRoomStates[roomId] === "loading" || this.medicalTopPendingOpen === roomId) return;
+    if (this.medicalTopRoomAssets.has(roomId)) {
+      this.openMedicalRoom(roomId);
+      return;
+    }
+    this.medicalTopRoomStates[roomId] = "loading";
+    this.medicalTopPendingOpen = roomId;
+    this.medicalTopLoadingText = `${roomId} / 黑暗中有什么正在显现`;
+    this.emitMedicalTopState();
+    void this.startMedicalRoomLoad(roomId);
+  }
+
+  private openMedicalRoom(roomId: MedicalTopRoomId): void {
+    const room = this.medicalTopMeta?.rooms[roomId];
+    if (!room || !this.assetHandle) return;
+    this.medicalTopLoadingText = undefined;
+    this.medicalTopRoomStates[roomId] = "open";
+    const visual = getInteriorAssetObject(this.assetHandle.root, room.doorVisualName);
+    if (visual) visual.visible = false;
+    const plate = this.medicalTopDoorPlates.get(roomId);
+    if (plate) plate.visible = false;
+    const blocker = this.medicalTopDoorBlockers.get(roomId);
+    if (blocker) blocker.visible = false;
+    if (roomId === "603") this.placeMedical603Bed();
+    const clearZone = {
+      minX: room.door.x - 0.72,
+      maxX: room.door.x + 0.72,
+      minZ: room.door.z - 0.36,
+      maxZ: room.door.z + 0.42,
+    };
+    this.colliders = this.colliders.flatMap((obstacle) => cutObstacleByClearZone({
+      ...obstacle,
+      kind: (obstacle as InteriorMapObstacle).kind ?? "wall",
+    }, clearZone));
+    this.interiorMapObstacles = (this.interiorMapObstacles ?? []).flatMap((obstacle) => cutObstacleByClearZone(obstacle, clearZone));
+    const props = this.medicalTopRoomColliders.get(roomId) ?? [];
+    this.colliders.push(...props);
+    this.interiorMapObstacles.push(...props);
+    this.staticColliderSet = false;
+    this.updateMedicalTopTargets();
+    this.emitMedicalTopState();
+  }
+
+  private placeMedical603Bed(): void {
+    if (!this.medicalTopBed) return;
+    this.medicalTopBed.position.set(-0.25, 0, 3.85);
+    this.medicalTopBed.rotation.y = Math.PI / 2;
+    this.medicalTopBed.visible = true;
+  }
+
+  private tryCompleteMedical603(): void {
+    if (!this.medicalTopSkullChecked || !this.medicalTopSedativeTaken) return;
+    this.medicalTopRoomStates["603"] = "complete";
+    if (this.medicalTopRolls?.route === "false-602") {
+      this.medicalTopRoomStates["601"] = "open";
+      this.medicalTopCurrentTarget = "601";
+      return;
+    }
+    this.moveToNextIncompleteMedicalRoom(["605", "601"]);
+  }
+
+  private advanceMedicalAfter601(): void {
+    if (this.medicalTopRolls?.route === "false-602" && this.medicalTop601Visits === 1) {
+      this.medicalTopRoomLabels["603"] = "602";
+      this.updateMedicalDoorPlate("603", "602");
+      this.medicalTopCurrentTarget = "605";
+      void this.startMedicalRoomLoad("605");
+      return;
+    }
+    if (this.medicalTop601Visits > 1) {
+      this.finishMedicalRooms();
+      return;
+    }
+    // Never point back at an already consumed room. This is the exact recovery
+    // seam for: 601(三声) → 完成603 → 强行601 → 继续605。
+    this.moveToNextIncompleteMedicalRoom(["603", "605"]);
+  }
+
+  private advanceMedicalAfter605(): void {
+    if (this.medicalTopRolls?.route === "normal") {
+      this.finishMedicalRooms();
+      return;
+    }
+    if (this.medicalTopForced601) {
+      this.moveToNextIncompleteMedicalRoom(["603"]);
+      return;
+    }
+    if (this.medicalTopRolls?.route === "third-knock") {
+      this.moveToNextIncompleteMedicalRoom(["601"]);
+      return;
+    }
+    this.medicalTopRoomLabels["603"] = "603";
+    this.updateMedicalDoorPlate("603", "603");
+    this.medicalTopCurrentTarget = "603";
+    void this.startMedicalRoomLoad("603");
+  }
+
+  private moveToNextIncompleteMedicalRoom(order: MedicalTopRoomId[]): void {
+    const next = order.find((roomId) => this.medicalTopRoomStates[roomId] !== "complete");
+    if (!next) {
+      this.finishMedicalRooms();
+      return;
+    }
+    this.medicalTopCurrentTarget = next;
+    void this.startMedicalRoomLoad(next);
+    this.updateMedicalTopTargets();
+    this.emitMedicalTopState();
+  }
+
+  private finishMedicalRooms(): void {
+    this.medicalTopCurrentTarget = undefined;
+    this.medicalTopAwaitingCorridor = true;
+    this.updateMedicalTopTargets();
+  }
+
+  private beginMedicalEscape(): void {
+    this.medicalTopAwaitingCorridor = false;
+    this.prepareMedicalEscapeScene();
+    this.medicalTopStage = "escape-warning";
+    this.medicalTopStageStartedAt = this.clock.elapsedTime;
+    this.medicalTopCurrentTarget = "elevator";
+    this.medicalTopEscapeOffCount = 0;
+    playMedicalLightBurst(0);
+    this.emitMedicalTopState();
+  }
+
+  /**
+   * Once all evidence is collected the three streamed room interiors are no
+   * longer playable. From the corridor they would otherwise all enter the
+   * camera frustum together (hundreds of extra draw calls) precisely while
+   * the timed escape needs its most responsive input. Keep the assets cached
+   * for a full restart, but render and collide only with the authored corridor.
+   */
+  private prepareMedicalEscapeScene(): void {
+    const meta = this.medicalTopMeta;
+    if (!meta || !this.assetHandle) return;
+    for (const roomId of ["601", "603", "605"] as const) {
+      const roomAsset = this.medicalTopRoomAssets.get(roomId);
+      if (roomAsset) roomAsset.root.visible = false;
+      const authoredDoor = getInteriorAssetObject(this.assetHandle.root, meta.rooms[roomId].doorVisualName);
+      if (authoredDoor) authoredDoor.visible = true;
+      const plate = this.medicalTopDoorPlates.get(roomId);
+      if (plate) plate.visible = true;
+    }
+    this.colliders = [...(this.medicalTopBaseColliders ?? this.colliders)];
+    this.interiorMapObstacles = [...(this.medicalTopBaseMapObstacles ?? this.interiorMapObstacles ?? [])];
+    this.staticColliderSet = false;
+  }
+
+  private medicalEscapeIntervals(): number[] {
+    const start = this.medicalTopHasFuse ? 3 : 2.5;
+    const end = this.medicalTopHasFuse ? 1.5 : 1;
+    return Array.from({ length: 12 }, (_, index) => THREE.MathUtils.lerp(start, end, index / 11));
+  }
+
+  private updateMedicalDoorViewScare(): void {
+    if (!this.medicalTopDoorScareArmed || this.medicalTopDoorScareTriggered || !this.medicalTopMeta) return;
+    const door = this.medicalTopMeta.rooms["603"].door;
+    const target = new THREE.Vector3(door.x, this.camera.position.y, door.z);
+    const direction = target.sub(this.camera.position);
+    const distance = direction.length();
+    if (distance > 7 || distance < 0.2) return;
+    direction.normalize();
+    const forward = this.camera.getWorldDirection(new THREE.Vector3());
+    if (forward.dot(direction) < Math.cos(THREE.MathUtils.degToRad(25))) return;
+    if (this.colliders.some((obstacle) => segmentHitsObstacleBeforeTarget(
+      this.camera.position.x,
+      this.camera.position.z,
+      door.x,
+      door.z,
+      obstacle,
+    ))) return;
+    this.medicalTopDoorScareTriggered = true;
+    this.medicalTopDoorScareArmed = false;
+    JumpscarePipeline.executeStoryEffect("ghost_close", 0.9, "门牌背后，有什么先看见了你。", undefined, 0);
+  }
+
+  private registerMedicalViolation(
+    rule: 2 | 7 | 11 | 24,
+    reason: string,
+    checkpoint: "bed" | "escape" | "rooms",
+    action?: "force601",
+  ): void {
+    if (this.medicalTopRecovery || this.medicalTopStage === "transition") return;
+    let next = this.medicalTopViolations + 1;
+    if (next >= 3 && this.medicalTopSedativeShield) {
+      this.medicalTopSedativeShield = false;
+      next = 2;
+    }
+    this.medicalTopViolations = Math.min(3, next);
+    const fatal = this.medicalTopViolations >= 3;
+    const message = `违反第${rule}条：${reason}`;
+    JumpscarePipeline.executeStoryEffect("ghost_caught", 0.96, message, undefined, 0);
+    this.setGameplayPaused(true);
+    this.medicalTopRecovery = {
+      at: this.clock.elapsedTime + 1.45,
+      checkpoint: fatal ? "rooms" : checkpoint,
+      action: fatal ? undefined : action,
+    };
+    if (fatal) {
+      this.medicalTopRecovery.at = this.clock.elapsedTime + 1.55;
+      this.medicalTopRecovery.checkpoint = "rooms";
+      window.setTimeout(() => {
+        if (!this.disposed && this.medicalTopViolations >= 3) this.restartMedicalTop();
+      }, 1550);
+    }
+    this.emitMedicalTopState();
+  }
+
+  private resetMedicalBedCheckpoint(): void {
+    const checkpoint = this.medicalTopMeta?.checkpoints.bed;
+    if (!checkpoint) return;
+    this.camera.position.set(checkpoint.x, checkpoint.y, checkpoint.z);
+    this.cameraController.setLook(checkpoint.yaw, 0);
+    this.medicalTopStage = "bed-blackout";
+    this.medicalTopStageStartedAt = this.clock.elapsedTime;
+    this.medicalTopBedSampled = -1;
+    if (this.medicalTopBed) {
+      this.medicalTopBed.visible = false;
+      this.medicalTopBed.rotation.y = 0;
+    }
+    if (this.medicalTopBedLight) this.medicalTopBedLight.visible = false;
+  }
+
+  private resetMedicalEscapeCheckpoint(): void {
+    const checkpoint = this.medicalTopMeta?.checkpoints.escape;
+    if (!checkpoint) return;
+    this.camera.position.set(checkpoint.x, checkpoint.y, checkpoint.z);
+    this.cameraController.setLook(checkpoint.yaw, 0);
+    this.medicalTopStage = "escape-warning";
+    this.medicalTopStageStartedAt = this.clock.elapsedTime;
+    this.medicalTopEscapeOffCount = 0;
+    this.medicalTopCurrentTarget = "elevator";
+    this.setMedicalTopLampState(true, 0);
+  }
+
+  private restartMedicalTop(): void {
+    const meta = this.medicalTopMeta;
+    if (!meta || !this.assetHandle) return;
+    this.medicalTopRecovery = undefined;
+    this.medicalTopStage = "notice";
+    this.medicalTopStageStartedAt = this.clock.elapsedTime;
+    this.medicalTopViolations = 0;
+    this.medicalTopSedativeShield = false;
+    this.medicalTopHasFuse = false;
+    this.medicalTopCurrentTarget = "notice";
+    this.medicalTopRoomStates = { "601": "sealed", "603": "sealed", "605": "sealed" };
+    this.medicalTopRoomLabels = { "601": "601", "603": "603", "605": "605" };
+    this.medicalTop601KnockResolved = false;
+    this.medicalTop601KnockPending = undefined;
+    this.medicalTopForced601 = false;
+    this.medicalTop601Visits = 0;
+    this.medicalTopSkullChecked = false;
+    this.medicalTopSedativeTaken = false;
+    this.medicalTopFuseTaken = false;
+    this.medicalTopDoorScareArmed = false;
+    this.medicalTopDoorScareTriggered = false;
+    this.medicalTopAwaitingCorridor = false;
+    this.medicalTopLoadingText = undefined;
+    this.medicalTopPendingOpen = undefined;
+    this.medicalTopEvidence = undefined;
+    this.colliders = [...(this.medicalTopBaseColliders ?? this.colliders)];
+    this.interiorMapObstacles = [...(this.medicalTopBaseMapObstacles ?? this.interiorMapObstacles ?? [])];
+    for (const roomId of ["601", "603", "605"] as const) {
+      const roomAsset = this.medicalTopRoomAssets.get(roomId);
+      if (roomAsset) roomAsset.root.visible = true;
+      const visual = getInteriorAssetObject(this.assetHandle.root, meta.rooms[roomId].doorVisualName);
+      if (visual) visual.visible = true;
+      this.updateMedicalDoorPlate(roomId, roomId);
+      const plate = this.medicalTopDoorPlates.get(roomId);
+      if (plate) plate.visible = true;
+      const blocker = this.medicalTopDoorBlockers.get(roomId);
+      if (blocker) blocker.visible = false;
+    }
+    const room603 = this.medicalTopRoomAssets.get("603")?.root;
+    const med = room603?.getObjectByName("medical_603_sedative");
+    const fuse = room603?.getObjectByName("medical_603_fuse");
+    if (med) med.visible = true;
+    if (fuse) fuse.visible = Boolean(this.medicalTopRolls?.fuseAvailable);
+    if (this.medicalTopBed) {
+      this.medicalTopBed.visible = false;
+      this.medicalTopBed.rotation.y = 0;
+    }
+    if (this.medicalTopBedLight) this.medicalTopBedLight.visible = false;
+    this.setMedicalTopLampState(true, 0);
+    this.camera.position.set(meta.spawn.x, meta.spawn.y, meta.spawn.z);
+    this.cameraController.setLook(meta.spawn.yaw, 0);
+    this.setGameplayPaused(false);
+    this.updateMedicalTopTargets();
+    this.emitMedicalTopState();
   }
 
   private bindInteriorAssetMetadata(handle: InteriorAssetHandle): void {
@@ -1640,6 +2988,7 @@ export class Interior3D {
   }
 
   private addAssetCeilingLights(handle: InteriorAssetHandle): void {
+    if (this.roomKind !== "library") return;
     handle.root.updateMatrixWorld(true);
     handle.root.traverse((object) => {
       if (!/^legacy_crimson_fluorescent_\d+_tube$/.test(object.name)) return;
@@ -2832,24 +4181,26 @@ export class Interior3D {
     const libraryProfile = this.roomKind === "library";
     const baishaProfile = this.roomKind === "dorm" && this.baishaTubes.length > 0;
     const medicalProfile = this.roomKind === "medical" && Boolean(this.assetHandle);
+    const medicalBlackout = medicalProfile && this.isMedicalTopBlackout(t);
+    const medicalBedPulse = medicalProfile && this.medicalTopStage === "bed" && !medicalBlackout;
     // Medical is an intentional authored scene whose gameplay metadata has not
     // been mapped yet. It must not inherit the diagnostic 8x flashlight used
     // for genuinely unmapped model previews.
     const previewingUnmappedAsset = Boolean(this.assetHandle && !this.assetHandle.meta && !medicalProfile);
     const targetAmbient = medicalProfile
-      ? hasFlashlight ? 1.65 : 1.35
+      ? medicalBlackout ? 0.005 : medicalBedPulse ? 0.48 : hasFlashlight ? 0.28 : 0.18
       : previewingUnmappedAsset
       ? 0.32
       : baishaProfile ? 0.18
       : hasFlashlight ? (libraryProfile ? 0.34 : 0.85) : libraryProfile ? 0.18 : 0.22;
     const targetFill = medicalProfile
-      ? hasFlashlight ? 0.85 : 0.68
+      ? medicalBlackout ? 0 : medicalBedPulse ? 0.34 : hasFlashlight ? 0.18 : 0.1
       : previewingUnmappedAsset
       ? 0.18
       : baishaProfile ? 0.1
       : hasFlashlight ? (libraryProfile ? 0.22 : 0.55) : libraryProfile ? 0.11 : 0.14;
     const targetNear = medicalProfile
-      ? hasFlashlight ? 0.38 : 0.3
+      ? medicalBlackout ? 0 : medicalBedPulse ? 0.38 : hasFlashlight ? 0.16 : 0.08
       : previewingUnmappedAsset
       ? 0.25
       : baishaProfile ? 0.2
@@ -2873,6 +4224,10 @@ export class Interior3D {
     } else {
       this.flashlight.intensity = 0;
     }
+    if (medicalProfile && (medicalBlackout || this.medicalTopStage === "bed" || this.medicalTopStage === "bed-blackout")) {
+      this.flashlight.visible = false;
+      this.flashlight.intensity = 0;
+    }
 
     this.updateBloodLight(t);
     this.updateAssetFlickerLights(t);
@@ -2882,6 +4237,16 @@ export class Interior3D {
     this.updateBaishaLighting(t);
     this.updateLibraryReturnPursuit(dt, t);
     this.outsideRedLight.visible = this.outsideRedLight.intensity > 0.01;
+  }
+
+  private isMedicalTopBlackout(t: number): boolean {
+    if (!this.medicalTopMeta || this.medicalSegment !== "top") return false;
+    if (this.medicalTopStage === "bed-blackout") return true;
+    if (this.medicalTopStage === "bed") return (t - this.medicalTopStageStartedAt) % 2 >= 1;
+    if (this.medicalTopStage === "escape-warning") {
+      return Math.floor((t - this.medicalTopStageStartedAt) / 0.35) % 2 === 1;
+    }
+    return false;
   }
 
   private isInLibraryExterior(): boolean {
@@ -3242,6 +4607,14 @@ export class Interior3D {
     // 7b. Story-state machine: only the current narrative phase is interactive.
     this.syncStoryPhase();
 
+    // 7c. The medical top floor keeps all narrative progression in one
+    // authoritative state machine while using the authored corridor geometry.
+    this.updateMedicalTopGameplay(dt);
+    if (this.medicalTopMeta && this.medicalSegment === "top") {
+      this.updateGuideLine();
+      return;
+    }
+
     // 8. Collect pickups (automatic proximity or E within the wider manual range).
     this.collectPickups();
     // 9. Check story triggers with the same shared interaction rule.
@@ -3586,6 +4959,9 @@ export class Interior3D {
       `Collision calls/s: ${(this.perfCollisionCalls / seconds).toFixed(1)}`,
       `Penetration scans/s: ${(this.perfPenetrationScans / seconds).toFixed(1)}`,
       `Stamina writes/s: ${(this.perfStaminaWrites / seconds).toFixed(1)}`,
+      `Medical lamp transitions/s: ${(this.perfMedicalLampTransitions / seconds).toFixed(1)}`,
+      `Medical lamp fixture writes/s: ${(this.perfMedicalLampWrites / seconds).toFixed(1)}`,
+      `Render programs: ${renderInfo.programs?.length ?? 0}`,
     ].join("\n"));
 
     this.perfWindowStartedAt = frameStartedAt;
@@ -3593,6 +4969,8 @@ export class Interior3D {
     this.perfCollisionCalls = 0;
     this.perfPenetrationScans = 0;
     this.perfStaminaWrites = 0;
+    this.perfMedicalLampTransitions = 0;
+    this.perfMedicalLampWrites = 0;
   }
 
   private loop = (): void => {

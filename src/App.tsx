@@ -45,6 +45,7 @@ import { pickJumpscareText, contextForHotspot, textVariantClass, type JumpscareC
 import { JumpscarePipeline } from "./game/JumpscarePipeline";
 import {
   JUMPSCARE_SPRITE_IDS,
+  defaultJumpscareSprite,
   jumpscareSpriteUrl,
   preloadJumpscareSprites,
   prepareJumpscareSprite,
@@ -92,7 +93,6 @@ const BAISHA_DEVELOPMENT_PLAYER = new URLSearchParams(window.location.search).ge
 // Temporary scene-03 workflow: normal development starts at the medical
 // college entrance story instead of replaying the completed earlier chapters.
 const MEDICAL_DEVELOPMENT_START = import.meta.env.DEV;
-const MEDICAL_DEVELOPMENT_PLAYER = { x: 12.5, y: 30.0 };
 
 function createBaishaDevelopmentStoryState(chaseOnly = false): GameStore["storyState"] {
   return {
@@ -115,7 +115,7 @@ function createBaishaDevelopmentStoryState(chaseOnly = false): GameStore["storyS
 
 function createMedicalDevelopmentStoryState(): GameStore["storyState"] {
   return {
-    currentSceneId: "medical_entry",
+    currentSceneId: "medical_window",
     stats: { sanity: 67, stamina: 72, clues: 58, trust: 62, affection: 8 },
     inventory: ["flashlight", "receipt", "talisman", "diary", "key_card", "medicine"],
     flags: {
@@ -866,6 +866,32 @@ function App() {
   // active red exit performs the atomic "leave + show outdoor scene" step.
   const canExitInterior = Boolean(resolveInteriorExitTrigger(storyState));
 
+  const handleMedicalTopComplete = useCallback((detail: { hasFuse: boolean; evidence?: string }) => {
+    setExitBlackout(true);
+    window.setTimeout(() => {
+      setStoryState((previous) => ({
+        ...previous,
+        currentSceneId: "medical_garage",
+        flags: {
+          ...previous.flags,
+          medicalTopComplete: true,
+          medicalFuse: detail.hasFuse,
+          medicalEvidenceR1953: detail.evidence === "林伟主动把档案带向B1。",
+          medicalEvidenceGhost: detail.evidence === "它在林伟进入画面前已经站在电梯旁。",
+          medicalEvidenceTimecode: detail.evidence === "录像被人为拼接过。",
+          medicalEvidenceReflection: detail.evidence === "病床曾随电梯下降到B1。",
+        },
+        log: [
+          detail.evidence ? `六层监控留下了证据：${detail.evidence}` : "你赶在最后一盏灯熄灭前进入了电梯。",
+          ...previous.log,
+        ].slice(0, 6),
+      }));
+      setActiveSceneId(null);
+      setAssetLoadAttempt((value) => value + 1);
+    }, 450);
+    window.setTimeout(() => setExitBlackout(false), 1050);
+  }, [setActiveSceneId, setStoryState]);
+
   const startGame = useCallback(() => {
     if (BAISHA_CHASE_ONLY) {
       setLaunchMode(null);
@@ -890,10 +916,9 @@ function App() {
       setLaunchAssetState("loading");
       setStoryState(() => createMedicalDevelopmentStoryState());
       startSession({ id: "medical-college", name: "医学院", zone: "academic" });
-      closeInterior();
-      setPlayerIso({ ...MEDICAL_DEVELOPMENT_PLAYER });
-      setActiveSceneId("medical_entry");
-      setPhaserReady(true);
+      setActiveSceneId(null);
+      setAssetLoadAttempt((value) => value + 1);
+      setPhaserReady(false);
       return;
     }
     setPhaserReady(false); // 不加载 2.5D 地图，直接进入 3D 内景
@@ -903,7 +928,7 @@ function App() {
     // 使用 storyEngine 统一解析起始建筑（始终从第一个热点开始）
     const startBuilding = resolveGameStartBuilding();
     startSession(startBuilding ?? { id: "medical-library", name: "农医馆", zone: "story" });
-  }, [closeInterior, scene01Debug, setActiveSceneId, setPlayerIso, setStoryState, startSession]);
+  }, [scene01Debug, setActiveSceneId, setStoryState, startSession]);
 
   const restartGame = useCallback(() => {
     resetAll();
@@ -916,11 +941,10 @@ function App() {
       setLaunchMode(null);
       setStoryState(() => createMedicalDevelopmentStoryState());
       startSession({ id: "medical-college", name: "医学院", zone: "academic" });
-      closeInterior();
-      setPlayerIso({ ...MEDICAL_DEVELOPMENT_PLAYER });
-      setActiveSceneId("medical_entry");
-      setPhaserReady(true);
-      miniMapSnapshotRef.current = { player: { ...MEDICAL_DEVELOPMENT_PLAYER }, ghostVisible: false };
+      setActiveSceneId(null);
+      setAssetLoadAttempt((value) => value + 1);
+      setPhaserReady(false);
+      miniMapSnapshotRef.current = { player: { x: 19.4, y: 30.2 }, ghostVisible: false };
       resetAudio();
       setGameSessionId((value) => value + 1);
       return;
@@ -931,7 +955,7 @@ function App() {
     miniMapSnapshotRef.current = { player: { x: 19.4, y: 30.2 }, ghostVisible: false };
     resetAudio();
     setGameSessionId((value) => value + 1);
-  }, [closeInterior, resetAll, resetAudio, setActiveSceneId, setPlayerIso, setStoryState, startSession]);
+  }, [resetAll, resetAudio, setActiveSceneId, setStoryState, startSession]);
 
   const handleLaunchEnter = useCallback(() => {
     setLaunchMode(null);
@@ -1049,16 +1073,15 @@ function App() {
         sanityCost: number; duration?: number; customMessage?: string; spriteId?: JumpscareSpriteId;
       }>).detail;
       const requestId = ++jumpscareRequestRef.current;
-      const visualReady = detail.spriteId
-        ? prepareJumpscareSprite(detail.spriteId)
-        : Promise.resolve(true);
+      const resolvedSprite = detail.spriteId ?? defaultJumpscareSprite(detail.context as JumpscareContext);
+      const visualReady = prepareJumpscareSprite(resolvedSprite);
 
       void Promise.all([visualReady, audioManager.prepareJumpscare()]).then(([spriteReady]) => {
         if (requestId !== jumpscareRequestRef.current) return;
         triggerEffect(
           "jumpscare",
           detail.context as JumpscareContext,
-          spriteReady ? detail.spriteId : undefined,
+          spriteReady ? resolvedSprite : undefined,
           detail.customMessage,
           detail.duration,
         );
@@ -1593,6 +1616,7 @@ function App() {
           canExit={canExitInterior}
           blockUntilAssetReady={launchMode !== null || baishaStillLoading}
           onAssetStateChange={setLaunchAssetState}
+          onMedicalTopComplete={handleMedicalTopComplete}
         />
       )}
 

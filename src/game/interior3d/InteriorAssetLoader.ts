@@ -166,7 +166,49 @@ export interface InteriorAssetMeta {
       trueExitSegment: { minX: number; maxX: number; z: number };
     };
   };
+  medicalSegmentSpawns?: Partial<Record<MedicalInteriorSegment, {
+    x: number;
+    y: number;
+    z: number;
+    yaw?: number;
+  }>>;
+  medicalTopGameplay?: MedicalTopGameplayMeta;
   notes?: string[];
+}
+
+export type MedicalTopRoomId = "601" | "603" | "605";
+
+export interface MedicalTopGameplayMeta {
+  spawn: { x: number; y: number; z: number; yaw: number };
+  noticeBoard: { x: number; y: number; z: number; radius: number; visualName: string };
+  /** Source shell meshes that need the three authored doorway apertures. */
+  portalWallVisualNames: string[];
+  corridor: {
+    minX: number;
+    maxX: number;
+    minZ: number;
+    maxZ: number;
+    safeStripWidth: number;
+  };
+  bed: {
+    model: string;
+    objectName: string;
+    positions: Array<{ x: number; y: number; z: number }>;
+    size: { x: number; y: number; z: number };
+  };
+  rooms: Record<MedicalTopRoomId, {
+    model: string;
+    doorVisualName: string;
+    door: { x: number; y: number; z: number; radius: number };
+    roomBounds: { minX: number; maxX: number; minZ: number; maxZ: number };
+    clueSpots: Array<{ id: string; x: number; y: number; z: number; radius: number }>;
+  }>;
+  fixtureNames: string[];
+  elevator: { x: number; y: number; z: number; radius: number };
+  checkpoints: {
+    bed: { x: number; y: number; z: number; yaw: number };
+    escape: { x: number; y: number; z: number; yaw: number };
+  };
 }
 
 type BaishaChaseConfig = NonNullable<NonNullable<InteriorAssetMeta["baishaGameplay"]>["chase"]>;
@@ -194,6 +236,13 @@ export interface InteriorAssetRequest {
 
 export type MedicalInteriorSegment = "top" | "garage" | "basement";
 
+export interface MedicalTopAuxiliaryHandle {
+  root: THREE.Group;
+  bounds: THREE.Box3;
+  collisionMap: InteriorCollisionMap;
+  dispose: () => void;
+}
+
 interface InteriorAssetSource {
   rootPath: string;
   model: string;
@@ -214,6 +263,8 @@ interface InteriorAssetSource {
   offset?: { x: number; y: number; z: number };
   /** Large vertically stacked interiors can stream one level at a time. */
   segmentModels?: Record<MedicalInteriorSegment, string>;
+  /** Rebase each isolated floor onto runtime ground level after segmentation. */
+  segmentOffsets?: Record<MedicalInteriorSegment, { x: number; y: number; z: number }>;
 }
 
 /** Resolve Blender/GLB source names after GLTFLoader removes track-reserved characters. */
@@ -239,11 +290,17 @@ const ASSET_SOURCES: Record<string, InteriorAssetSource> = {
   "medical-college:medical": {
     rootPath: "models/interiors/medical-school",
     model: "medical-top.glb",
-    cacheVersion: "medical-school-v3-segments",
+    cacheVersion: "medical-school-v7-top-gameplay",
+    metaFile: "top-gameplay.meta.json",
     segmentModels: {
       top: "medical-top.glb",
       garage: "medical-garage.glb",
       basement: "medical-basement.glb",
+    },
+    segmentOffsets: {
+      top: { x: -312.58, y: -0.5, z: 207.34 },
+      garage: { x: -312.58, y: 4, z: 207.34 },
+      basement: { x: -312.58, y: 10, z: 207.34 },
     },
     // The authored top teaching floor is centred around (312.58, 0, -207.34).
     // Move it to the runtime origin so camera and lighting stay numerically
@@ -383,6 +440,45 @@ export async function preloadNextMedicalInteriorSegment(
   await preloadInteriorAsset({ ...req, medicalSegment: next });
 }
 
+const MEDICAL_TOP_ROOT = "models/interiors/medical-school";
+const MEDICAL_TOP_CACHE_VERSION = "medical-top-gameplay-v7";
+
+function medicalTopAuxiliaryUrl(file: string): string {
+  return assetUrl(`${MEDICAL_TOP_ROOT}/${file}`, MEDICAL_TOP_CACHE_VERSION);
+}
+
+/** Preload one independently streamed top-floor room/prop package. */
+export async function preloadMedicalTopAuxiliary(file: string): Promise<void> {
+  await Promise.all([getLoader(), fetchBinaryAsset(medicalTopAuxiliaryUrl(file))]);
+}
+
+/**
+ * Parse an independently streamed top-floor room/prop package. These GLBs are
+ * exported in runtime coordinates, so unlike the stacked source they require
+ * no medical-segment rebase.
+ */
+export async function loadMedicalTopAuxiliary(file: string): Promise<MedicalTopAuxiliaryHandle> {
+  const gltfLoader = await getLoader();
+  const url = medicalTopAuxiliaryUrl(file);
+  const buffer = await fetchBinaryAsset(url);
+  let parsed: Awaited<ReturnType<typeof gltfLoader.parseAsync>>;
+  try {
+    parsed = await gltfLoader.parseAsync(buffer, assetUrl(`${MEDICAL_TOP_ROOT}/`));
+  } finally {
+    binaryAssetPromises.delete(url);
+  }
+  const root = parsed.scene as THREE.Group;
+  tuneLoadedScene(root);
+  const bounds = new THREE.Box3().setFromObject(root);
+  const collisionMap = buildInteriorCollisionMap(root, bounds);
+  return {
+    root,
+    bounds,
+    collisionMap,
+    dispose: () => disposeLoadedScene(root),
+  };
+}
+
 function getAuthoredViewpoint(root: THREE.Group, name?: string): InteriorAssetHandle["viewpoint"] {
   if (!name) return undefined;
   root.updateMatrixWorld(true);
@@ -408,6 +504,14 @@ function getPreviewViewpoint(
       position: new THREE.Vector3(view.x, view.y, view.z),
       yaw: view.yaw,
       pitch: view.pitch ?? 0,
+    };
+  }
+  const segmentSpawn = medicalSegment ? meta?.medicalSegmentSpawns?.[medicalSegment] : undefined;
+  if (segmentSpawn) {
+    return {
+      position: new THREE.Vector3(segmentSpawn.x, segmentSpawn.y, segmentSpawn.z),
+      yaw: segmentSpawn.yaw ?? 0,
+      pitch: 0,
     };
   }
   if (meta?.spawn) {
@@ -445,9 +549,14 @@ function tuneLoadedScene(root: THREE.Group): void {
   });
 }
 
-function applySourceOffset(root: THREE.Group, source: InteriorAssetSource): void {
-  if (!source.offset) return;
-  root.position.add(new THREE.Vector3(source.offset.x, source.offset.y, source.offset.z));
+function applySourceOffset(
+  root: THREE.Group,
+  source: InteriorAssetSource,
+  medicalSegment?: MedicalInteriorSegment,
+): void {
+  const offset = medicalSegment ? source.segmentOffsets?.[medicalSegment] ?? source.offset : source.offset;
+  if (!offset) return;
+  root.position.add(new THREE.Vector3(offset.x, offset.y, offset.z));
   root.updateMatrixWorld(true);
 }
 
@@ -735,7 +844,7 @@ export async function loadInteriorAsset(req: InteriorAssetRequest): Promise<Inte
   const [gltf, ...extras] = parsedModels;
   const authoredBaseRoot = gltf.scene as THREE.Group;
   tuneLoadedScene(authoredBaseRoot);
-  applySourceOffset(authoredBaseRoot, source);
+  applySourceOffset(authoredBaseRoot, source, req.medicalSegment);
   const bounds = new THREE.Box3().setFromObject(authoredBaseRoot);
   // Collision is projected from the original object granularity. Rendering
   // batches must never change obstacle classification or navigation gaps.
@@ -773,7 +882,7 @@ export async function loadInteriorAsset(req: InteriorAssetRequest): Promise<Inte
   for (const extra of extras) {
     const extraRoot = extra.scene as THREE.Group;
     tuneLoadedScene(extraRoot);
-    applySourceOffset(extraRoot, source);
+    applySourceOffset(extraRoot, source, req.medicalSegment);
     root.add(extraRoot);
   }
   const viewpoint = getPreviewViewpoint(source, root, meta, req.medicalSegment);

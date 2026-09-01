@@ -1,17 +1,17 @@
 import fs from "node:fs";
 import path from "node:path";
 
-// Turns the medical school's ORIGINAL square corridor ceiling panels into the
-// red "legacy_crimson_fluorescent" fixtures, replacing the previously injected
-// tube fixtures (which the user asked to remove).
+// Turns every ORIGINAL square medical-school ceiling panel into a red
+// "legacy_crimson_fluorescent" fixture, replacing the previously injected tube
+// fixtures (which the user asked to remove).
 //
 // The model ships all 12 lamp diffusers merged into a single mesh (node 2006,
-// material M00_Soft_Cloud): 7 panels along corridor A + 5 in the south strip.
+// material M00_Soft_Cloud) across its two connected corridor runs.
 // This script:
 //   1. restores nothing itself — it always builds from the pristine backup;
 //   2. clusters the merged mesh's triangles into 12 connected islands;
-//   3. keeps the south-strip islands in the original mesh untouched;
-//   4. re-meshes each corridor island as its own node named
+//   3. verifies that all 12 authored square panels were found;
+//   4. re-meshes every panel island as its own node named
 //      legacy_crimson_fluorescent_<N>_tube with a dedicated crimson material,
 //      so Interior3D.addAssetCeilingLights() discovers them exactly like the
 //      library fixtures (emissive boost + pooled red point lights), without
@@ -25,9 +25,7 @@ const workspace = process.cwd();
 const newModelPath = path.join(workspace, "public/models/interiors/medical-school/medical.glb");
 const backupPath = path.join(workspace, "public/models/interiors/medical-school/medical.before-crimson-tubes.glb");
 const SOURCE_NODE = 2006;
-// Corridor A ceiling band in authored glTF coords (runtime z -3.4..1.4 shifted
-// by the loader offset z +207.34, ceiling band y 3.2..3.35).
-const CORRIDOR_Z = { min: -210.5, max: -206.0 };
+const EXPECTED_PANEL_COUNT = 12;
 
 function parseGlb(filePath) {
   const file = fs.readFileSync(filePath);
@@ -210,11 +208,14 @@ for (const island of islands) {
   console.log(`  worldCenter=[${island.center.map((v) => v.toFixed(2))}] tris=${island.tris.length}`);
 }
 
-const corridorIslands = islands
-  .filter((island) => island.center[2] >= CORRIDOR_Z.min && island.center[2] <= CORRIDOR_Z.max)
-  .sort((a, b) => a.center[0] - b.center[0]);
-const corridorTris = new Set(corridorIslands.flatMap((island) => island.tris));
-console.log(`corridor panels: ${corridorIslands.length}`);
+if (islands.length !== EXPECTED_PANEL_COUNT) {
+  throw new Error(`Expected ${EXPECTED_PANEL_COUNT} square panels, found ${islands.length}`);
+}
+const crimsonIslands = islands.sort((a, b) => (
+  a.center[2] - b.center[2] || a.center[0] - b.center[0]
+));
+const crimsonTris = new Set(crimsonIslands.flatMap((island) => island.tris));
+console.log(`crimson square panels: ${crimsonIslands.length}`);
 
 // ── binary append helpers ──────────────────────────────────────────────────
 const copiedChunks = [bin];
@@ -278,8 +279,8 @@ const crimsonMaterial = gltf.materials.push({
 }) - 1;
 
 const newNodeIndices = [];
-for (let panelIndex = 0; panelIndex < corridorIslands.length; panelIndex++) {
-  const island = corridorIslands[panelIndex];
+for (let panelIndex = 0; panelIndex < crimsonIslands.length; panelIndex++) {
+  const island = crimsonIslands[panelIndex];
 
   // Used vertices + remap.
   const used = [...new Set(island.tris.flatMap((t) => [indices[t * 3], indices[t * 3 + 1], indices[t * 3 + 2]]))];
@@ -365,9 +366,9 @@ for (let panelIndex = 0; panelIndex < corridorIslands.length; panelIndex++) {
   newNodeIndices.push(nodeIndex);
 }
 
-// Original mesh keeps only the non-corridor (south strip) islands.
+// Every authored square panel is now represented by its own crimson fixture.
 const remainingTris = [];
-for (let t = 0; t < triCount; t++) if (!corridorTris.has(t)) remainingTris.push(t);
+for (let t = 0; t < triCount; t++) if (!crimsonTris.has(t)) remainingTris.push(t);
 const remainingIndices = new (COMP[primitive.indices !== undefined ? gltf.accessors[primitive.indices].componentType : 5125])(remainingTris.length * 3);
 for (let i = 0; i < remainingTris.length; i++) {
   const t = remainingTris[i];
@@ -387,5 +388,5 @@ const temporaryPath = `${newModelPath}.tmp`;
 writeGlb(temporaryPath, gltf, combinedBin);
 fs.copyFileSync(temporaryPath, newModelPath);
 fs.unlinkSync(temporaryPath);
-console.log(`Split ${corridorIslands.length} corridor panels into crimson fixtures in ${newModelPath}`);
-console.log(`Original mesh keeps ${remainingTris.length} triangles (south strip panels)`);
+console.log(`Split ${crimsonIslands.length} square panels into crimson fixtures in ${newModelPath}`);
+console.log(`Original shared panel mesh keeps ${remainingTris.length} triangles`);

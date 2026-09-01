@@ -542,6 +542,154 @@ function scheduleGlassKnock(
   });
 }
 
+// ══════════════════════════════════════════════════
+// 医学院顶层 — 敲门、病床、灯具与电梯
+// ══════════════════════════════════════════════════
+
+/** Dry wooden knocks from behind 601. Count is intentionally audible. */
+export function playMedicalKnocks(count: 2 | 3): void {
+  const audioCtx = getCtx();
+  const master = audioCtx.createGain();
+  master.gain.value = 0.72;
+  master.connect(audioCtx.destination);
+  let remaining = count;
+  for (let index = 0; index < count; index++) {
+    // The third knock lands a fraction late so it cannot be mistaken for the
+    // tail of the second. The route is resolved only after this sound ends.
+    const at = audioCtx.currentTime + (index === 2 ? 1.08 : index * 0.46);
+    const body = audioCtx.createOscillator();
+    body.type = "sine";
+    body.frequency.setValueAtTime(118, at);
+    body.frequency.exponentialRampToValueAtTime(54, at + 0.16);
+    const bodyGain = audioCtx.createGain();
+    bodyGain.gain.setValueAtTime(0.001, at);
+    bodyGain.gain.linearRampToValueAtTime(0.42, at + 0.006);
+    bodyGain.gain.exponentialRampToValueAtTime(0.001, at + 0.22);
+    const wood = audioCtx.createBiquadFilter();
+    wood.type = "bandpass";
+    wood.frequency.value = 420;
+    wood.Q.value = 0.8;
+    body.connect(wood).connect(bodyGain).connect(master);
+    body.addEventListener("ended", () => {
+      body.disconnect();
+      wood.disconnect();
+      bodyGain.disconnect();
+      remaining--;
+      if (remaining === 0) master.disconnect();
+    }, { once: true });
+    body.start(at);
+    body.stop(at + 0.24);
+  }
+}
+
+/** One red-frame pass: rubber castors, dry bearing squeal and metal drag. */
+export function playMedicalBedPass(progress = 0.5): void {
+  const audioCtx = getCtx();
+  const now = audioCtx.currentTime;
+  const panner = audioCtx.createStereoPanner();
+  panner.pan.value = Math.max(-0.9, Math.min(0.9, progress * 1.8 - 0.9));
+  const master = audioCtx.createGain();
+  master.gain.setValueAtTime(0.26, now);
+  master.gain.exponentialRampToValueAtTime(0.001, now + 0.92);
+  panner.connect(master).connect(audioCtx.destination);
+
+  const noiseBuffer = audioCtx.createBuffer(1, Math.floor(audioCtx.sampleRate * 0.9), audioCtx.sampleRate);
+  const noise = noiseBuffer.getChannelData(0);
+  let brown = 0;
+  for (let index = 0; index < noise.length; index++) {
+    brown = (brown + 0.035 * (Math.random() * 2 - 1)) / 1.035;
+    noise[index] = brown * 3.4 * (0.55 + 0.45 * Math.sin(index * 0.061));
+  }
+  const drag = audioCtx.createBufferSource();
+  drag.buffer = noiseBuffer;
+  const dragBand = audioCtx.createBiquadFilter();
+  dragBand.type = "bandpass";
+  dragBand.frequency.value = 330;
+  dragBand.Q.value = 0.58;
+  drag.connect(dragBand).connect(panner);
+
+  const squeal = audioCtx.createOscillator();
+  squeal.type = "sawtooth";
+  squeal.frequency.setValueAtTime(910, now);
+  squeal.frequency.linearRampToValueAtTime(560, now + 0.82);
+  const squealGain = audioCtx.createGain();
+  squealGain.gain.setValueAtTime(0.035, now);
+  squealGain.gain.exponentialRampToValueAtTime(0.001, now + 0.88);
+  squeal.connect(squealGain).connect(panner);
+
+  drag.start(now);
+  squeal.start(now);
+  let remaining = 2;
+  const releaseSharedNodes = (): void => {
+    remaining--;
+    if (remaining === 0) {
+      panner.disconnect();
+      master.disconnect();
+    }
+  };
+  drag.addEventListener("ended", () => {
+    drag.disconnect();
+    dragBand.disconnect();
+    releaseSharedNodes();
+  }, { once: true });
+  squeal.addEventListener("ended", () => {
+    squeal.disconnect();
+    squealGain.disconnect();
+    releaseSharedNodes();
+  }, { once: true });
+  drag.stop(now + 0.9);
+  squeal.stop(now + 0.9);
+}
+
+/** Electrical pop shared by the three warning flashes and each dying lamp. */
+export function playMedicalLightBurst(progress = 0): void {
+  const audioCtx = getCtx();
+  const now = audioCtx.currentTime;
+  const buffer = audioCtx.createBuffer(1, Math.floor(audioCtx.sampleRate * 0.16), audioCtx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let index = 0; index < data.length; index++) {
+    data[index] = (Math.random() * 2 - 1) * Math.exp(-index / (audioCtx.sampleRate * 0.018));
+  }
+  const source = audioCtx.createBufferSource();
+  source.buffer = buffer;
+  const high = audioCtx.createBiquadFilter();
+  high.type = "highpass";
+  high.frequency.value = 850 + progress * 500;
+  const gain = audioCtx.createGain();
+  gain.gain.setValueAtTime(0.18, now);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+  source.connect(high).connect(gain).connect(audioCtx.destination);
+  source.addEventListener("ended", () => {
+    source.disconnect();
+    high.disconnect();
+    gain.disconnect();
+  }, { once: true });
+  source.start(now);
+}
+
+/** Restrained two-note lift chime before the black-screen level handoff. */
+export function playMedicalElevatorChime(): void {
+  const audioCtx = getCtx();
+  const now = audioCtx.currentTime;
+  [659.25, 783.99].forEach((frequency, index) => {
+    const oscillator = audioCtx.createOscillator();
+    oscillator.type = "sine";
+    oscillator.frequency.value = frequency;
+    const gain = audioCtx.createGain();
+    const at = now + index * 0.18;
+    gain.gain.setValueAtTime(0.001, at);
+    gain.gain.linearRampToValueAtTime(0.1, at + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, at + 0.7);
+    oscillator.connect(gain).connect(audioCtx.destination);
+    oscillator.addEventListener("ended", () => {
+      oscillator.disconnect();
+      gain.disconnect();
+    }, { once: true });
+    oscillator.start(at);
+    oscillator.stop(at + 0.72);
+  });
+}
+
 /** Schedule the three knocks; exported so the exact production sound can be rendered in audio QA. */
 export function scheduleBaishaWindowKnocks(
   audioCtx: BaseAudioContext,

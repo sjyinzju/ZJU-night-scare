@@ -1,4 +1,5 @@
 import { assetUrl } from "./assetPath";
+import type { JumpscareContext } from "./jumpscareTexts";
 
 export type JumpscareSpriteId = "library-shelf" | "library-fall";
 
@@ -18,6 +19,17 @@ const spriteRecords = new Map<JumpscareSpriteId, SpriteRecord>();
 
 export function jumpscareSpriteUrl(spriteId: JumpscareSpriteId): string {
   return assetUrl(`images/jumpscares/${spriteFiles[spriteId]}`);
+}
+
+/**
+ * A `jumpscare` effect always has a decoded bitmap. Text-only shocks use the
+ * separate shake/text effect path and therefore never reach this resolver.
+ */
+export function defaultJumpscareSprite(context: JumpscareContext): JumpscareSpriteId {
+  if (context === "library_fall" || context === "story_death" || context === "ghost_caught") {
+    return "library-fall";
+  }
+  return "library-shelf";
 }
 
 function createSpriteRecord(spriteId: JumpscareSpriteId): SpriteRecord {

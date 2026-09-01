@@ -1,0 +1,69 @@
+{
+  "assetVersion": 7,
+  "buildingId": "medical-college",
+  "roomKind": "medical",
+  "model": "medical-top.glb",
+  "qualityProfile": "authored-segmented-medical-school",
+  "medicalSegmentSpawns": {
+    "top": { "x": 13.42, "y": 1.6, "z": 0.34, "yaw": 1.5707963267948966 },
+    "garage": { "x": 0, "y": 1.6, "z": 0, "yaw": 1.5707963267948966 },
+    "basement": { "x": 0, "y": 1.6, "z": 0, "yaw": 1.5707963267948966 }
+  },
+  "medicalTopGameplay": {
+    "spawn": { "x": 13.42, "y": 1.6, "z": 0.34, "yaw": 1.5707963267948966 },
+    "noticeBoard": { "x": 10.03, "y": 1.08, "z": -3.54, "radius": 1.65, "visualName": "medical_notice_board_anchor" },
+    "portalWallVisualNames": ["Geom3D_3d66.com_1188512", "Geom3D.125", "Geom3D.129", "Geom3D_.056", "Geom3D.640"],
+    "corridor": { "minX": -16.1, "maxX": 16.1, "minZ": -3.72, "maxZ": 1.34, "safeStripWidth": 0.75 },
+    "bed": {
+      "model": "medical-top-props.glb",
+      "objectName": "medical_corridor_bed",
+      "positions": [
+        { "x": -15.2, "y": 0, "z": -0.9 }, { "x": -9.12, "y": 0, "z": -0.9 },
+        { "x": -3.04, "y": 0, "z": -0.9 }, { "x": 3.04, "y": 0, "z": -0.9 },
+        { "x": 9.12, "y": 0, "z": -0.9 }, { "x": 15.2, "y": 0, "z": -0.9 }
+      ],
+      "size": { "x": 2, "y": 1.1, "z": 0.95 }
+    },
+    "rooms": {
+      "601": {
+        "model": "medical-top-601.glb", "doorVisualName": "door 12.005",
+        "door": { "x": -3.674, "y": 1.1, "z": 1.524, "radius": 1.45 },
+        "roomBounds": { "minX": -5.25, "maxX": -2.1, "minZ": 1.7, "maxZ": 6.7 },
+        "clueSpots": [{ "id": "record", "x": -2.88, "y": 0.82, "z": 4.04, "radius": 1.15 }]
+      },
+      "603": {
+        "model": "medical-top-603.glb", "doorVisualName": "door 12.004",
+        "door": { "x": 0.276, "y": 1.1, "z": 1.524, "radius": 1.45 },
+        "roomBounds": { "minX": -1.32, "maxX": 1.88, "minZ": 1.7, "maxZ": 6.7 },
+        "clueSpots": [
+          { "id": "skull", "x": 0.276, "y": 0.92, "z": 3.94, "radius": 1.05 },
+          { "id": "sedative", "x": 1.42, "y": 0.9, "z": 4.74, "radius": 0.92 },
+          { "id": "fuse", "x": 0.32, "y": 0.9, "z": 4.94, "radius": 0.82 }
+        ]
+      },
+      "605": {
+        "model": "medical-top-605.glb", "doorVisualName": "door 12.001",
+        "door": { "x": 4.355, "y": 1.1, "z": 1.524, "radius": 1.45 },
+        "roomBounds": { "minX": 2.75, "maxX": 5.95, "minZ": 1.7, "maxZ": 6.7 },
+        "clueSpots": [{ "id": "monitor", "x": 5.42, "y": 0.82, "z": 4.34, "radius": 1.1 }]
+      }
+    },
+    "fixtureNames": [
+      "legacy_crimson_fluorescent_1_tube", "legacy_crimson_fluorescent_2_tube",
+      "legacy_crimson_fluorescent_3_tube", "legacy_crimson_fluorescent_4_tube",
+      "legacy_crimson_fluorescent_5_tube", "legacy_crimson_fluorescent_6_tube",
+      "legacy_crimson_fluorescent_7_tube", "legacy_crimson_fluorescent_8_tube",
+      "legacy_crimson_fluorescent_9_tube", "legacy_crimson_fluorescent_10_tube",
+      "legacy_crimson_fluorescent_11_tube", "legacy_crimson_fluorescent_12_tube"
+    ],
+    "elevator": { "x": -16.2, "y": 0, "z": 0.8, "radius": 1.2 },
+    "checkpoints": {
+      "bed": { "x": 10.8, "y": 1.6, "z": -3.05, "yaw": 1.5707963267948966 },
+      "escape": { "x": 5.8, "y": 1.6, "z": -2.4, "yaw": 1.5707963267948966 }
+    }
+  },
+  "notes": [
+    "All top gameplay coordinates use the runtime Three.js frame.",
+    "Room GLBs share the same rebased frame and load independently."
+  ]
+}
