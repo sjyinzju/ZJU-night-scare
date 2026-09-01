@@ -43,30 +43,75 @@ const ORIGIN_Y = 120;
 const MAP_W = 42;
 const MAP_D = 34;
 const EXTERIOR_SPRITE_KEYS: Record<string, string> = {
+  "main-gate": "exterior-main-gate",
+  "dorm-lantian": "exterior-dorm-lantian",
+  "dorm-danyang": "exterior-dorm-danyang",
+  "dorm-cuibai": "exterior-dorm-cuibai",
   "medical-library": "exterior-medical-library",
   "medical-college": "exterior-medical-college",
   "dorm-baisha": "exterior-dorm-baisha",
   "little-theater": "exterior-little-theater",
   "linhu-canteen": "exterior-linhu-canteen",
+  "west-teaching": "exterior-west-teaching",
+  "ocean-building": "exterior-ocean-building",
+  "qiushi-auditorium": "exterior-qiushi-auditorium",
+  "marine-lab": "exterior-marine-lab",
+  "engineering-lab": "exterior-engineering-lab",
+  "agri-life": "exterior-agri-life",
+  "library": "exterior-library",
   "east-teaching-1": "exterior-east-teaching-1",
   "east-teaching-2": "exterior-east-teaching-2",
   "east-teaching-3": "exterior-east-teaching-3",
   "east-teaching-4": "exterior-east-teaching-4",
+  "east-teaching-5": "exterior-east-teaching-5",
+  "east-teaching-6": "exterior-east-teaching-6",
+  "east-teaching-7": "exterior-east-teaching-7",
+  "gym": "exterior-gym",
+  "life-science": "exterior-life-science",
+  "environment-college": "exterior-environment-college",
 };
+
+const LANDMARK_SPRITE_KEYS = {
+  crescent: "exterior-crescent-building",
+  admin: "exterior-admin-center",
+} as const;
 
 // Blender exports keep transparent breathing room around each render.  Anchor
 // the visible pixels (rather than the full 1280x960 canvas) to the building's
 // front edge so the model actually sits on the map.
 const EXTERIOR_SPRITE_ORIGINS: Record<string, { x: number; y: number }> = {
+  "main-gate": { x: 0.5, y: 0.9509 },
+  "dorm-lantian": { x: 0.5, y: 0.9575 },
+  "dorm-danyang": { x: 0.5, y: 0.9543 },
+  "dorm-cuibai": { x: 0.5, y: 0.9493 },
   "medical-library": { x: 0.5, y: 0.8833 },
   "medical-college": { x: 0.5, y: 0.899 },
   "dorm-baisha": { x: 0.5, y: 0.8896 },
   "little-theater": { x: 0.5, y: 0.8729 },
   "linhu-canteen": { x: 0.5121, y: 0.9427 },
+  "west-teaching": { x: 0.5, y: 0.9634 },
+  "ocean-building": { x: 0.5, y: 0.9594 },
+  "qiushi-auditorium": { x: 0.5, y: 0.9615 },
+  "marine-lab": { x: 0.5, y: 0.9629 },
+  "engineering-lab": { x: 0.5, y: 0.9606 },
+  "agri-life": { x: 0.5, y: 0.959 },
+  "library": { x: 0.5, y: 0.9647 },
   "east-teaching-1": { x: 0.4746, y: 0.9885 },
   "east-teaching-2": { x: 0.477, y: 0.9896 },
   "east-teaching-3": { x: 0.4754, y: 0.9854 },
   "east-teaching-4": { x: 0.4777, y: 0.9813 },
+  "east-teaching-5": { x: 0.5, y: 0.9616 },
+  "east-teaching-6": { x: 0.5, y: 0.9637 },
+  "east-teaching-7": { x: 0.5, y: 0.9627 },
+  "gym": { x: 0.5, y: 0.9485 },
+  "life-science": { x: 0.5, y: 0.961 },
+  "environment-college": { x: 0.5, y: 0.9622 },
+};
+
+// Only correct visual proportions here. Gameplay footprints, collision and
+// entrance coordinates continue to use the original mapData values.
+const EXTERIOR_SPRITE_SCALES: Record<string, number> = {
+  "dorm-lantian": 0.8,
 };
 // Old movement used 0.075 * speed per frame. Keep the 60fps feel while
 // making movement frame-rate independent.
@@ -269,6 +314,8 @@ export class CampusScene extends Phaser.Scene {
     Object.entries(EXTERIOR_SPRITE_KEYS).forEach(([buildingId, textureKey]) => {
       this.load.image(textureKey, assetUrl(`assets/exterior/${buildingId}/${buildingId}.png`));
     });
+    this.load.image(LANDMARK_SPRITE_KEYS.crescent, assetUrl("assets/exterior/crescent-building/crescent-building.png"));
+    this.load.image(LANDMARK_SPRITE_KEYS.admin, assetUrl("assets/exterior/admin-center/admin-center.png"));
   }
 
   create() {
@@ -538,17 +585,35 @@ export class CampusScene extends Phaser.Scene {
       bridgeGraphics.setDepth(16.4);
     }
 
-    // 月牙楼先用可替换的几何地标占位，后续贴图只需替换这个对象，不触碰
-    // 任何剧情或路线数据。
-    const crescent = this.toScreen({ x: 23.1, y: 6.3 });
-    const crescentGraphics = this.add.graphics();
-    crescentGraphics.fillStyle(0x52615d, 0.88);
-    crescentGraphics.fillEllipse(crescent.x, crescent.y - 12, 112, 52);
-    crescentGraphics.fillStyle(0x0b1719, 1);
-    crescentGraphics.fillEllipse(crescent.x + 17, crescent.y - 18, 88, 42);
-    crescentGraphics.lineStyle(3, 0x9aafa3, 0.42);
-    crescentGraphics.strokeEllipse(crescent.x, crescent.y - 12, 112, 52);
-    crescentGraphics.setDepth(crescent.y + 18);
+    // 月牙楼与行政楼是纯导航地标。它们使用 Blender 外观，但不写入
+    // campusBuildings，因此不会新增碰撞、改变道路或影响剧情触发坐标。
+    const drawDecorativeLandmark = (
+      textureKey: string,
+      anchorIso: IsoPoint,
+      displayHeight: number,
+      originY: number,
+      labelText: string,
+    ) => {
+      if (!this.textures.exists(textureKey)) return;
+      const anchor = this.toScreen(anchorIso);
+      const shadow = this.add.ellipse(anchor.x + 6, anchor.y + 5, displayHeight * 1.18, displayHeight * 0.24, 0x010405, 0.30);
+      shadow.setDepth(anchor.y - 1);
+      const sprite = this.add.image(anchor.x, anchor.y + 2, textureKey).setOrigin(0.5, originY);
+      sprite.setDisplaySize(displayHeight * (sprite.width / sprite.height), displayHeight);
+      sprite.setDepth(anchor.y + 1);
+      const label = this.add.text(anchor.x, anchor.y - displayHeight * 0.78, labelText, {
+        fontFamily: "Microsoft YaHei, sans-serif",
+        fontSize: "13px",
+        color: "#c7d7cf",
+        backgroundColor: "rgba(0, 3, 3, 0.72)",
+        padding: { x: 7, y: 3 },
+      }).setOrigin(0.5);
+      label.setAlpha(0.46);
+      label.setDepth(anchor.y + 2);
+    };
+
+    drawDecorativeLandmark(LANDMARK_SPRITE_KEYS.crescent, { x: 23.1, y: 7.45 }, 176, 0.9577, "月牙楼");
+    drawDecorativeLandmark(LANDMARK_SPRITE_KEYS.admin, { x: 38.2, y: 18.9 }, 196, 0.9505, "行政楼");
   }
 
   private drawDiamond(graphics: Phaser.GameObjects.Graphics, x: number, y: number, color: number, alpha = 1) {
@@ -1239,8 +1304,9 @@ export class CampusScene extends Phaser.Scene {
     const footprintScreenWidth = (building.w + building.d) * (TILE_W / 2) + 18;
     const expectedScreenHeight = building.h * 28 + (building.w + building.d) * (TILE_H / 2) + 18;
     const aspect = sprite.width > 0 && sprite.height > 0 ? sprite.width / sprite.height : 1;
-    const width = Math.max(footprintScreenWidth, expectedScreenHeight * aspect);
-    sprite.setDisplaySize(width, expectedScreenHeight);
+    const visualScale = EXTERIOR_SPRITE_SCALES[building.id] ?? 1;
+    const width = Math.max(footprintScreenWidth, expectedScreenHeight * aspect) * visualScale;
+    sprite.setDisplaySize(width, expectedScreenHeight * visualScale);
     sprite.setDepth(depth + 1);
     sprite.setData("buildingId", building.id);
     this.exteriorBuildingSprites.set(building.id, sprite);
