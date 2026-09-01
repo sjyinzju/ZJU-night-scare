@@ -94,7 +94,9 @@ export default function InteriorOverlay({
     && new URLSearchParams(window.location.search).get("baishaGameplayDebug") === "1";
   const baishaChaseOnly = building.id === "dorm-baisha"
     && shouldUseBaishaDirectChaseTest();
-  const concealBaishaUntilReady = building.id === "dorm-baisha" && assetState !== "ready";
+  const concealUntilAuthoredAssetReady = (
+    building.id === "dorm-baisha" || building.id === "medical-college"
+  ) && assetState !== "ready";
 
   useEffect(() => {
     if (!baishaChaseOnly || assetState !== "ready") return;
@@ -567,13 +569,8 @@ export default function InteriorOverlay({
         }}
       />
 
-      {/*
-       * The authored Baisha scene is large enough that its procedural room can
-       * otherwise be visible for several seconds on a cold network load. Keep
-       * this veil owned by the interior itself so a stale outer loading state
-       * can never expose the fallback room or its provisional minimap.
-       */}
-      {concealBaishaUntilReady && (
+      {/* Required authored scenes stay veiled until their GLB is ready. */}
+      {concealUntilAuthoredAssetReady && (
         <div
           className="interiorAssetCurtain"
           style={styles.assetCurtain}
@@ -581,9 +578,13 @@ export default function InteriorOverlay({
           aria-live="polite"
         >
           <span style={styles.assetCurtainText}>
-            {assetState === "failed"
-              ? "白沙宿舍 / 场景读取失败，请刷新后重试"
-              : "白沙宿舍 / 正在适应黑暗"}
+            {building.id === "medical-college"
+              ? assetState === "failed"
+                ? "医学院 / 场景读取失败，请刷新后重试"
+                : "医学院 / 黑暗中有什么正在显现"
+              : assetState === "failed"
+                ? "白沙宿舍 / 场景读取失败，请刷新后重试"
+                : "白沙宿舍 / 正在适应黑暗"}
           </span>
         </div>
       )}

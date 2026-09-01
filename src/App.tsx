@@ -89,6 +89,10 @@ const BAISHA_CHASE_ONLY = shouldUseBaishaDirectChaseTest();
 const BAISHA_DEVELOPMENT_PLAYER = new URLSearchParams(window.location.search).get("baishaDoor") === "1"
   ? { x: 7.6, y: 8.11 }
   : { x: 19.4, y: 30.2 };
+// Temporary scene-03 workflow: normal development starts at the medical
+// college entrance story instead of replaying the completed earlier chapters.
+const MEDICAL_DEVELOPMENT_START = import.meta.env.DEV;
+const MEDICAL_DEVELOPMENT_PLAYER = { x: 12.5, y: 30.0 };
 
 function createBaishaDevelopmentStoryState(chaseOnly = false): GameStore["storyState"] {
   return {
@@ -105,6 +109,26 @@ function createBaishaDevelopmentStoryState(chaseOnly = false): GameStore["storyS
     log: [
       "你带着借阅小票和从农医馆取得的符纸回到校园。",
       "林伟坠楼前留下的线索指向白沙宿舍。",
+    ],
+  };
+}
+
+function createMedicalDevelopmentStoryState(): GameStore["storyState"] {
+  return {
+    currentSceneId: "medical_entry",
+    stats: { sanity: 67, stamina: 72, clues: 58, trust: 62, affection: 8 },
+    inventory: ["flashlight", "receipt", "talisman", "diary", "key_card", "medicine"],
+    flags: {
+      talisman_collected: true,
+      library_fall_witnessed: true,
+      readForum: true,
+      baishaEscaped: true,
+    },
+    visitedHotspots: ["library", "dorm", "canteen", "du-office", "medical-college"],
+    completedHotspots: ["library", "dorm", "canteen", "du-office"],
+    log: [
+      "你带着门禁卡与杜学民交给你的镇定药来到医学院。",
+      "林伟留下的线索指向教学楼地下仓库。",
     ],
   };
 }
@@ -861,6 +885,17 @@ function App() {
       setPhaserReady(true);
       return;
     }
+    if (MEDICAL_DEVELOPMENT_START) {
+      setLaunchMode(null);
+      setLaunchAssetState("loading");
+      setStoryState(() => createMedicalDevelopmentStoryState());
+      startSession({ id: "medical-college", name: "医学院", zone: "academic" });
+      closeInterior();
+      setPlayerIso({ ...MEDICAL_DEVELOPMENT_PLAYER });
+      setActiveSceneId("medical_entry");
+      setPhaserReady(true);
+      return;
+    }
     setPhaserReady(false); // 不加载 2.5D 地图，直接进入 3D 内景
     setLaunchAssetState("loading");
     setAssetLoadAttempt((value) => value + 1);
@@ -868,7 +903,7 @@ function App() {
     // 使用 storyEngine 统一解析起始建筑（始终从第一个热点开始）
     const startBuilding = resolveGameStartBuilding();
     startSession(startBuilding ?? { id: "medical-library", name: "农医馆", zone: "story" });
-  }, [closeInterior, scene01Debug, setPlayerIso, setStoryState, startSession]);
+  }, [closeInterior, scene01Debug, setActiveSceneId, setPlayerIso, setStoryState, startSession]);
 
   const restartGame = useCallback(() => {
     resetAll();
@@ -877,13 +912,26 @@ function App() {
     setLaunchAssetState("loading");
     setAssetLoadAttempt((value) => value + 1);
     setPhaserReady(false);
+    if (MEDICAL_DEVELOPMENT_START && !BAISHA_CHASE_ONLY && !BAISHA_DEVELOPMENT_START) {
+      setLaunchMode(null);
+      setStoryState(() => createMedicalDevelopmentStoryState());
+      startSession({ id: "medical-college", name: "医学院", zone: "academic" });
+      closeInterior();
+      setPlayerIso({ ...MEDICAL_DEVELOPMENT_PLAYER });
+      setActiveSceneId("medical_entry");
+      setPhaserReady(true);
+      miniMapSnapshotRef.current = { player: { ...MEDICAL_DEVELOPMENT_PLAYER }, ghostVisible: false };
+      resetAudio();
+      setGameSessionId((value) => value + 1);
+      return;
+    }
     setLaunchMode("restart");
     const startBuilding = resolveGameStartBuilding();
     startSession(startBuilding ?? { id: "medical-library", name: "农医馆", zone: "story" });
     miniMapSnapshotRef.current = { player: { x: 19.4, y: 30.2 }, ghostVisible: false };
     resetAudio();
     setGameSessionId((value) => value + 1);
-  }, [resetAll, resetAudio, startSession]);
+  }, [closeInterior, resetAll, resetAudio, setActiveSceneId, setPlayerIso, setStoryState, startSession]);
 
   const handleLaunchEnter = useCallback(() => {
     setLaunchMode(null);

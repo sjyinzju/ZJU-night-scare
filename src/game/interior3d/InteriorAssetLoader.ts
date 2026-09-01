@@ -188,7 +188,11 @@ export interface InteriorAssetRequest {
   buildingId: string;
   roomKind: RoomKind;
   isMobile: boolean;
+  /** Medical-school level requested by the future black-screen transition. */
+  medicalSegment?: MedicalInteriorSegment;
 }
+
+export type MedicalInteriorSegment = "top" | "garage" | "basement";
 
 interface InteriorAssetSource {
   rootPath: string;
@@ -206,6 +210,10 @@ interface InteriorAssetSource {
     yaw: number;
     pitch?: number;
   };
+  /** Runtime translation applied before bounds and collision projection. */
+  offset?: { x: number; y: number; z: number };
+  /** Large vertically stacked interiors can stream one level at a time. */
+  segmentModels?: Record<MedicalInteriorSegment, string>;
 }
 
 /** Resolve Blender/GLB source names after GLTFLoader removes track-reserved characters. */
@@ -227,6 +235,29 @@ const ASSET_SOURCES: Record<string, InteriorAssetSource> = {
     metaFile: "scene01.meta.json",
     viewpointName: "新页面",
     previewViewpoint: { x: 8.62, y: 1.6, z: 10.53, yaw: Math.PI / 4, pitch: -0.3 },
+  },
+  "medical-college:medical": {
+    rootPath: "models/interiors/medical-school",
+    model: "medical-top.glb",
+    cacheVersion: "medical-school-v3-segments",
+    segmentModels: {
+      top: "medical-top.glb",
+      garage: "medical-garage.glb",
+      basement: "medical-basement.glb",
+    },
+    // The authored top teaching floor is centred around (312.58, 0, -207.34).
+    // Move it to the runtime origin so camera and lighting stay numerically
+    // stable while the multi-level collision/navigation pass is still pending.
+    // The teaching floor's walking surface sits at authored Z = 0.5, not 0:
+    // without the -0.5 Y shift the floor plane falls inside the collision
+    // slice (0.16..1.45) and the whole corridor rasterises into obstacles.
+    // With the shift the floor lands at runtime Y = 0, matching both the
+    // collision slice assumption and the flat floorHeightAt() baseline.
+    offset: { x: -312.58, y: -0.5, z: 207.34 },
+    // The model uses a Blender Z-up coordinate system. After applying the
+    // source offset this point lands inside the top-floor central corridor,
+    // looking west along its full length instead of into the nearby divider.
+    previewViewpoint: { x: 13.42, y: 1.6, z: 0.34, yaw: Math.PI / 2 },
   },
   "dorm-baisha:dorm": {
     rootPath: "models/interiors/baisha",
@@ -298,9 +329,10 @@ function resolveModelFiles(
   source: InteriorAssetSource,
   meta?: InteriorAssetMeta,
 ): string[] {
+  const segmentedModel = source.segmentModels?.[req.medicalSegment ?? "top"];
   const preferredModel = req.isMobile
-    ? (source.lodModel ?? meta?.lodModel ?? source.model)
-    : (meta?.model ?? source.model);
+    ? (source.lodModel ?? meta?.lodModel ?? segmentedModel ?? source.model)
+    : (segmentedModel ?? meta?.model ?? source.model);
   const extraModels = meta?.additionalModels ?? source.additionalModels ?? [];
   return [preferredModel, ...extraModels];
 }
@@ -325,6 +357,32 @@ export async function preloadInteriorAsset(req: InteriorAssetRequest): Promise<v
   await Promise.all(resolvedFiles.map((file) => fetchBinaryAsset(sourceAssetUrl(source, file))));
 }
 
+const MEDICAL_SEGMENT_ORDER: MedicalInteriorSegment[] = ["top", "garage", "basement"];
+
+/**
+ * Resolve the level owned by the current story phase. The actual black-screen
+ * scene transition will consume this mapping later; keeping it here ensures
+ * loading and preloading use one source of truth.
+ */
+export function getMedicalInteriorSegment(sceneId?: string): MedicalInteriorSegment {
+  if (sceneId === "medical_garage") return "garage";
+  if (sceneId === "medical_vault" || sceneId === "ghost_choice" || sceneId === "stand_ground") {
+    return "basement";
+  }
+  return "top";
+}
+
+/** Download only the segment immediately after the one currently displayed. */
+export async function preloadNextMedicalInteriorSegment(
+  req: Omit<InteriorAssetRequest, "medicalSegment">,
+  current: MedicalInteriorSegment,
+): Promise<void> {
+  const currentIndex = MEDICAL_SEGMENT_ORDER.indexOf(current);
+  const next = MEDICAL_SEGMENT_ORDER[currentIndex + 1];
+  if (!next) return;
+  await preloadInteriorAsset({ ...req, medicalSegment: next });
+}
+
 function getAuthoredViewpoint(root: THREE.Group, name?: string): InteriorAssetHandle["viewpoint"] {
   if (!name) return undefined;
   root.updateMatrixWorld(true);
@@ -342,8 +400,9 @@ function getPreviewViewpoint(
   source: InteriorAssetSource,
   root: THREE.Group,
   meta?: InteriorAssetMeta,
+  medicalSegment?: MedicalInteriorSegment,
 ): InteriorAssetHandle["viewpoint"] {
-  if (source.previewViewpoint) {
+  if (source.previewViewpoint && (!source.segmentModels || medicalSegment === undefined || medicalSegment === "top")) {
     const view = source.previewViewpoint;
     return {
       position: new THREE.Vector3(view.x, view.y, view.z),
@@ -384,6 +443,12 @@ function tuneLoadedScene(root: THREE.Group): void {
       standard.needsUpdate = true;
     }
   });
+}
+
+function applySourceOffset(root: THREE.Group, source: InteriorAssetSource): void {
+  if (!source.offset) return;
+  root.position.add(new THREE.Vector3(source.offset.x, source.offset.y, source.offset.z));
+  root.updateMatrixWorld(true);
 }
 
 function applyBaishaWindowCutout(
@@ -670,6 +735,7 @@ export async function loadInteriorAsset(req: InteriorAssetRequest): Promise<Inte
   const [gltf, ...extras] = parsedModels;
   const authoredBaseRoot = gltf.scene as THREE.Group;
   tuneLoadedScene(authoredBaseRoot);
+  applySourceOffset(authoredBaseRoot, source);
   const bounds = new THREE.Box3().setFromObject(authoredBaseRoot);
   // Collision is projected from the original object granularity. Rendering
   // batches must never change obstacle classification or navigation gaps.
@@ -707,9 +773,10 @@ export async function loadInteriorAsset(req: InteriorAssetRequest): Promise<Inte
   for (const extra of extras) {
     const extraRoot = extra.scene as THREE.Group;
     tuneLoadedScene(extraRoot);
+    applySourceOffset(extraRoot, source);
     root.add(extraRoot);
   }
-  const viewpoint = getPreviewViewpoint(source, root, meta);
+  const viewpoint = getPreviewViewpoint(source, root, meta, req.medicalSegment);
 
   return {
     root,

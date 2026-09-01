@@ -79,8 +79,8 @@ const INTERIOR_STORY_TRIGGERS: Record<string, InteriorStoryTriggerDefinition[]> 
   dorm: [{ sceneId: "dorm_forum", position: "forum", action: "story", activeSceneIds: ["dorm_forum"] }],
   hall: [{ sceneId: "final_plan", position: "stage", action: "story", activeSceneIds: ["final_plan"] }],
   medical: [
-    { sceneId: "medical_garage", position: "garage", action: "story", activeSceneIds: ["medical_garage"], radius: 1.15 },
     { sceneId: "medical_window", position: "window", action: "story", activeSceneIds: ["medical_window"], radius: 1.2 },
+    { sceneId: "medical_garage", position: "garage", action: "story", activeSceneIds: ["medical_garage"], radius: 1.15 },
     { sceneId: "medical_vault", position: "vault", action: "story", activeSceneIds: ["medical_vault"], radius: 1.15 },
     { sceneId: "ghost_choice", position: "ghost", action: "story", activeSceneIds: ["ghost_choice"] },
     { sceneId: "stand_ground", position: "stand", action: "story", activeSceneIds: ["stand_ground"] },

@@ -17,10 +17,13 @@ import { CameraController } from "./CameraController";
 import { FlashlightSystem } from "./FlashlightSystem";
 import { getInteriorNpcRevealSceneIds } from "../storyEngine";
 import {
+  getMedicalInteriorSegment,
   getInteriorAssetObject,
   loadInteriorAsset,
+  preloadNextMedicalInteriorSegment,
   type InteriorAssetHandle,
   type InteriorAssetMeta,
+  type MedicalInteriorSegment,
 } from "./InteriorAssetLoader";
 import type { InteriorCollisionMap, InteriorMapObstacle } from "./InteriorCollisionMap";
 import { playBaishaThunder, playLibraryThunder, startLibraryStorm, stopLibraryStorm } from "../audio/proceduralAudio";
@@ -145,6 +148,7 @@ type BaishaTubeRuntime = {
 export class Interior3D {
   private readonly container: HTMLElement;
   private readonly isMobile: boolean;
+  private readonly buildingId: string;
 
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene: THREE.Scene;
@@ -171,6 +175,8 @@ export class Interior3D {
   private playerRadius = DEFAULT_PLAYER_RADIUS;
   private readonly blueprint: InteriorBlueprint;
   private assetHandle?: InteriorAssetHandle;
+  private medicalSegment?: MedicalInteriorSegment;
+  private readonly medicalPreloadsStarted = new Set<MedicalInteriorSegment>();
   private readonly assetPickupVisuals = new Map<string, THREE.Object3D[]>();
   private readonly assetStoryVisuals = new Map<string, THREE.Object3D[]>();
   private readonly pickupsByItemId = new Map<string, RoomBuildResult["pickups"][number]>();
@@ -342,6 +348,7 @@ export class Interior3D {
   constructor(options: Interior3DOptions) {
     this.container = options.container;
     this.isMobile = options.isMobile ?? false;
+    this.buildingId = options.buildingId;
     this.onPickup = options.onPickup;
     this.onStoryTrigger = options.onStoryTrigger;
     this.onExitTrigger = options.onExitTrigger;
@@ -356,6 +363,10 @@ export class Interior3D {
     this.onBaishaChaseStart = options.onBaishaChaseStart;
     this.onBaishaCapture = options.onBaishaCapture;
     this.onBaishaExit = options.onBaishaExit;
+    // Review-only noclip remains available for inspecting the Baisha asset.
+    // The medical school used to need it because the teaching floor plate sat
+    // inside the collision slice; the loader now shifts the asset down 0.5 m
+    // so the top floor collides correctly and review mode is no longer needed.
     this.visualReviewMode = options.buildingId === "dorm-baisha"
       && new URLSearchParams(window.location.search).get("baishaReview") === "1";
     this.perfEnabled = new URLSearchParams(window.location.search).get("perfInterior") === "1";
@@ -1066,14 +1077,28 @@ export class Interior3D {
   }
 
   private async loadStaticInteriorAsset(buildingId: string): Promise<void> {
+    const requiresAuthoredAsset = buildingId === "medical-college";
+    const medicalSegment = requiresAuthoredAsset
+      ? getMedicalInteriorSegment(this.getStorySceneId?.())
+      : undefined;
+    this.medicalSegment = medicalSegment;
+    if (requiresAuthoredAsset) {
+      // The old procedural medical room must never flash through while the
+      // full multi-storey GLB is loading, nor reappear after a failed request.
+      this.room.root.visible = false;
+    }
     this.onAssetStateChange?.("loading");
     try {
       const handle = await loadInteriorAsset({
         buildingId,
         roomKind: this.roomKind,
         isMobile: this.isMobile,
+        medicalSegment,
       });
       if (!handle) {
+        if (requiresAuthoredAsset) {
+          throw new Error(`No authored interior asset is mapped for ${buildingId}:${this.roomKind}`);
+        }
         if (!this.disposed) this.onAssetStateChange?.("ready");
         return;
       }
@@ -1121,6 +1146,7 @@ export class Interior3D {
         this.baishaShadowCameraQuaternion.copy(this.camera.quaternion);
       }
       this.onAssetStateChange?.("ready");
+      if (medicalSegment) this.preloadMedicalSegmentAfter(medicalSegment);
       window.dispatchEvent(new CustomEvent("zju-horror-interior-asset-state", {
         detail: {
           buildingId,
@@ -1131,8 +1157,13 @@ export class Interior3D {
       }));
     } catch (err) {
       if (this.disposed) return;
-      console.warn("[Interior3D] Failed to load static interior asset, using procedural fallback:", err);
-      this.setProceduralRoomVisualsVisible(true);
+      console.warn(
+        requiresAuthoredAsset
+          ? "[Interior3D] Failed to load required medical-school asset; keeping the authored-only curtain visible:"
+          : "[Interior3D] Failed to load static interior asset, using procedural fallback:",
+        err,
+      );
+      if (!requiresAuthoredAsset) this.setProceduralRoomVisualsVisible(true);
       this.onAssetStateChange?.("failed");
       window.dispatchEvent(new CustomEvent("zju-horror-interior-asset-state", {
         detail: { buildingId, roomKind: this.roomKind, loaded: false },
@@ -1146,6 +1177,24 @@ export class Interior3D {
     this.bounds.maxX = assetBounds.maxX;
     this.bounds.minZ = assetBounds.minZ;
     this.bounds.maxZ = assetBounds.maxZ;
+    if (this.roomKind === "medical") {
+      // The medical-school GLB spans more than 100 m. The default 30 m indoor
+      // fog made distant, fully loaded geometry converge to the black
+      // background, which looked like half of the model had failed to load.
+      const spanX = assetBounds.maxX - assetBounds.minX;
+      const spanZ = assetBounds.maxZ - assetBounds.minZ;
+      const horizontalDiagonal = Math.hypot(spanX, spanZ);
+      if (this.scene.fog instanceof THREE.Fog) {
+        this.scene.fog.near = 9;
+        this.scene.fog.far = Math.max(90, horizontalDiagonal * 1.05);
+      }
+      this.camera.far = Math.max(this.camera.far, horizontalDiagonal * 1.25);
+      this.camera.updateProjectionMatrix();
+      this.renderer.toneMappingExposure = 0.85;
+      this.ambientLight.color.setHex(0xaeb8c4);
+      this.fillLight.color.setHex(0x91a6bf);
+      this.fillLight.groundColor.setHex(0x46515e);
+    }
     // The procedural room uses a different coordinate system. Once an
     // authored GLB is present, its projected meshes become collision truth.
     const clearZones = handle.meta?.navigationClearZones ?? [];
@@ -1186,6 +1235,19 @@ export class Interior3D {
     // heading while keeping the playable first-person view near eye level.
     const playablePitch = THREE.MathUtils.clamp(handle.viewpoint.pitch, -0.4, 0.4);
     this.cameraController.setLook(handle.viewpoint.yaw, playablePitch);
+  }
+
+  private preloadMedicalSegmentAfter(current: MedicalInteriorSegment): void {
+    if (this.medicalPreloadsStarted.has(current)) return;
+    this.medicalPreloadsStarted.add(current);
+    void preloadNextMedicalInteriorSegment({
+      buildingId: this.buildingId,
+      roomKind: this.roomKind,
+      isMobile: this.isMobile,
+    }, current).catch((error) => {
+      this.medicalPreloadsStarted.delete(current);
+      console.warn(`[Interior3D] Medical ${current} follow-up preload was unavailable; entry will retry.`, error);
+    });
   }
 
   private bindInteriorAssetMetadata(handle: InteriorAssetHandle): void {
@@ -2666,6 +2728,9 @@ export class Interior3D {
   }
 
   private resolvePenetration(): void {
+    // Noclip review mode must skip penetration pushes too: collides() alone
+    // returning false still left players shoved onto obstacle boundary lines.
+    if (this.visualReviewMode) return;
     const pos = this.camera.position;
     for (let pass = 0; pass < 8; pass++) {
       if (this.perfEnabled) this.perfPenetrationScans++;
@@ -2726,6 +2791,12 @@ export class Interior3D {
     if (sceneId !== this.storySceneId) {
       this.storySceneId = sceneId;
       this.storyPhaseDirty = true;
+      if (this.buildingId === "medical-college" && this.assetHandle && this.medicalSegment) {
+        // Top starts the garage download. Once the story reaches the garage,
+        // the same hook starts the basement download. Loading/switching the
+        // visible level remains the future black-screen transition's job.
+        this.preloadMedicalSegmentAfter(getMedicalInteriorSegment(sceneId));
+      }
     }
     if (inventory !== this.inventorySnapshot || inventory.length !== this.inventoryItems.size) {
       this.inventorySnapshot = inventory;
@@ -2760,16 +2831,26 @@ export class Interior3D {
     const hasFlashlight = this.hasInventoryItem("flashlight");
     const libraryProfile = this.roomKind === "library";
     const baishaProfile = this.roomKind === "dorm" && this.baishaTubes.length > 0;
-    const previewingUnmappedAsset = Boolean(this.assetHandle && !this.assetHandle.meta);
-    const targetAmbient = previewingUnmappedAsset
+    const medicalProfile = this.roomKind === "medical" && Boolean(this.assetHandle);
+    // Medical is an intentional authored scene whose gameplay metadata has not
+    // been mapped yet. It must not inherit the diagnostic 8x flashlight used
+    // for genuinely unmapped model previews.
+    const previewingUnmappedAsset = Boolean(this.assetHandle && !this.assetHandle.meta && !medicalProfile);
+    const targetAmbient = medicalProfile
+      ? hasFlashlight ? 1.65 : 1.35
+      : previewingUnmappedAsset
       ? 0.32
       : baishaProfile ? 0.18
       : hasFlashlight ? (libraryProfile ? 0.34 : 0.85) : libraryProfile ? 0.18 : 0.22;
-    const targetFill = previewingUnmappedAsset
+    const targetFill = medicalProfile
+      ? hasFlashlight ? 0.85 : 0.68
+      : previewingUnmappedAsset
       ? 0.18
       : baishaProfile ? 0.1
       : hasFlashlight ? (libraryProfile ? 0.22 : 0.55) : libraryProfile ? 0.11 : 0.14;
-    const targetNear = previewingUnmappedAsset
+    const targetNear = medicalProfile
+      ? hasFlashlight ? 0.38 : 0.3
+      : previewingUnmappedAsset
       ? 0.25
       : baishaProfile ? 0.2
       : hasFlashlight ? (libraryProfile ? 0.18 : 0.85) : libraryProfile ? 0.24 : 0.24;
@@ -2783,6 +2864,7 @@ export class Interior3D {
     if (hasFlashlight || previewingUnmappedAsset) {
       this.flashlightSys.update(dt, t);
       if (previewingUnmappedAsset) this.flashlight.intensity *= 8;
+      if (medicalProfile) this.flashlight.intensity *= 0.48;
       if (this.fallRevealed) {
         // Outside, retain a readable beam while letting the red streetlamp own
         // the body reveal. Back in the shelf room it returns to full strength.
@@ -3499,6 +3581,7 @@ export class Interior3D {
       `Draw calls: ${renderInfo.render.calls}`,
       `Triangles: ${renderInfo.render.triangles}`,
       `Memory: ${renderInfo.memory.geometries} geometries / ${renderInfo.memory.textures} textures`,
+      `Player: (${this.camera.position.x.toFixed(2)}, ${this.camera.position.y.toFixed(2)}, ${this.camera.position.z.toFixed(2)})`,
       `Colliders: ${this.colliders.length}`,
       `Collision calls/s: ${(this.perfCollisionCalls / seconds).toFixed(1)}`,
       `Penetration scans/s: ${(this.perfPenetrationScans / seconds).toFixed(1)}`,
