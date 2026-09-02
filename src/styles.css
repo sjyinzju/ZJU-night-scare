@@ -2233,6 +2233,14 @@ button {
   color: #e63b48;
   font-weight: 750;
   text-shadow: 0 0 16px rgba(206, 0, 24, 0.52);
+  animation: storyWarningFlash 1.9s steps(2, end) infinite;
+}
+
+.medicalRuleInlineAnomaly {
+  color: #e63b48;
+  font-weight: 780;
+  text-shadow: 0 0 16px rgba(206, 0, 24, 0.52);
+  animation: storyWarningFlash 1.75s steps(2, end) infinite;
 }
 
 .medicalRuleLine--struck {
@@ -2260,11 +2268,14 @@ button {
   91% { transform: translateX(3px); filter: blur(0); }
 }
 
-.storyText p.medicalRulesBottomMark {
-  margin: 38px 0 64px;
-  text-align: center;
+.medicalRuleAfterword {
+  margin: 58px 0 12px 2.2em;
+  color: #e63b48;
+  font-weight: 780;
+  letter-spacing: 0.12em;
   text-indent: 0;
-  letter-spacing: 0.14em;
+  text-shadow: 0 0 18px rgba(206, 0, 24, 0.56);
+  animation: storyTextFade 2.6s ease 1.2s both, storyWarningFlash 1.8s steps(2, end) 3.8s infinite;
 }
 
 .choiceButton.medicalStoryContinue {
@@ -2273,15 +2284,32 @@ button {
   margin: 20px auto 0;
 }
 
-.storyText p.medicalBleedingName,
+.storyText .medicalBleedingName,
 .storyText p.medicalSpecimenCode {
   text-indent: 0;
   font-family: "Noto Serif SC", "Songti SC", serif;
   letter-spacing: 0.1em;
 }
 
-.storyText p.medicalBleedingName {
+.storyText .medicalBleedingName {
   animation: storyTextFade 0.5s ease-out both, medicalTextBleed 1.8s ease both;
+}
+
+.storyText p.medicalRecordSignature {
+  display: grid;
+  grid-template-columns: minmax(8em, 11em) minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: 1.4em;
+  margin: 28px clamp(12px, 5vw, 72px) 18px;
+  text-indent: 0;
+}
+
+.medicalRecordSignature strong {
+  justify-self: start;
+}
+
+.storyText p.medicalRecordRevisit {
+  margin-top: 14px;
 }
 
 .storyModal.medicalCctvTruth {
@@ -2290,6 +2318,13 @@ button {
 
 .medicalCctvChoices {
   width: min(880px, 100%);
+}
+
+.storyText.medicalCctvFinding {
+  width: min(880px, 100%);
+  max-height: 38vh;
+  overflow-y: auto;
+  padding-right: 12px;
 }
 
 @keyframes medicalTextBleed {

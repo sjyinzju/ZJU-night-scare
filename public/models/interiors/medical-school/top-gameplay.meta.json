@@ -1,5 +1,5 @@
 {
-  "assetVersion": 7,
+  "assetVersion": 8,
   "buildingId": "medical-college",
   "roomKind": "medical",
   "model": "medical-top.glb",
@@ -18,9 +18,10 @@
       "model": "medical-top-props.glb",
       "objectName": "medical_corridor_bed",
       "positions": [
-        { "x": -15.2, "y": 0, "z": -0.9 }, { "x": -9.12, "y": 0, "z": -0.9 },
-        { "x": -3.04, "y": 0, "z": -0.9 }, { "x": 3.04, "y": 0, "z": -0.9 },
-        { "x": 9.12, "y": 0, "z": -0.9 }, { "x": 15.2, "y": 0, "z": -0.9 }
+        { "x": -14.0, "y": 0, "z": -0.9 }, { "x": -10.0, "y": 0, "z": -0.9 },
+        { "x": -6.0, "y": 0, "z": -0.9 }, { "x": -2.0, "y": 0, "z": -0.9 },
+        { "x": 2.0, "y": 0, "z": -0.9 }, { "x": 6.0, "y": 0, "z": -0.9 },
+        { "x": 10.0, "y": 0, "z": -0.9 }, { "x": 14.0, "y": 0, "z": -0.9 }
       ],
       "size": { "x": 2, "y": 1.1, "z": 0.95 }
     },
@@ -49,12 +50,13 @@
       }
     },
     "fixtureNames": [
-      "legacy_crimson_fluorescent_1_tube", "legacy_crimson_fluorescent_2_tube",
+      "legacy_crimson_fluorescent_0_tube", "legacy_crimson_fluorescent_1_tube",
+      "legacy_crimson_fluorescent_2_tube",
       "legacy_crimson_fluorescent_3_tube", "legacy_crimson_fluorescent_4_tube",
       "legacy_crimson_fluorescent_5_tube", "legacy_crimson_fluorescent_6_tube",
       "legacy_crimson_fluorescent_7_tube", "legacy_crimson_fluorescent_8_tube",
       "legacy_crimson_fluorescent_9_tube", "legacy_crimson_fluorescent_10_tube",
-      "legacy_crimson_fluorescent_11_tube", "legacy_crimson_fluorescent_12_tube"
+      "legacy_crimson_fluorescent_11_tube"
     ],
     "elevator": { "x": -16.2, "y": 0, "z": 0.8, "radius": 1.2 },
     "checkpoints": {

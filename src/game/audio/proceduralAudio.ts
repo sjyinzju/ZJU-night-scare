@@ -546,39 +546,130 @@ function scheduleGlassKnock(
 // 医学院顶层 — 敲门、病床、灯具与电梯
 // ══════════════════════════════════════════════════
 
-/** Dry wooden knocks from behind 601. Count is intentionally audible. */
+let medicalKnockNoiseBuffer: AudioBuffer | null = null;
+let medicalBedNoiseBuffer: AudioBuffer | null = null;
+
+function getMedicalKnockNoise(audioCtx: AudioContext): AudioBuffer {
+  if (medicalKnockNoiseBuffer && medicalKnockNoiseBuffer.sampleRate === audioCtx.sampleRate) {
+    return medicalKnockNoiseBuffer;
+  }
+  const buffer = audioCtx.createBuffer(1, Math.floor(audioCtx.sampleRate * 0.085), audioCtx.sampleRate);
+  const data = buffer.getChannelData(0);
+  let previous = 0;
+  for (let index = 0; index < data.length; index++) {
+    const white = Math.random() * 2 - 1;
+    previous = previous * 0.62 + white * 0.38;
+    data[index] = previous * Math.exp(-index / (audioCtx.sampleRate * 0.019));
+  }
+  medicalKnockNoiseBuffer = buffer;
+  return buffer;
+}
+
+function getMedicalBedNoise(audioCtx: AudioContext): AudioBuffer {
+  if (medicalBedNoiseBuffer && medicalBedNoiseBuffer.sampleRate === audioCtx.sampleRate) {
+    return medicalBedNoiseBuffer;
+  }
+  const buffer = audioCtx.createBuffer(1, Math.floor(audioCtx.sampleRate * 0.9), audioCtx.sampleRate);
+  const data = buffer.getChannelData(0);
+  let brown = 0;
+  for (let index = 0; index < data.length; index++) {
+    brown = (brown + 0.035 * (Math.random() * 2 - 1)) / 1.035;
+    data[index] = brown * 3.4 * (0.55 + 0.45 * Math.sin(index * 0.061));
+  }
+  medicalBedNoiseBuffer = buffer;
+  return buffer;
+}
+
+/** Loud, hollow impacts against the old wooden door inside 601. */
 export function playMedicalKnocks(count: 2 | 3): void {
   const audioCtx = getCtx();
   const master = audioCtx.createGain();
-  master.gain.value = 0.72;
-  master.connect(audioCtx.destination);
-  let remaining = count;
+  master.gain.value = 1.28;
+  const muffle = audioCtx.createBiquadFilter();
+  muffle.type = "lowpass";
+  muffle.frequency.value = 680;
+  muffle.Q.value = 0.52;
+  const compressor = audioCtx.createDynamicsCompressor();
+  compressor.threshold.value = -16;
+  compressor.knee.value = 8;
+  compressor.ratio.value = 4;
+  compressor.attack.value = 0.003;
+  compressor.release.value = 0.16;
+  master.connect(muffle).connect(compressor).connect(audioCtx.destination);
+  let remaining = count * 4;
+  const releaseSource = (): void => {
+    remaining--;
+    if (remaining === 0) {
+      master.disconnect();
+      muffle.disconnect();
+      compressor.disconnect();
+    }
+  };
   for (let index = 0; index < count; index++) {
     // The third knock lands a fraction late so it cannot be mistaken for the
     // tail of the second. The route is resolved only after this sound ends.
     const at = audioCtx.currentTime + (index === 2 ? 1.08 : index * 0.46);
+    const strength = index === 2 ? 1.08 : 1;
+
+    const impact = audioCtx.createBufferSource();
+    impact.buffer = getMedicalKnockNoise(audioCtx);
+    const impactBand = audioCtx.createBiquadFilter();
+    impactBand.type = "bandpass";
+    impactBand.frequency.value = 420;
+    impactBand.Q.value = 0.56;
+    const impactGain = audioCtx.createGain();
+    impactGain.gain.setValueAtTime(0.001, at);
+    impactGain.gain.linearRampToValueAtTime(0.68 * strength, at + 0.004);
+    impactGain.gain.exponentialRampToValueAtTime(0.001, at + 0.12);
+    impact.connect(impactBand).connect(impactGain).connect(master);
+    impact.addEventListener("ended", () => {
+      impact.disconnect();
+      impactBand.disconnect();
+      impactGain.disconnect();
+      releaseSource();
+    }, { once: true });
+    impact.start(at);
+    impact.stop(at + 0.125);
+
     const body = audioCtx.createOscillator();
-    body.type = "sine";
-    body.frequency.setValueAtTime(118, at);
-    body.frequency.exponentialRampToValueAtTime(54, at + 0.16);
+    body.type = "triangle";
+    body.frequency.setValueAtTime(80, at);
+    body.frequency.exponentialRampToValueAtTime(34, at + 0.25);
     const bodyGain = audioCtx.createGain();
     bodyGain.gain.setValueAtTime(0.001, at);
-    bodyGain.gain.linearRampToValueAtTime(0.42, at + 0.006);
-    bodyGain.gain.exponentialRampToValueAtTime(0.001, at + 0.22);
+    bodyGain.gain.linearRampToValueAtTime(0.72 * strength, at + 0.006);
+    bodyGain.gain.exponentialRampToValueAtTime(0.001, at + 0.35);
     const wood = audioCtx.createBiquadFilter();
     wood.type = "bandpass";
-    wood.frequency.value = 420;
-    wood.Q.value = 0.8;
+    wood.frequency.value = 155;
+    wood.Q.value = 0.58;
     body.connect(wood).connect(bodyGain).connect(master);
     body.addEventListener("ended", () => {
       body.disconnect();
       wood.disconnect();
       bodyGain.disconnect();
-      remaining--;
-      if (remaining === 0) master.disconnect();
+      releaseSource();
     }, { once: true });
     body.start(at);
-    body.stop(at + 0.24);
+    body.stop(at + 0.37);
+
+    [112, 188].forEach((frequency, resonanceIndex) => {
+      const resonance = audioCtx.createOscillator();
+      resonance.type = resonanceIndex === 0 ? "sine" : "triangle";
+      resonance.frequency.setValueAtTime(frequency * (1 + index * 0.012), at);
+      const resonanceGain = audioCtx.createGain();
+      resonanceGain.gain.setValueAtTime(0.001, at);
+      resonanceGain.gain.linearRampToValueAtTime((0.24 - resonanceIndex * 0.07) * strength, at + 0.006);
+      resonanceGain.gain.exponentialRampToValueAtTime(0.001, at + 0.42 + resonanceIndex * 0.08);
+      resonance.connect(resonanceGain).connect(master);
+      resonance.addEventListener("ended", () => {
+        resonance.disconnect();
+        resonanceGain.disconnect();
+        releaseSource();
+      }, { once: true });
+      resonance.start(at);
+      resonance.stop(at + 0.53);
+    });
   }
 }
 
@@ -593,15 +684,8 @@ export function playMedicalBedPass(progress = 0.5): void {
   master.gain.exponentialRampToValueAtTime(0.001, now + 0.92);
   panner.connect(master).connect(audioCtx.destination);
 
-  const noiseBuffer = audioCtx.createBuffer(1, Math.floor(audioCtx.sampleRate * 0.9), audioCtx.sampleRate);
-  const noise = noiseBuffer.getChannelData(0);
-  let brown = 0;
-  for (let index = 0; index < noise.length; index++) {
-    brown = (brown + 0.035 * (Math.random() * 2 - 1)) / 1.035;
-    noise[index] = brown * 3.4 * (0.55 + 0.45 * Math.sin(index * 0.061));
-  }
   const drag = audioCtx.createBufferSource();
-  drag.buffer = noiseBuffer;
+  drag.buffer = getMedicalBedNoise(audioCtx);
   const dragBand = audioCtx.createBiquadFilter();
   dragBand.type = "bandpass";
   dragBand.frequency.value = 330;

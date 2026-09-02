@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties, type Muta
 import { assetUrl } from "../assetPath";
 import type { Interior3D } from "./Interior3D";
 import {
+  MEDICAL_601_ANOMALIES,
   MEDICAL_601_OBSERVATIONS,
   MEDICAL_601_RECORD,
   MEDICAL_603_OBSERVATIONS,
@@ -40,6 +41,7 @@ export default function MedicalTopExperience({
   const [rulesCanClose, setRulesCanClose] = useState(false);
   const [cctvIndex, setCctvIndex] = useState(0);
   const [cctvFinished, setCctvFinished] = useState(false);
+  const [selectedCctvChoiceId, setSelectedCctvChoiceId] = useState<string | null>(null);
 
   useEffect(() => {
     setRulesCanClose(false);
@@ -56,9 +58,24 @@ export default function MedicalTopExperience({
   }, [modal]);
 
   useEffect(() => {
+    if (!active) return;
+    const files = [...CCTV_NORMAL, ...CCTV_PACK.A, ...CCTV_PACK.B];
+    const images = files.map((file) => {
+      const image = new Image();
+      image.decoding = "async";
+      image.src = assetUrl(`images/medical-cctv/${file}`, "medical-cctv-v3-webp");
+      return image;
+    });
+    return () => {
+      for (const image of images) image.src = "";
+    };
+  }, [active]);
+
+  useEffect(() => {
     if (modal?.kind !== "cctv") return;
     setCctvIndex(0);
     setCctvFinished(false);
+    setSelectedCctvChoiceId(null);
     const timer = window.setInterval(() => {
       setCctvIndex((previous) => {
         if (previous >= 4) {
@@ -120,8 +137,11 @@ export default function MedicalTopExperience({
   };
 
   const cctvImages = modal?.kind === "cctv"
-    ? [...CCTV_NORMAL, ...CCTV_PACK[modal.pack]].map((file) => assetUrl(`images/medical-cctv/${file}`, "medical-cctv-v2-webp"))
+    ? [...CCTV_NORMAL, ...CCTV_PACK[modal.pack]].map((file) => assetUrl(`images/medical-cctv/${file}`, "medical-cctv-v3-webp"))
     : [];
+  const selectedCctvChoice = modal?.kind === "cctv" && selectedCctvChoiceId
+    ? MEDICAL_605_CHOICES[modal.pack].find((choice) => choice.id === selectedCctvChoiceId)
+    : undefined;
 
   return (
     <>
@@ -144,20 +164,31 @@ export default function MedicalTopExperience({
           if (event.target === event.currentTarget && rulesCanClose) finishRules();
         }}>
           <section className="storyModal medicalStoryModal medicalRulesModal" aria-modal="true" role="dialog" aria-label="医学院六层夜间巡查守则">
-            <div className="storyKicker"><span>医学院 · 六层</span><b>修订时间：今晚 23:47</b></div>
-            <h1>夜间巡查守则</h1>
+            <div className="storyKicker"><span>医学院 · 六层</span><b>2008年3月8日　23:47</b></div>
+            <h1>《医学院六层夜间巡查守则》</h1>
             <div ref={rulesScrollRef} onScroll={handleRulesScroll} className="storyText medicalRulesScroll">
               {MEDICAL_TOP_RULES.map((rule, index) => (
                 <p key={index} className="medicalRule" style={{ "--story-line-delay": `${Math.min(index * 24, 360)}ms` } as CSSProperties}>
                   <b className="medicalRuleNumber">{index + 1}.</b>
                   <span className="medicalRuleLines">
-                    {rule.lines.map((line, lineIndex) => (
-                      <span key={lineIndex} className={`medicalRuleLine medicalRuleLine--${line.tone ?? "normal"}`}>{line.text}</span>
-                    ))}
+                    {rule.lines.map((line, lineIndex) => {
+                      const emphasisIndex = line.emphasis ? line.text.indexOf(line.emphasis) : -1;
+                      return (
+                        <span key={lineIndex} className={`medicalRuleLine medicalRuleLine--${line.tone ?? "normal"}`}>
+                          {emphasisIndex < 0 ? line.text : (
+                            <>
+                              {line.text.slice(0, emphasisIndex)}
+                              <strong className="medicalRuleInlineAnomaly">{line.emphasis}</strong>
+                              {line.text.slice(emphasisIndex + line.emphasis!.length)}
+                            </>
+                          )}
+                        </span>
+                      );
+                    })}
                   </span>
                 </p>
               ))}
-              <p className="medicalRulesBottomMark shock">—— 规则到此为止。请不要继续向下看。——</p>
+              <p className="medicalRuleAfterword">你已经读完第二十八条了。</p>
             </div>
             {rulesCanClose && (
               <button type="button" onClick={finishRules} className="choiceButton primary medicalStoryContinue">
@@ -176,10 +207,27 @@ export default function MedicalTopExperience({
             <div className="storyText medicalRecordBody">
               {MEDICAL_601_RECORD.map((line, index) => (
                 line === "六层夜间巡查记录" ? null : (
-                  <p key={index} className={line === "林伟" ? "shock medicalBleedingName" : undefined}>{line || "\u00a0"}</p>
+                  <p key={index}>{line || "\u00a0"}</p>
                 )
               ))}
-              {modal.revisit && <p className="shock medicalBleedingName">第二次复核人：正在阅读这行的人。</p>}
+              <p className="medicalRecordSignature">
+                <span>本次巡查员：</span>
+                <strong className="shock medicalBleedingName">林伟</strong>
+              </p>
+              {modal.revisit && (
+                <p className="medicalRecordSignature medicalRecordRevisit">
+                  <span>第二次复核人：</span>
+                  <strong className="shock medicalBleedingName">正在阅读这行的人。</strong>
+                </p>
+              )}
+              {modal.anomaly && MEDICAL_601_ANOMALIES[modal.anomaly].lines.map((line, index) => (
+                <p
+                  key={`anomaly-${modal.anomaly}-${index}`}
+                  className={`medicalRuleLine--${line.tone ?? "normal"}`}
+                >
+                  {line.text}
+                </p>
+              ))}
               {MEDICAL_601_OBSERVATIONS.map((line, index) => <p key={`observation-${index}`} className="tense">{line}</p>)}
             </div>
             <button type="button" onClick={() => closeDocument("record")} className="choiceButton primary medicalStoryContinue">合上记录</button>
@@ -223,14 +271,27 @@ export default function MedicalTopExperience({
                 <p>{MEDICAL_605_TRUTH}</p>
                 <p className="tense">画面停住了，但放映机仍在转。桌面下方传来一声很轻的电梯提示音。</p>
               </div>
-              <div className="choiceList medicalCctvChoices">
-                {MEDICAL_605_CHOICES[modal.pack].map((choice) => (
-                  <button key={choice.id} type="button" className="choiceButton" onClick={() => chooseEvidence(choice.evidence)}>
-                    <strong>{choice.label}</strong>
-                    <span>{choice.evidence}</span>
+              {!selectedCctvChoice ? (
+                <div className="choiceList medicalCctvChoices">
+                  {MEDICAL_605_CHOICES[modal.pack].map((choice) => (
+                    <button key={choice.id} type="button" className="choiceButton" onClick={() => setSelectedCctvChoiceId(choice.id)}>
+                      <strong>{choice.label}</strong>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <>
+                  <div className="storyText medicalCctvFinding">
+                    {selectedCctvChoice.outcome.map((paragraph, index) => (
+                      <p key={index} className={index === selectedCctvChoice.outcome.length - 1 ? "shock" : undefined}>{paragraph}</p>
+                    ))}
+                    <p className="tense">证据记录：{selectedCctvChoice.evidence}</p>
+                  </div>
+                  <button type="button" className="choiceButton primary medicalStoryContinue" onClick={() => chooseEvidence(selectedCctvChoice.evidence)}>
+                    记下证据并离开605
                   </button>
-                ))}
-              </div>
+                </>
+              )}
             </section>
           )}
         </div>

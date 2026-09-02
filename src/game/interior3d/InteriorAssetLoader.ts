@@ -441,7 +441,7 @@ export async function preloadNextMedicalInteriorSegment(
 }
 
 const MEDICAL_TOP_ROOT = "models/interiors/medical-school";
-const MEDICAL_TOP_CACHE_VERSION = "medical-top-gameplay-v7";
+const MEDICAL_TOP_CACHE_VERSION = "medical-top-gameplay-v8";
 
 function medicalTopAuxiliaryUrl(file: string): string {
   return assetUrl(`${MEDICAL_TOP_ROOT}/${file}`, MEDICAL_TOP_CACHE_VERSION);
