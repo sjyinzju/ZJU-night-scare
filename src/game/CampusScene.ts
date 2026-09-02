@@ -113,8 +113,10 @@ const EXTERIOR_SPRITE_METRICS: Record<string, { x: number; y: number; visibleW: 
 const EXTERIOR_SPRITE_SCALES: Record<string, number> = {
   "dorm-lantian": 0.72,
   "dorm-baisha": 0.94,
-  "medical-college": 0.94,
+  "medical-college": 0.84,
   "medical-library": 0.94,
+  "marine-lab": 0.86,
+  "linhu-canteen": 0.84,
   "library": 0.92,
   "east-teaching-1": 0.94,
   "east-teaching-2": 0.94,
@@ -123,6 +125,7 @@ const EXTERIOR_SPRITE_SCALES: Record<string, number> = {
   "east-teaching-5": 0.94,
   "east-teaching-6": 0.94,
   "east-teaching-7": 0.94,
+  "environment-college": 0.84,
 };
 
 // The legacy Lantian and Baisha logical rectangles overlap. Keep both gameplay
@@ -130,6 +133,22 @@ const EXTERIOR_SPRITE_SCALES: Record<string, number> = {
 // own large footprint so the two facades no longer merge into one building.
 const EXTERIOR_SPRITE_ISO_OFFSETS: Record<string, IsoPoint> = {
   "dorm-lantian": { x: -1.15, y: -1.15 },
+  "environment-college": { x: 0.7, y: -0.08 },
+  "medical-college": { x: 0, y: -0.72 },
+  "marine-lab": { x: 0.68, y: 0 },
+  "linhu-canteen": { x: 0, y: -0.7 },
+};
+
+const EXTERIOR_SPRITE_GRADES: Record<string, { brightness: number; saturation: number; hue?: number; contrast?: number }> = {
+  "main-gate": { brightness: 0.86, saturation: -0.34, hue: 3, contrast: 0.04 },
+  "dorm-lantian": { brightness: 0.84, saturation: -0.36, hue: 3, contrast: 0.04 },
+  "dorm-danyang": { brightness: 0.84, saturation: -0.36, hue: 3, contrast: 0.04 },
+  "dorm-cuibai": { brightness: 0.84, saturation: -0.36, hue: 3, contrast: 0.04 },
+  "medical-library": { brightness: 1.1, saturation: -0.16, hue: -3, contrast: 0.02 },
+  "medical-college": { brightness: 0.98, saturation: -0.2, hue: -2, contrast: 0.03 },
+  "dorm-baisha": { brightness: 0.94, saturation: -0.24, hue: 2, contrast: 0.03 },
+  "little-theater": { brightness: 0.92, saturation: -0.2, hue: -2, contrast: 0.04 },
+  "linhu-canteen": { brightness: 0.94, saturation: -0.26, hue: -2, contrast: 0.03 },
 };
 // Old movement used 0.075 * speed per frame. Keep the 60fps feel while
 // making movement frame-rate independent.
@@ -455,11 +474,13 @@ export class CampusScene extends Phaser.Scene {
    */
   private drawExteriorMapV2() {
     this.drawGroundV2();
+    this.drawCampusSurfaceDetails();
     this.drawSwampField();
     this.drawWater();
     this.drawMapLandmarksV2();
     this.drawPlazas();
     this.drawRoads();
+    this.drawRoadsideFurniture();
     this.drawBuildings();
   }
 
@@ -487,10 +508,11 @@ export class CampusScene extends Phaser.Scene {
     g.strokePath();
 
     const districts = [
-      { x: 2.0, y: 2.1, w: 8.0, d: 6.4, color: 0x29413b, alpha: 0.72 },
-      { x: 28.4, y: 8.0, w: 9.0, d: 8.5, color: 0x263d3f, alpha: 0.68 },
-      { x: 9.0, y: 27.0, w: 12.0, d: 4.2, color: 0x3a3734, alpha: 0.62 },
-      { x: 28.8, y: 26.4, w: 9.6, d: 4.0, color: 0x293c38, alpha: 0.62 },
+      { x: 1.7, y: 1.8, w: 19.2, d: 7.2, color: 0x29443c, alpha: 0.82 },
+      { x: 2.0, y: 9.0, w: 11.5, d: 14.4, color: 0x263a36, alpha: 0.72 },
+      { x: 12.8, y: 5.3, w: 15.1, d: 19.0, color: 0x24413e, alpha: 0.7 },
+      { x: 27.1, y: 7.0, w: 12.0, d: 20.6, color: 0x2b3d3e, alpha: 0.78 },
+      { x: 8.8, y: 27.0, w: 30.2, d: 5.2, color: 0x3d3937, alpha: 0.76 },
     ];
     districts.forEach((district, index) => {
       const points = [
@@ -524,6 +546,111 @@ export class CampusScene extends Phaser.Scene {
       g.strokePath();
     }
     g.setDepth(0);
+  }
+
+  private drawCampusSurfaceDetails() {
+    const g = this.add.graphics();
+    g.setDepth(3);
+
+    const drawIsoArea = (x: number, y: number, w: number, d: number, color: number, alpha: number) => {
+      const points = [
+        this.toScreen({ x, y }),
+        this.toScreen({ x: x + w, y }),
+        this.toScreen({ x: x + w, y: y + d }),
+        this.toScreen({ x, y: y + d }),
+      ];
+      g.fillStyle(color, alpha);
+      g.lineStyle(2, this.shade(color, 34), 0.28);
+      g.beginPath();
+      points.forEach((point, index) => {
+        if (index === 0) g.moveTo(point.x, point.y);
+        else g.lineTo(point.x, point.y);
+      });
+      g.closePath();
+      g.fillPath();
+      g.strokePath();
+    };
+
+    const lawns = [
+      { x: 2.1, y: 2.1, w: 7.4, d: 5.9, color: 0x315348 },
+      { x: 10.3, y: 2.3, w: 9.8, d: 5.2, color: 0x2f5147 },
+      { x: 13.3, y: 8.8, w: 3.4, d: 7.1, color: 0x2b5148 },
+      { x: 22.7, y: 8.8, w: 4.2, d: 6.4, color: 0x2d534a },
+      { x: 14.0, y: 20.7, w: 4.0, d: 2.8, color: 0x31554a },
+      { x: 22.0, y: 20.4, w: 4.8, d: 3.0, color: 0x2d5048 },
+    ];
+    lawns.forEach((lawn, lawnIndex) => {
+      drawIsoArea(lawn.x, lawn.y, lawn.w, lawn.d, lawn.color, 0.8);
+      const columns = Math.max(3, Math.floor(lawn.w * 1.35));
+      const rows = Math.max(2, Math.floor(lawn.d * 1.15));
+      for (let row = 1; row < rows; row += 1) {
+        for (let column = 1; column < columns; column += 1) {
+          if ((row * 7 + column * 11 + lawnIndex) % 4 !== 0) continue;
+          const point = this.toScreen({
+            x: lawn.x + (lawn.w * column) / columns,
+            y: lawn.y + (lawn.d * row) / rows,
+          });
+          g.lineStyle(2, lawnIndex % 2 ? 0x68816a : 0x587861, 0.34);
+          g.beginPath();
+          g.moveTo(point.x - 3, point.y + 2);
+          g.lineTo(point.x, point.y - 5);
+          g.lineTo(point.x + 4, point.y + 1);
+          g.strokePath();
+        }
+      }
+    });
+
+    const pavedZones = [
+      { x: 27.8, y: 8.2, w: 9.1, d: 17.7, color: 0x394b49, spacing: 1.1 },
+      { x: 9.2, y: 27.4, w: 29.1, d: 4.4, color: 0x514642, spacing: 1.35 },
+      { x: 2.3, y: 9.5, w: 9.4, d: 12.8, color: 0x354744, spacing: 1.45 },
+    ];
+    pavedZones.forEach((zone, zoneIndex) => {
+      drawIsoArea(zone.x, zone.y, zone.w, zone.d, zone.color, zoneIndex === 1 ? 0.68 : 0.6);
+      g.lineStyle(1, zoneIndex === 1 ? 0x9b7770 : 0x7d9790, 0.16);
+      for (let x = zone.x + zone.spacing; x < zone.x + zone.w; x += zone.spacing) {
+        const start = this.toScreen({ x, y: zone.y + 0.08 });
+        const end = this.toScreen({ x, y: zone.y + zone.d - 0.08 });
+        g.beginPath();
+        g.moveTo(start.x, start.y);
+        g.lineTo(end.x, end.y);
+        g.strokePath();
+      }
+      for (let y = zone.y + zone.spacing; y < zone.y + zone.d; y += zone.spacing) {
+        const start = this.toScreen({ x: zone.x + 0.08, y });
+        const end = this.toScreen({ x: zone.x + zone.w - 0.08, y });
+        g.beginPath();
+        g.moveTo(start.x, start.y);
+        g.lineTo(end.x, end.y);
+        g.strokePath();
+      }
+    });
+
+    // Building forecourts create a transition from the broad district surface
+    // to each facade. They are visual only and do not create new walkable data.
+    campusBuildings.forEach((building, index) => {
+      if (building.id === "east-track" || building.id === "main-gate") return;
+      const frontY = building.y + building.d + 0.08;
+      const left = this.toScreen({ x: building.x + 0.08, y: frontY });
+      const right = this.toScreen({ x: building.x + building.w - 0.08, y: frontY });
+      const frontLeft = this.toScreen({ x: building.x + 0.18, y: frontY + 0.42 });
+      const frontRight = this.toScreen({ x: building.x + building.w - 0.18, y: frontY + 0.42 });
+      g.fillStyle(building.zone === "living" ? 0x67524a : building.zone === "story" ? 0x5a4c50 : 0x53625d, 0.36);
+      g.beginPath();
+      g.moveTo(left.x, left.y);
+      g.lineTo(right.x, right.y);
+      g.lineTo(frontRight.x, frontRight.y);
+      g.lineTo(frontLeft.x, frontLeft.y);
+      g.closePath();
+      g.fillPath();
+      if (index % 2 === 0) {
+        g.lineStyle(1, 0xa6b4ad, 0.16);
+        g.beginPath();
+        g.moveTo(frontLeft.x, frontLeft.y);
+        g.lineTo(frontRight.x, frontRight.y);
+        g.strokePath();
+      }
+    });
   }
 
   private drawMapLandmarksV2() {
@@ -937,23 +1064,32 @@ export class CampusScene extends Phaser.Scene {
         graphics.strokePath();
       };
       const shadow = this.add.graphics();
-      shadow.lineStyle(Math.max(14, Math.round(21 * widthScale)), 0x010303, isMainAxis ? 0.48 : 0.36);
-      stroke(shadow, 4);
+      shadow.lineStyle(Math.max(28, Math.round(44 * widthScale)), 0x010303, isMainAxis ? 0.5 : 0.4);
+      stroke(shadow, 6);
       shadow.setDepth(15);
 
-      const shoulder = this.add.graphics();
-      shoulder.lineStyle(
-        Math.max(11, Math.round(17 * widthScale)),
-        isMainAxis ? 0x675650 : isWetLoop ? 0x46615a : 0x3e514c,
-        0.92,
+      const sidewalk = this.add.graphics();
+      sidewalk.lineStyle(
+        Math.max(24, Math.round(36 * widthScale)),
+        isMainAxis ? 0x6d5d57 : isWetLoop ? 0x526b63 : 0x4c5f59,
+        0.96,
       );
-      stroke(shoulder);
-      shoulder.setDepth(15.4);
+      stroke(sidewalk);
+      sidewalk.setDepth(15.2);
+
+      const curb = this.add.graphics();
+      curb.lineStyle(
+        Math.max(18, Math.round(27 * widthScale)),
+        isMainAxis ? 0x9a8177 : isWetLoop ? 0x82968c : 0x788a83,
+        0.72,
+      );
+      stroke(curb);
+      curb.setDepth(15.45);
 
       const g = this.add.graphics();
       g.lineStyle(
-        Math.max(7, Math.round(11 * widthScale)),
-        isMainAxis ? 0x533a39 : isWetLoop ? 0x254743 : this.shade(road.color, -22),
+        Math.max(13, Math.round(20 * widthScale)),
+        isMainAxis ? 0x493838 : isWetLoop ? 0x243f3c : this.shade(road.color, -16),
         0.98,
       );
       stroke(g);
@@ -963,9 +1099,9 @@ export class CampusScene extends Phaser.Scene {
       // than a painted lane line; campus roads should not look like highways.
       const wetReflection = this.add.graphics();
       wetReflection.lineStyle(
-        Math.max(2, Math.round(3 * widthScale)),
+        Math.max(4, Math.round(6 * widthScale)),
         isMainAxis ? 0xb26159 : isWetLoop ? 0x4b8b85 : 0x78928b,
-        isMainAxis ? 0.18 : 0.12,
+        isMainAxis ? 0.14 : 0.1,
       );
       stroke(wetReflection, -1);
       wetReflection.setDepth(16.4);
@@ -985,10 +1121,83 @@ export class CampusScene extends Phaser.Scene {
     junctions.forEach(({ point, count }) => {
       if (count < 2) return;
       const p = this.toScreen(point);
-      nodes.fillStyle(0x8eaaa0, 0.3);
-      nodes.fillCircle(p.x, p.y, 4);
+      nodes.fillStyle(0x83978f, 0.86);
+      nodes.fillCircle(p.x, p.y, 18);
+      nodes.fillStyle(0x304540, 0.98);
+      nodes.fillCircle(p.x, p.y, 11);
+      nodes.lineStyle(2, 0xa4b3ac, 0.26);
+      nodes.strokeCircle(p.x, p.y, 15);
     });
     nodes.setDepth(17.35);
+  }
+
+  private drawRoadsideFurniture() {
+    const furnitureRoads = campusRoads.filter((road) => {
+      const kind = road.kind ?? "branch";
+      return kind === "main" || kind === "ring" || road.id === "west-medical-road";
+    });
+    let itemIndex = 0;
+
+    const isClear = (point: IsoPoint) => {
+      if (point.x < 2 || point.y < 2 || point.x > MAP_W - 2.2 || point.y > MAP_D - 2.2) return false;
+      if (campusWaters.some((water) => this.pointInPolygon(point, water.points))) return false;
+      return !campusBuildings.some((building) =>
+        point.x > building.x - 0.45 &&
+        point.x < building.x + building.w + 0.45 &&
+        point.y > building.y - 0.45 &&
+        point.y < building.y + building.d + 0.45
+      );
+    };
+
+    furnitureRoads.forEach((road, roadIndex) => {
+      const kind = road.kind ?? "branch";
+      for (let segmentIndex = 1; segmentIndex < road.points.length; segmentIndex += 1) {
+        const start = road.points[segmentIndex - 1];
+        const end = road.points[segmentIndex];
+        const dx = end.x - start.x;
+        const dy = end.y - start.y;
+        const length = Math.hypot(dx, dy);
+        if (length < 1.8) continue;
+        const nx = -dy / length;
+        const ny = dx / length;
+        const spacing = kind === "main" ? 3.2 : 3.8;
+        const steps = Math.floor(length / spacing);
+        for (let step = 1; step <= steps; step += 1) {
+          const t = step / (steps + 1);
+          const side = (step + segmentIndex + roadIndex) % 2 === 0 ? 1 : -1;
+          const offset = kind === "main" ? 0.74 : 0.64;
+          const point = {
+            x: start.x + dx * t + nx * offset * side,
+            y: start.y + dy * t + ny * offset * side,
+          };
+          if (!isClear(point)) continue;
+          const screen = this.toScreen(point);
+          const pit = this.add.ellipse(screen.x, screen.y + 5, 36, 13, 0x182722, 0.9);
+          pit.setDepth(17.5);
+
+          if (itemIndex % 3 !== 1) {
+            const shadow = this.add.ellipse(screen.x + 10, screen.y + 8, 50, 14, 0x010303, 0.3);
+            shadow.setAngle(9);
+            shadow.setDepth(screen.y - 2);
+            const trunk = this.add.rectangle(screen.x, screen.y - 7, 6, 28, 0x33251c, 0.96);
+            trunk.setDepth(screen.y + 1);
+            const crownColor = itemIndex % 4 === 0 ? 0x244536 : 0x1d3b31;
+            const crown = this.add.circle(screen.x, screen.y - 30, 17 + (itemIndex % 3) * 2, crownColor, 0.98);
+            crown.setStrokeStyle(2, 0x53715e, 0.32);
+            crown.setDepth(screen.y + 2);
+          } else {
+            const pole = this.add.rectangle(screen.x, screen.y - 15, 4, 40, 0x26322f, 0.98);
+            pole.setDepth(screen.y + 1);
+            const bulb = this.add.circle(screen.x, screen.y - 38, 5, itemIndex % 2 ? 0xdab77a : 0xa6d2ca, 0.92);
+            bulb.setDepth(screen.y + 2);
+            const pool = this.add.ellipse(screen.x + 4, screen.y + 5, 72, 21, itemIndex % 2 ? 0xd08e52 : 0x70b5af, 0.07);
+            pool.setBlendMode(Phaser.BlendModes.ADD);
+            pool.setDepth(17.4);
+          }
+          itemIndex += 1;
+        }
+      }
+    });
   }
 
   private drawGroundDecals() {
@@ -1342,13 +1551,23 @@ export class CampusScene extends Phaser.Scene {
     const ne = this.toScreen({ x: building.x + building.w + visualOffset.x, y: building.y + visualOffset.y });
     const se = this.toScreen({ x: building.x + building.w + visualOffset.x, y: building.y + building.d + visualOffset.y });
     const sw = this.toScreen({ x: building.x + visualOffset.x, y: building.y + building.d + visualOffset.y });
+    const castShadow = this.add.ellipse(
+      anchor.x + 18,
+      anchor.y + 9,
+      Math.max(78, (building.w + building.d) * 43),
+      Math.max(20, building.d * 17),
+      0x010304,
+      0.28,
+    );
+    castShadow.setAngle(8);
+    castShadow.setDepth(anchor.y - 2);
     const contactShadow = this.add.graphics();
-    contactShadow.fillStyle(0x010405, 0.3);
+    contactShadow.fillStyle(0x010405, 0.34);
     contactShadow.beginPath();
-    contactShadow.moveTo(nw.x, nw.y + 3);
-    contactShadow.lineTo(ne.x, ne.y + 3);
-    contactShadow.lineTo(se.x, se.y + 5);
-    contactShadow.lineTo(sw.x, sw.y + 5);
+    contactShadow.moveTo(nw.x + 14, nw.y + 7);
+    contactShadow.lineTo(ne.x + 14, ne.y + 7);
+    contactShadow.lineTo(se.x + 18, se.y + 9);
+    contactShadow.lineTo(sw.x + 18, sw.y + 9);
     contactShadow.closePath();
     contactShadow.fillPath();
     contactShadow.setDepth(anchor.y - 1);
@@ -1365,6 +1584,16 @@ export class CampusScene extends Phaser.Scene {
     const sourceScale = Math.min(Math.max(heightFit, widthFit), maximumWidthFit) * visualScale;
     sprite.setDisplaySize(sprite.width * sourceScale, sprite.height * sourceScale);
     sprite.setDepth(depth + 1);
+    const gradeProfile = EXTERIOR_SPRITE_GRADES[building.id];
+    const colorMatrix = gradeProfile ? sprite.postFX?.addColorMatrix() : undefined;
+    if (gradeProfile && colorMatrix) {
+      colorMatrix.saturate(gradeProfile.saturation);
+      colorMatrix.brightness(gradeProfile.brightness, true);
+      colorMatrix.contrast(gradeProfile.contrast ?? 0.04, true);
+      colorMatrix.hue(gradeProfile.hue ?? 0, true);
+    } else {
+      sprite.setTint(0xd1ddd8);
+    }
     sprite.setData("buildingId", building.id);
     this.exteriorBuildingSprites.set(building.id, sprite);
   }
