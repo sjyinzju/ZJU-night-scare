@@ -76,42 +76,60 @@ const LANDMARK_SPRITE_KEYS = {
   admin: "exterior-admin-center",
 } as const;
 
-// Blender exports keep transparent breathing room around each render.  Anchor
-// the visible pixels (rather than the full 1280x960 canvas) to the building's
-// front edge so the model actually sits on the map.
-const EXTERIOR_SPRITE_ORIGINS: Record<string, { x: number; y: number }> = {
-  "main-gate": { x: 0.5, y: 0.9509 },
-  "dorm-lantian": { x: 0.5, y: 0.9575 },
-  "dorm-danyang": { x: 0.5, y: 0.9543 },
-  "dorm-cuibai": { x: 0.5, y: 0.9493 },
-  "medical-library": { x: 0.5, y: 0.8833 },
-  "medical-college": { x: 0.5, y: 0.899 },
-  "dorm-baisha": { x: 0.5, y: 0.8896 },
-  "little-theater": { x: 0.5, y: 0.8729 },
-  "linhu-canteen": { x: 0.5121, y: 0.9427 },
-  "west-teaching": { x: 0.5, y: 0.9634 },
-  "ocean-building": { x: 0.5, y: 0.9594 },
-  "qiushi-auditorium": { x: 0.5, y: 0.9615 },
-  "marine-lab": { x: 0.5, y: 0.9629 },
-  "engineering-lab": { x: 0.5, y: 0.9606 },
-  "agri-life": { x: 0.5, y: 0.959 },
-  "library": { x: 0.5, y: 0.9647 },
-  "east-teaching-1": { x: 0.4746, y: 0.9885 },
-  "east-teaching-2": { x: 0.477, y: 0.9896 },
-  "east-teaching-3": { x: 0.4754, y: 0.9854 },
-  "east-teaching-4": { x: 0.4777, y: 0.9813 },
-  "east-teaching-5": { x: 0.5, y: 0.9616 },
-  "east-teaching-6": { x: 0.5, y: 0.9637 },
-  "east-teaching-7": { x: 0.5, y: 0.9627 },
-  "gym": { x: 0.5, y: 0.9485 },
-  "life-science": { x: 0.5, y: 0.961 },
-  "environment-college": { x: 0.5, y: 0.9622 },
+// Blender renders come from two batches with very different transparent
+// margins. These values are measured from the alpha channel, so Phaser scales
+// and anchors the visible building rather than the full PNG canvas.
+const EXTERIOR_SPRITE_METRICS: Record<string, { x: number; y: number; visibleW: number; visibleH: number }> = {
+  "main-gate": { x: 0.4994, y: 0.9479, visibleW: 0.9173, visibleH: 0.9003 },
+  "dorm-lantian": { x: 0.5, y: 0.9562, visibleW: 0.9062, visibleH: 0.915 },
+  "dorm-danyang": { x: 0.4986, y: 0.9514, visibleW: 0.9093, visibleH: 0.9057 },
+  "dorm-cuibai": { x: 0.4993, y: 0.9477, visibleW: 0.912, visibleH: 0.897 },
+  "medical-library": { x: 0.4996, y: 0.8833, visibleW: 0.8719, visibleH: 0.7969 },
+  "medical-college": { x: 0.4996, y: 0.899, visibleW: 0.9453, visibleH: 0.8292 },
+  "dorm-baisha": { x: 0.4996, y: 0.8885, visibleW: 0.8328, visibleH: 0.7844 },
+  "little-theater": { x: 0.4996, y: 0.8719, visibleW: 0.9094, visibleH: 0.6552 },
+  "linhu-canteen": { x: 0.5117, y: 0.9417, visibleW: 0.7102, visibleH: 0.9125 },
+  "west-teaching": { x: 0.4994, y: 0.9611, visibleW: 0.9227, visibleH: 0.9257 },
+  "ocean-building": { x: 0.5, y: 0.9581, visibleW: 0.8885, visibleH: 0.9188 },
+  "qiushi-auditorium": { x: 0.4993, y: 0.9591, visibleW: 0.9099, visibleH: 0.9218 },
+  "marine-lab": { x: 0.4994, y: 0.9618, visibleW: 0.9215, visibleH: 0.9421 },
+  "engineering-lab": { x: 0.4993, y: 0.9582, visibleW: 0.9066, visibleH: 0.9508 },
+  "agri-life": { x: 0.4996, y: 0.9564, visibleW: 0.9437, visibleH: 0.9167 },
+  "library": { x: 0.4994, y: 0.9625, visibleW: 0.9177, visibleH: 0.9394 },
+  "east-teaching-1": { x: 0.4738, y: 0.9875, visibleW: 0.7984, visibleH: 0.8031 },
+  "east-teaching-2": { x: 0.4762, y: 0.9885, visibleW: 0.7406, visibleH: 0.8323 },
+  "east-teaching-3": { x: 0.4746, y: 0.9854, visibleW: 0.7969, visibleH: 0.8042 },
+  "east-teaching-4": { x: 0.4773, y: 0.9812, visibleW: 0.707, visibleH: 0.8448 },
+  "east-teaching-5": { x: 0.4995, y: 0.9604, visibleW: 0.9276, visibleH: 0.9233 },
+  "east-teaching-6": { x: 0.4994, y: 0.9625, visibleW: 0.9249, visibleH: 0.9353 },
+  "east-teaching-7": { x: 0.4994, y: 0.9603, visibleW: 0.929, visibleH: 0.923 },
+  "gym": { x: 0.5, y: 0.9452, visibleW: 0.8992, visibleH: 0.8937 },
+  "life-science": { x: 0.4994, y: 0.9586, visibleW: 0.9163, visibleH: 0.9196 },
+  "environment-college": { x: 0.5, y: 0.9599, visibleW: 0.8988, visibleH: 0.9303 },
 };
 
 // Only correct visual proportions here. Gameplay footprints, collision and
 // entrance coordinates continue to use the original mapData values.
 const EXTERIOR_SPRITE_SCALES: Record<string, number> = {
-  "dorm-lantian": 0.8,
+  "dorm-lantian": 0.72,
+  "dorm-baisha": 0.94,
+  "medical-college": 0.94,
+  "medical-library": 0.94,
+  "library": 0.92,
+  "east-teaching-1": 0.94,
+  "east-teaching-2": 0.94,
+  "east-teaching-3": 0.94,
+  "east-teaching-4": 0.94,
+  "east-teaching-5": 0.94,
+  "east-teaching-6": 0.94,
+  "east-teaching-7": 0.94,
+};
+
+// The legacy Lantian and Baisha logical rectangles overlap. Keep both gameplay
+// footprints untouched, but place the Lantian render farther north inside its
+// own large footprint so the two facades no longer merge into one building.
+const EXTERIOR_SPRITE_ISO_OFFSETS: Record<string, IsoPoint> = {
+  "dorm-lantian": { x: -1.15, y: -1.15 },
 };
 // Old movement used 0.075 * speed per frame. Keep the 60fps feel while
 // making movement frame-rate independent.
@@ -457,8 +475,8 @@ export class CampusScene extends Phaser.Scene {
     // A single continuous campus slab makes the map read as one place instead
     // of a collection of disconnected tiles. The old tile texture remains as
     // a low-opacity overlay later in the pipeline.
-    g.fillStyle(0x0b1719, 0.98);
-    g.lineStyle(7, 0x1b3030, 0.88);
+    g.fillStyle(0x102326, 0.99);
+    g.lineStyle(8, 0x34504d, 0.9);
     g.beginPath();
     corners.forEach((point, index) => {
       if (index === 0) g.moveTo(point.x, point.y);
@@ -469,10 +487,10 @@ export class CampusScene extends Phaser.Scene {
     g.strokePath();
 
     const districts = [
-      { x: 2.0, y: 2.1, w: 8.0, d: 6.4, color: 0x182829, alpha: 0.58 },
-      { x: 28.4, y: 8.0, w: 9.0, d: 8.5, color: 0x192a2c, alpha: 0.48 },
-      { x: 9.0, y: 27.0, w: 12.0, d: 4.2, color: 0x1b292a, alpha: 0.44 },
-      { x: 28.8, y: 26.4, w: 9.6, d: 4.0, color: 0x192927, alpha: 0.42 },
+      { x: 2.0, y: 2.1, w: 8.0, d: 6.4, color: 0x29413b, alpha: 0.72 },
+      { x: 28.4, y: 8.0, w: 9.0, d: 8.5, color: 0x263d3f, alpha: 0.68 },
+      { x: 9.0, y: 27.0, w: 12.0, d: 4.2, color: 0x3a3734, alpha: 0.62 },
+      { x: 28.8, y: 26.4, w: 9.6, d: 4.0, color: 0x293c38, alpha: 0.62 },
     ];
     districts.forEach((district, index) => {
       const points = [
@@ -489,7 +507,7 @@ export class CampusScene extends Phaser.Scene {
       });
       g.closePath();
       g.fillPath();
-      g.lineStyle(1, index % 2 ? 0x42605b : 0x385653, 0.22);
+      g.lineStyle(2, index % 2 ? 0x53746c : 0x496a64, 0.3);
       g.strokePath();
     });
 
@@ -499,7 +517,7 @@ export class CampusScene extends Phaser.Scene {
       const y = 3.3 + i * 3.55;
       const start = this.toScreen({ x: 2.0, y });
       const end = this.toScreen({ x: MAP_W - 2.0, y: y + 0.18 * Math.sin(i * 1.7) });
-      g.lineStyle(1, 0x34504e, 0.12);
+      g.lineStyle(1, 0x51736e, 0.14);
       g.beginPath();
       g.moveTo(start.x, start.y);
       g.lineTo(end.x, end.y);
@@ -711,10 +729,10 @@ export class CampusScene extends Phaser.Scene {
       const g = this.add.graphics();
       const points = water.points.map((p) => this.toScreen(p));
       const isQizhenLake = water.id === "qizhen-lake";
-      const waterFill = isQizhenLake ? 0x143a4a : water.color;
-      const waterStroke = isQizhenLake ? 0x1e5a6a : 0x1d5660;
-      g.fillStyle(this.shade(waterFill, -28), 0.94);
-      g.lineStyle(4, waterStroke, isQizhenLake ? 0.56 : 0.42);
+      const waterFill = isQizhenLake ? 0x174b5e : water.color;
+      const waterStroke = isQizhenLake ? 0x3a7b85 : 0x2a6770;
+      g.fillStyle(this.shade(waterFill, -16), 0.96);
+      g.lineStyle(isQizhenLake ? 12 : 7, 0x31584f, isQizhenLake ? 0.62 : 0.42);
       g.beginPath();
       points.forEach((p, index) => {
         if (index === 0) g.moveTo(p.x, p.y);
@@ -722,6 +740,8 @@ export class CampusScene extends Phaser.Scene {
       });
       g.closePath();
       g.fillPath();
+      g.strokePath();
+      g.lineStyle(3, waterStroke, isQizhenLake ? 0.74 : 0.52);
       g.strokePath();
       g.setDepth(12);
 
@@ -870,8 +890,8 @@ export class CampusScene extends Phaser.Scene {
       const ne = this.toScreen({ x: plaza.x + plaza.w, y: plaza.y });
       const se = this.toScreen({ x: plaza.x + plaza.w, y: plaza.y + plaza.d });
       const sw = this.toScreen({ x: plaza.x, y: plaza.y + plaza.d });
-      g.fillStyle(this.shade(plaza.color, -38), 0.84);
-      g.lineStyle(2, 0x9fb8ad, 0.1);
+      g.fillStyle(0x2b403b, 0.9);
+      g.lineStyle(2, 0x9fb8ad, 0.22);
       g.beginPath();
       g.moveTo(nw.x, nw.y);
       g.lineTo(ne.x, ne.y);
@@ -880,6 +900,20 @@ export class CampusScene extends Phaser.Scene {
       g.closePath();
       g.fillPath();
       g.strokePath();
+      g.lineStyle(1, 0x8eaaa0, 0.14);
+      for (let index = 1; index < 4; index += 1) {
+        const t = index / 4;
+        g.beginPath();
+        g.moveTo(
+          Phaser.Math.Linear(nw.x, ne.x, t),
+          Phaser.Math.Linear(nw.y, ne.y, t),
+        );
+        g.lineTo(
+          Phaser.Math.Linear(sw.x, se.x, t),
+          Phaser.Math.Linear(sw.y, se.y, t),
+        );
+        g.strokePath();
+      }
       g.setDepth(14);
 
       const center = this.toScreen({ x: plaza.x + plaza.w / 2, y: plaza.y + plaza.d / 2 });
@@ -903,36 +937,38 @@ export class CampusScene extends Phaser.Scene {
         graphics.strokePath();
       };
       const shadow = this.add.graphics();
-      shadow.lineStyle(Math.round(12 * widthScale), 0x010303, isMainAxis ? 0.42 : 0.32);
-      stroke(shadow, 3);
+      shadow.lineStyle(Math.max(14, Math.round(21 * widthScale)), 0x010303, isMainAxis ? 0.48 : 0.36);
+      stroke(shadow, 4);
       shadow.setDepth(15);
 
-      const roadBed = this.add.graphics();
-      roadBed.lineStyle(
-        Math.max(5, Math.round(9 * widthScale)),
-        isMainAxis ? 0x392b2c : isWetLoop ? 0x1a302e : 0x17211f,
-        0.98,
+      const shoulder = this.add.graphics();
+      shoulder.lineStyle(
+        Math.max(11, Math.round(17 * widthScale)),
+        isMainAxis ? 0x675650 : isWetLoop ? 0x46615a : 0x3e514c,
+        0.92,
       );
-      stroke(roadBed);
-      roadBed.setDepth(15.5);
+      stroke(shoulder);
+      shoulder.setDepth(15.4);
 
       const g = this.add.graphics();
       g.lineStyle(
-        Math.max(3, Math.round(6 * widthScale)),
-        isMainAxis ? 0x4a3334 : this.shade(road.color, isWetLoop ? -32 : -48),
-        0.96,
+        Math.max(7, Math.round(11 * widthScale)),
+        isMainAxis ? 0x533a39 : isWetLoop ? 0x254743 : this.shade(road.color, -22),
+        0.98,
       );
       stroke(g);
       g.setDepth(16);
 
-      // Only the main axis keeps a faint guide line. Branch roads stay flat so
-      // they read as campus paving instead of raised pipes.
-      if (isMainAxis) {
-        const centerLine = this.add.graphics();
-        centerLine.lineStyle(1, 0xc77a70, 0.16);
-        stroke(centerLine);
-        centerLine.setDepth(17);
-      }
+      // A broad, translucent wet reflection reads as material variation rather
+      // than a painted lane line; campus roads should not look like highways.
+      const wetReflection = this.add.graphics();
+      wetReflection.lineStyle(
+        Math.max(2, Math.round(3 * widthScale)),
+        isMainAxis ? 0xb26159 : isWetLoop ? 0x4b8b85 : 0x78928b,
+        isMainAxis ? 0.18 : 0.12,
+      );
+      stroke(wetReflection, -1);
+      wetReflection.setDepth(16.4);
     });
 
     // 路口节点和桥头用统一的小标记强调，位置直接来自 campusRoads，便于
@@ -949,8 +985,8 @@ export class CampusScene extends Phaser.Scene {
     junctions.forEach(({ point, count }) => {
       if (count < 2) return;
       const p = this.toScreen(point);
-      nodes.fillStyle(0x6f8b82, 0.28);
-      nodes.fillCircle(p.x, p.y, 3);
+      nodes.fillStyle(0x8eaaa0, 0.3);
+      nodes.fillCircle(p.x, p.y, 4);
     });
     nodes.setDepth(17.35);
   }
@@ -1184,11 +1220,19 @@ export class CampusScene extends Phaser.Scene {
       }
 
       const theme = buildingThemes[building.id];
+      const visualOffset = EXTERIOR_SPRITE_ISO_OFFSETS[building.id] ?? { x: 0, y: 0 };
       const center = this.toScreen({
-        x: building.x + building.w / 2,
-        y: building.y + building.d / 2,
+        x: building.x + building.w / 2 + visualOffset.x,
+        y: building.y + building.d / 2 + visualOffset.y,
       });
-      const depth = center.y + building.h * 26 + 1;
+      // Sort by the south/front edge of the footprint. Including building
+      // height here made tall buildings behind the player cover objects that
+      // were actually closer to the camera.
+      const frontEdge = this.toScreen({
+        x: building.x + building.w / 2 + visualOffset.x,
+        y: building.y + building.d + visualOffset.y,
+      });
+      const depth = frontEdge.y;
       const spriteKey = EXTERIOR_SPRITE_KEYS[building.id];
       if (spriteKey && this.textures.exists(spriteKey)) {
         this.drawBuildingSprite(building, center, depth, spriteKey);
@@ -1208,7 +1252,7 @@ export class CampusScene extends Phaser.Scene {
           : building;
         const g = this.add.graphics();
         this.drawIsoPrism(g, visualBuilding);
-        g.setDepth(center.y + building.h * 26);
+        g.setDepth(depth);
         this.drawBuildingGeometryV2(visualBuilding, center, depth);
         if (building.id === "admin-center") {
           this.drawAdminEyeRoof(building, depth);
@@ -1224,7 +1268,7 @@ export class CampusScene extends Phaser.Scene {
           padding: { x: 7, y: 3 },
         })
         .setOrigin(0.5);
-      label.setDepth(center.y + building.h * 26 + 2);
+      label.setDepth(depth + 3);
       label.setAlpha(0.34);
       label.setData("baseText", theme?.label ?? building.name);
       this.buildingLabels.set(building.id, label);
@@ -1239,7 +1283,7 @@ export class CampusScene extends Phaser.Scene {
         });
       }
 
-      this.drawBuildingAtmosphere(building, center, center.y + building.h * 26 + 1);
+      this.drawBuildingAtmosphere(building, center, depth + 1);
 
       // ── 为目标建筑预创建红色脉冲光晕（初始不可见） ──
       const storyBuildingIds = new Set(Object.values(hotspotBuildingMap).flat());
@@ -1252,7 +1296,7 @@ export class CampusScene extends Phaser.Scene {
           0xd04438,
           0,
         );
-        glow.setDepth(center.y + building.h * 26 + 0.5);
+        glow.setDepth(depth + 0.5);
         glow.setBlendMode(Phaser.BlendModes.ADD);
         const tween = this.tweens.add({
           targets: glow,
@@ -1279,16 +1323,25 @@ export class CampusScene extends Phaser.Scene {
     // The image is anchored on the south/front edge, the same edge used by
     // drawIsoPrism for the building entrance.  `center` is still used for
     // depth sorting and the atmospheric overlays below.
-    const anchor = this.toScreen({ x: building.x + building.w * 0.5, y: building.y + building.d });
-    const origin = EXTERIOR_SPRITE_ORIGINS[building.id] ?? { x: 0.5, y: 1 };
+    const visualOffset = EXTERIOR_SPRITE_ISO_OFFSETS[building.id] ?? { x: 0, y: 0 };
+    const anchor = this.toScreen({
+      x: building.x + building.w * 0.5 + visualOffset.x,
+      y: building.y + building.d + visualOffset.y,
+    });
+    const metrics = EXTERIOR_SPRITE_METRICS[building.id] ?? {
+      x: 0.5,
+      y: 1,
+      visibleW: 1,
+      visibleH: 1,
+    };
 
     // A low isometric contact shadow hides the seam between the rendered
     // facade and the procedural ground. It is visual only: collision and all
     // story/entry coordinates still come from mapData.
-    const nw = this.toScreen({ x: building.x, y: building.y });
-    const ne = this.toScreen({ x: building.x + building.w, y: building.y });
-    const se = this.toScreen({ x: building.x + building.w, y: building.y + building.d });
-    const sw = this.toScreen({ x: building.x, y: building.y + building.d });
+    const nw = this.toScreen({ x: building.x + visualOffset.x, y: building.y + visualOffset.y });
+    const ne = this.toScreen({ x: building.x + building.w + visualOffset.x, y: building.y + visualOffset.y });
+    const se = this.toScreen({ x: building.x + building.w + visualOffset.x, y: building.y + building.d + visualOffset.y });
+    const sw = this.toScreen({ x: building.x + visualOffset.x, y: building.y + building.d + visualOffset.y });
     const contactShadow = this.add.graphics();
     contactShadow.fillStyle(0x010405, 0.3);
     contactShadow.beginPath();
@@ -1300,13 +1353,17 @@ export class CampusScene extends Phaser.Scene {
     contactShadow.fillPath();
     contactShadow.setDepth(anchor.y - 1);
 
-    const sprite = this.add.image(anchor.x, anchor.y + 3, textureKey).setOrigin(origin.x, origin.y);
+    const sprite = this.add.image(anchor.x, anchor.y + 3, textureKey).setOrigin(metrics.x, metrics.y);
     const footprintScreenWidth = (building.w + building.d) * (TILE_W / 2) + 18;
     const expectedScreenHeight = building.h * 28 + (building.w + building.d) * (TILE_H / 2) + 18;
-    const aspect = sprite.width > 0 && sprite.height > 0 ? sprite.width / sprite.height : 1;
     const visualScale = EXTERIOR_SPRITE_SCALES[building.id] ?? 1;
-    const width = Math.max(footprintScreenWidth, expectedScreenHeight * aspect) * visualScale;
-    sprite.setDisplaySize(width, expectedScreenHeight * visualScale);
+    const visibleSourceWidth = Math.max(1, sprite.width * metrics.visibleW);
+    const visibleSourceHeight = Math.max(1, sprite.height * metrics.visibleH);
+    const heightFit = (expectedScreenHeight * 0.92) / visibleSourceHeight;
+    const widthFit = (footprintScreenWidth * 0.92) / visibleSourceWidth;
+    const maximumWidthFit = (footprintScreenWidth * 1.35) / visibleSourceWidth;
+    const sourceScale = Math.min(Math.max(heightFit, widthFit), maximumWidthFit) * visualScale;
+    sprite.setDisplaySize(sprite.width * sourceScale, sprite.height * sourceScale);
     sprite.setDepth(depth + 1);
     sprite.setData("buildingId", building.id);
     this.exteriorBuildingSprites.set(building.id, sprite);
