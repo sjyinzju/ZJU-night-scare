@@ -22,7 +22,7 @@ const timer = window.setInterval(() => {
   const camera = scene.cameras.main;
   camera.stopFollow();
   camera.setZoom(0.29);
-  camera.centerOn(1160, 1060);
+  camera.centerOn(1060, 1140);
 
   let dragging = false;
   let lastX = 0;

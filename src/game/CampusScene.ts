@@ -38,6 +38,7 @@ import {
 // original IsoPoint values, while the campus gets a less cramped silhouette.
 const TILE_W = 112;
 const TILE_H = 50;
+const MAP_Y_AXIS_STRETCH = 1.18;
 const ORIGIN_X = 980;
 const ORIGIN_Y = 120;
 const MAP_W = 42;
@@ -459,9 +460,10 @@ export class CampusScene extends Phaser.Scene {
   }
 
   private toScreen(point: IsoPoint) {
+    const visualY = point.y * MAP_Y_AXIS_STRETCH;
     return {
-      x: ORIGIN_X + (point.x - point.y) * (TILE_W / 2),
-      y: ORIGIN_Y + (point.x + point.y) * (TILE_H / 2),
+      x: ORIGIN_X + (point.x - visualY) * (TILE_W / 2),
+      y: ORIGIN_Y + (point.x + visualY) * (TILE_H / 2),
     };
   }
 
@@ -2806,7 +2808,7 @@ export class CampusScene extends Phaser.Scene {
     const screen = { x: screenX / screenLength, y: screenY / screenLength };
     const iso = this.normalize({
       x: screen.x / TILE_W + screen.y / TILE_H,
-      y: screen.y / TILE_H - screen.x / TILE_W,
+      y: (screen.y / TILE_H - screen.x / TILE_W) / MAP_Y_AXIS_STRETCH,
     });
 
     return { screen, iso };
@@ -3027,9 +3029,10 @@ export class CampusScene extends Phaser.Scene {
   }
 
   private toScreenDelta(point: IsoPoint) {
+    const visualY = point.y * MAP_Y_AXIS_STRETCH;
     return {
-      x: (point.x - point.y) * (TILE_W / 2),
-      y: (point.x + point.y) * (TILE_H / 2),
+      x: (point.x - visualY) * (TILE_W / 2),
+      y: (point.x + visualY) * (TILE_H / 2),
     };
   }
 
