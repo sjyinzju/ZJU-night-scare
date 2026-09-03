@@ -1,6 +1,6 @@
 export type StatKey = "sanity" | "stamina" | "clues" | "trust" | "affection";
 
-export type ItemId = "talisman" | "flashlight" | "receipt" | "key_card" | "medicine" | "diary" | "photograph" | "cat_hair" | "energy";
+export type ItemId = "talisman" | "flashlight" | "receipt" | "key_card" | "medicine" | "diary" | "photograph" | "owl_feather" | "energy";
 
 export type HotspotId =
   | "library"
@@ -141,7 +141,7 @@ export const itemCatalog: Record<ItemId, { name: string; icon: string; desc: str
   medicine: { name: "镇定药", icon: "药", desc: "杜学民给的白色药瓶。服用后恢复 20 点理智。" },
   diary: { name: "日记残页", icon: "页", desc: "论坛附件里的扫描页，记录了千绳会的旧案。" },
   photograph: { name: "老照片", icon: "照", desc: "苏婉在旧教学楼前的照片。背面写着 1953。" },
-  cat_hair: { name: "黑猫毛发", icon: "毛", desc: "能感知阵法里不自然的冷点。" },
+  owl_feather: { name: "猫头鹰羽毛", icon: "羽", desc: "来自R-1953封存袋；能让被篡改的档案文字短暂保持不变。" },
   energy: { name: "能量饮料", icon: "饮", desc: "罐装咖啡。恢复 30 点体力。" },
 };
 
@@ -208,7 +208,7 @@ export const storyHotspots: StoryHotspot[] = [
     id: "medical-college",
     title: "医学院入口",
     place: "医学院",
-    objective: "从顶层按守则完成巡查，乘电梯前往地下一层",
+    objective: "逐层调查医学院，沿车库封印路线前往地下仓库",
     sceneId: "medical_entry",
     x: 12.5,
     y: 30.0,
@@ -913,23 +913,23 @@ export const storyScenes: Record<StorySceneId, StoryScene> = {
   },
   teaching_back: {
     id: "teaching_back",
-    title: "后门与黑猫",
+    title: "后门与空标本袋",
     chapter: "第五章",
     locationId: "medical-college",
     setting: "outdoor",
     body: [
       "绕到教学楼后面。这里更偏僻，连路灯都没有，西侧未开发的沼泽田贴着围栏铺开。",
-      "地上有烧过纸钱的痕迹，和一些用粉笔画的奇怪符号。角落的纸箱里是一只脖子被扭断的黑猫，周围散落着黄纸符咒。旁边堆着施工木板，你捡到一支还有电的小手电。",
+      "地上有烧过纸钱的痕迹，和一些用粉笔画的奇怪符号。角落纸箱里只有一个被雨水泡烂的空标本袋，标签写着“夜枭羽毛”，内容物已经被取走。旁边堆着施工木板，你捡到一支还有电的小手电。",
       "墙根有一行新写的粉笔字：她不是凶手。六层窗口似乎有人背对着你站了一秒。后门没有锁，门后的安全梯只亮着最上方一盏灯；每层标牌都被划掉，只剩一个向上的“6”。",
     ],
     choices: [
       {
         id: "take",
-        text: "拿起手电和黑猫毛发，沿安全梯上到顶层",
+        text: "拿起手电，沿安全梯上到顶层",
         next: "medical_window",
         statChanges: { sanity: -4, clues: 10, stamina: -3 },
-        gainItems: ["flashlight", "cat_hair"],
-        setFlag: "foundCatKiller",
+        gainItems: ["flashlight"],
+        setFlag: "foundOwlSpecimenBag",
         effect: "reveal",
       },
     ],
@@ -1051,10 +1051,10 @@ export const storyScenes: Record<StorySceneId, StoryScene> = {
         effect: "whisper",
       },
       {
-        id: "cat",
-        text: "用黑猫毛发感知她指向的位置",
+        id: "feather",
+        text: "用猫头鹰羽毛压住正在变化的档案文字",
         next: "stand_ground",
-        requireItem: "cat_hair",
+        requireItem: "owl_feather",
         statChanges: { sanity: -2, clues: 12 },
       },
       {

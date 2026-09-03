@@ -18,6 +18,7 @@ import {
 import { CampusScene, type GameHudEvent, type GameMiniMapEvent } from "./game/CampusScene";
 import InteriorOverlay from "./game/interior3d/InteriorOverlay";
 import type { InteriorAssetState } from "./game/interior3d/Interior3D";
+import type { MedicalBasementConclusionId, MedicalBasementEvidenceId } from "./game/interior3d/medicalBasementData";
 import { preloadInteriorAsset } from "./game/interior3d/InteriorAssetLoader";
 import { shouldUseBaishaDirectChaseTest } from "./game/interior3d/baishaDebug";
 import LaunchSequence, { type LaunchSequenceMode } from "./LaunchSequence";
@@ -90,8 +91,8 @@ const BAISHA_CHASE_ONLY = shouldUseBaishaDirectChaseTest();
 const BAISHA_DEVELOPMENT_PLAYER = new URLSearchParams(window.location.search).get("baishaDoor") === "1"
   ? { x: 7.6, y: 8.11 }
   : { x: 19.4, y: 30.2 };
-// Temporary scene-03 workflow: normal development starts at the medical
-// college entrance story instead of replaying the completed earlier chapters.
+// Temporary basement workflow: development starts inside the final medical
+// segment instead of replaying the library, Baisha, top floor and garage.
 const MEDICAL_DEVELOPMENT_START = import.meta.env.DEV;
 
 function createBaishaDevelopmentStoryState(chaseOnly = false): GameStore["storyState"] {
@@ -115,7 +116,7 @@ function createBaishaDevelopmentStoryState(chaseOnly = false): GameStore["storyS
 
 function createMedicalDevelopmentStoryState(): GameStore["storyState"] {
   return {
-    currentSceneId: "medical_window",
+    currentSceneId: "medical_vault",
     stats: { sanity: 67, stamina: 72, clues: 58, trust: 62, affection: 8 },
     inventory: ["flashlight", "receipt", "talisman", "diary", "key_card", "medicine"],
     flags: {
@@ -123,12 +124,14 @@ function createMedicalDevelopmentStoryState(): GameStore["storyState"] {
       library_fall_witnessed: true,
       readForum: true,
       baishaEscaped: true,
+      medicalTopComplete: true,
+      medicalGarageComplete: true,
     },
     visitedHotspots: ["library", "dorm", "canteen", "du-office", "medical-college"],
     completedHotspots: ["library", "dorm", "canteen", "du-office"],
     log: [
-      "你带着门禁卡与杜学民交给你的镇定药来到医学院。",
-      "林伟留下的线索指向教学楼地下仓库。",
+      "停车场里的封印阵已经闭合，楼梯通向医学院最底层。",
+      "你带着此前取得的线索进入封存的地下仓库。",
     ],
   };
 }
@@ -892,6 +895,72 @@ function App() {
     window.setTimeout(() => setExitBlackout(false), 1050);
   }, [setActiveSceneId, setStoryState]);
 
+  const handleMedicalGarageComplete = useCallback(() => {
+    setExitBlackout(true);
+    window.setTimeout(() => {
+      setStoryState((previous) => ({
+        ...previous,
+        currentSceneId: "medical_vault",
+        flags: { ...previous.flags, medicalGarageComplete: true },
+        log: [
+          "最后一道红线闭合，雷声震得整层车库短暂失明。再次睁眼时，楼梯已经通向更深处的地下仓库。",
+          ...previous.log,
+        ].slice(0, 6),
+      }));
+      setActiveSceneId(null);
+      setAssetLoadAttempt((value) => value + 1);
+    }, 450);
+    window.setTimeout(() => setExitBlackout(false), 1080);
+  }, [setActiveSceneId, setStoryState]);
+
+  const handleMedicalBasementComplete = useCallback((detail: {
+    evidenceIds: MedicalBasementEvidenceId[];
+    conclusion: MedicalBasementConclusionId;
+  }) => {
+    setExitBlackout(true);
+    setStoryState((previous) => {
+      const inventory = [...previous.inventory];
+      if (!inventory.includes("owl_feather")) inventory.push("owl_feather");
+      if (!inventory.includes("photograph")) inventory.push("photograph");
+      return {
+        ...previous,
+        currentSceneId: "report_findings",
+        inventory,
+        stats: {
+          ...previous.stats,
+          clues: Math.min(100, previous.stats.clues + 14),
+          sanity: Math.max(0, previous.stats.sanity - 3),
+        },
+        flags: {
+          ...previous.flags,
+          medicalBasementComplete: true,
+          medicalBasementEvidenceRegistry: detail.evidenceIds.includes("registry"),
+          medicalBasementEvidenceRope: detail.evidenceIds.includes("rope"),
+          medicalBasementEvidenceProtocol: detail.evidenceIds.includes("protocol"),
+          medicalBasementConclusionProtector: detail.conclusion === "protector",
+          medicalBasementConclusionOperator: detail.conclusion === "operator",
+          medicalBasementConclusionRoute: detail.conclusion === "route",
+          medicalBasementConclusionComplete: detail.conclusion === "complete",
+        },
+        visitedHotspots: previous.visitedHotspots.includes("medical-college")
+          ? previous.visitedHotspots
+          : [...previous.visitedHotspots, "medical-college"],
+        completedHotspots: previous.completedHotspots.includes("medical-college")
+          ? previous.completedHotspots
+          : [...previous.completedHotspots, "medical-college"],
+        log: [
+          "23:47的交接锁已经打开。你带走R-1953照片、交接簿和猫头鹰羽毛，下一处线索在启真湖。",
+          ...previous.log,
+        ].slice(0, 6),
+      };
+    });
+    setActiveSceneId(null);
+    placePlayerAtInteriorExit("medical-college");
+    closeInterior();
+    setPhaserReady(true);
+    window.setTimeout(() => setExitBlackout(false), 760);
+  }, [closeInterior, placePlayerAtInteriorExit, setActiveSceneId, setStoryState]);
+
   const startGame = useCallback(() => {
     if (BAISHA_CHASE_ONLY) {
       setLaunchMode(null);
@@ -1617,6 +1686,8 @@ function App() {
           blockUntilAssetReady={launchMode !== null || baishaStillLoading}
           onAssetStateChange={setLaunchAssetState}
           onMedicalTopComplete={handleMedicalTopComplete}
+          onMedicalGarageComplete={handleMedicalGarageComplete}
+          onMedicalBasementComplete={handleMedicalBasementComplete}
         />
       )}
 

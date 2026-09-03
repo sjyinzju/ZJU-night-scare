@@ -16,6 +16,7 @@ import { InputManager } from "./InputManager";
 import { CameraController } from "./CameraController";
 import { FlashlightSystem } from "./FlashlightSystem";
 import { getInteriorNpcRevealSceneIds } from "../storyEngine";
+import { assetUrl } from "../assetPath";
 import {
   getMedicalInteriorSegment,
   getInteriorAssetObject,
@@ -27,6 +28,8 @@ import {
   type InteriorAssetMeta,
   type MedicalTopAuxiliaryHandle,
   type MedicalTopGameplayMeta,
+  type MedicalGarageGameplayMeta,
+  type MedicalBasementGameplayMeta,
   type MedicalTopRoomId,
   type MedicalInteriorSegment,
 } from "./InteriorAssetLoader";
@@ -51,6 +54,18 @@ import {
   type MedicalTopSnapshot,
   type MedicalTopStage,
 } from "./medicalTopData";
+import {
+  type MedicalGarageModal,
+  type MedicalGarageSnapshot,
+  type MedicalGarageStage,
+} from "./medicalGarageData";
+import {
+  type MedicalBasementConclusionId,
+  type MedicalBasementEvidenceId,
+  type MedicalBasementModal,
+  type MedicalBasementSnapshot,
+  type MedicalBasementStage,
+} from "./medicalBasementData";
 
 export type InteriorAssetState = "loading" | "ready" | "failed";
 export type BaishaGameplayPhase = "photo" | "balcony" | "computer" | "paused" | "complete";
@@ -80,6 +95,17 @@ function cutObstacleByClearZone(obstacle: InteriorMapObstacle, zone: NavigationC
   add(cutMinX, cutMaxX, obstacle.minZ, cutMinZ);
   add(cutMinX, cutMaxX, cutMaxZ, obstacle.maxZ);
   return pieces;
+}
+
+function cutAabbByClearZone(obstacle: AABB, zone: NavigationClearZone): AABB[] {
+  const pieces = cutObstacleByClearZone({
+    minX: obstacle.minX,
+    maxX: obstacle.maxX,
+    minZ: obstacle.minZ,
+    maxZ: obstacle.maxZ,
+    kind: zone.kind ?? "wall",
+  }, zone);
+  return pieces.map(({ minX, maxX, minZ, maxZ }) => ({ minX, maxX, minZ, maxZ }));
 }
 
 function segmentHitsObstacleBeforeTarget(
@@ -114,16 +140,18 @@ export interface InteriorMapSnapshot {
   obstacles: InteriorMapObstacle[];
   player: { x: number; z: number };
   objective?: { x: number; z: number };
-  ghost?: { x: number; z: number; state: BaishaGhostState };
+  ghost?: { x: number; z: number; state: BaishaGhostState | "garage" };
   fallenPerson?: { x: number; z: number };
   exitSegment?: { minX: number; maxX: number; z: number; color?: "red" | "green" };
   layoutPaths?: Array<Array<{ x: number; z: number }>>;
+  routeLines?: Array<{ from: { x: number; z: number }; to: { x: number; z: number }; complete: boolean }>;
   labels?: Array<{
     id: string;
     label: string;
     x: number;
     z: number;
     state: "normal" | "target" | "complete" | "abnormal";
+    marker?: "garage-node";
   }>;
 }
 
@@ -175,6 +203,21 @@ export interface Interior3DOptions {
   onMedicalTopModal?: (modal: MedicalTopModal) => void;
   /** The elevator was reached before the last lamp died. */
   onMedicalTopComplete?: (detail: { hasFuse: boolean; evidence?: string }) => void;
+  /** Reports the live underground-garage sealing state for HUD/minimap rendering. */
+  onMedicalGarageStateChange?: (snapshot: MedicalGarageSnapshot) => void;
+  /** Opens the garage introduction or the sixth-column record. */
+  onMedicalGarageModal?: (modal: MedicalGarageModal) => void;
+  /** The seven-column seal is complete and the stair trigger was reached. */
+  onMedicalGarageComplete?: () => void;
+  /** Reports the final underground archive state for its HUD and document UI. */
+  onMedicalBasementStateChange?: (snapshot: MedicalBasementSnapshot) => void;
+  /** Opens the clutter investigation, physical archive, or keypad. */
+  onMedicalBasementModal?: (modal: MedicalBasementModal) => void;
+  /** The R-1953 archive has been recovered and the 23:47 lock was opened. */
+  onMedicalBasementComplete?: (detail: {
+    evidenceIds: MedicalBasementEvidenceId[];
+    conclusion: MedicalBasementConclusionId;
+  }) => void;
 }
 
 const DEFAULT_PLAYER_RADIUS = 0.32;
@@ -263,6 +306,7 @@ export class Interior3D {
   }> = [];
   private readonly assetCeilingLights: THREE.PointLight[] = [];
   private readonly assetCeilingFixtures: THREE.Vector3[] = [];
+  private assetCeilingFixtureGroup?: THREE.Group;
   private nextAssetCeilingPoolUpdateAt = Number.NEGATIVE_INFINITY;
   private readonly onPickup?: (itemId: string, name: string) => void;
   private readonly onStoryTrigger?: (sceneId: string) => void;
@@ -280,6 +324,15 @@ export class Interior3D {
   private readonly onMedicalTopStateChange?: (snapshot: MedicalTopSnapshot) => void;
   private readonly onMedicalTopModal?: (modal: MedicalTopModal) => void;
   private readonly onMedicalTopComplete?: (detail: { hasFuse: boolean; evidence?: string }) => void;
+  private readonly onMedicalGarageStateChange?: (snapshot: MedicalGarageSnapshot) => void;
+  private readonly onMedicalGarageModal?: (modal: MedicalGarageModal) => void;
+  private readonly onMedicalGarageComplete?: () => void;
+  private readonly onMedicalBasementStateChange?: (snapshot: MedicalBasementSnapshot) => void;
+  private readonly onMedicalBasementModal?: (modal: MedicalBasementModal) => void;
+  private readonly onMedicalBasementComplete?: (detail: {
+    evidenceIds: MedicalBasementEvidenceId[];
+    conclusion: MedicalBasementConclusionId;
+  }) => void;
   private runtimeStamina = 100;
   private persistedStamina = 100;
   private staminaStoreSyncElapsed = 0;
@@ -430,6 +483,68 @@ export class Interior3D {
   private medicalTopEscapeOffCount = 0;
   private medicalTopEvidence?: string;
 
+  private medicalGarageMeta?: MedicalGarageGameplayMeta;
+  private medicalGaragePropsAsset?: MedicalTopAuxiliaryHandle;
+  private medicalGarageGhost?: THREE.Object3D;
+  private medicalGarageGhostBaseY = 0;
+  private medicalGarageCandle?: THREE.Object3D;
+  private medicalGarageCandleLight?: THREE.PointLight;
+  private medicalGarageGhostLight?: THREE.PointLight;
+  private medicalGarageStage: MedicalGarageStage = "opening";
+  private medicalGarageStageStartedAt = 0;
+  private medicalGarageNextLightningAt = Number.POSITIVE_INFINITY;
+  private medicalGarageLightningFlashUntil = 0;
+  private medicalGarageCycle = 0;
+  private medicalGarageViolations = 0;
+  private medicalGarageActivatedNodes = 0;
+  private medicalGarageHasCandle = false;
+  private medicalGarageDocumentRead = false;
+  private medicalGarageLoadingText?: string;
+  private medicalGarageOutOfViewSeconds = 0;
+  private medicalGarageFailurePending = false;
+  private medicalGarageCompleteReported = false;
+  private medicalGarageSegmentValid = true;
+  private medicalGarageSegmentWarningShown = false;
+  private medicalGarageRecoveryAt = Number.POSITIVE_INFINITY;
+  private readonly medicalGarageNodes: THREE.Vector3[] = [];
+  private readonly medicalGarageRouteMaterials: THREE.MeshBasicMaterial[] = [];
+  private medicalGarageRouteGroup?: THREE.Group;
+  private medicalGarageCandlePoint = new THREE.Vector3();
+  private medicalGarageStairsPoint = new THREE.Vector3();
+  private medicalGarageSpawnPoint = new THREE.Vector3();
+  private medicalGarageSpawnYaw = 0;
+  private medicalGarageGhostOpacityMaterials: THREE.MeshStandardMaterial[] = [];
+  private medicalGarageGhostBaseSpeed = 0;
+  private medicalGarageGhostAcceleration = 0;
+
+  private medicalBasementMeta?: MedicalBasementGameplayMeta;
+  private medicalBasementPropsAsset?: MedicalTopAuxiliaryHandle;
+  private medicalBasementStage: MedicalBasementStage = "approach";
+  private medicalBasementFeather?: THREE.Object3D;
+  private medicalBasementNotebook?: THREE.Object3D;
+  private medicalBasementFeatherLight?: THREE.PointLight;
+  private medicalBasementNotebookLight?: THREE.PointLight;
+  private medicalBasementHasFeather = false;
+  private medicalBasementEvidenceIds: MedicalBasementEvidenceId[] = [];
+  private medicalBasementConclusion: MedicalBasementConclusionId = "protector";
+  private medicalBasementNotebookComplete = false;
+  private medicalBasementWrongPasswordAttempts = 0;
+  private medicalBasementLoadingText?: string;
+  private medicalBasementModalOpen = false;
+  private medicalBasementCompleteReported = false;
+  private medicalBasementLeftDoor?: THREE.Object3D;
+  private medicalBasementRightDoor?: THREE.Object3D;
+  private medicalBasementLeftDoorClosed = new THREE.Quaternion();
+  private medicalBasementRightDoorClosed = new THREE.Quaternion();
+  private medicalBasementLeftDoorOpen = new THREE.Quaternion();
+  private medicalBasementRightDoorOpen = new THREE.Quaternion();
+  private medicalBasementDoorProgress = 0;
+  private medicalBasementApparition?: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
+  private medicalBasementApparitionTexture?: THREE.Texture;
+  private medicalBasementAnatomyDoorVisuals: THREE.Object3D[] = [];
+  private medicalBasementAnatomyDoorCollider?: AABB;
+  private medicalBasementAnatomyDoorOpen = false;
+
   // ── New movement architecture ──
   private readonly inputManager: InputManager;
   private readonly cameraController: CameraController;
@@ -503,6 +618,12 @@ export class Interior3D {
     this.onMedicalTopStateChange = options.onMedicalTopStateChange;
     this.onMedicalTopModal = options.onMedicalTopModal;
     this.onMedicalTopComplete = options.onMedicalTopComplete;
+    this.onMedicalGarageStateChange = options.onMedicalGarageStateChange;
+    this.onMedicalGarageModal = options.onMedicalGarageModal;
+    this.onMedicalGarageComplete = options.onMedicalGarageComplete;
+    this.onMedicalBasementStateChange = options.onMedicalBasementStateChange;
+    this.onMedicalBasementModal = options.onMedicalBasementModal;
+    this.onMedicalBasementComplete = options.onMedicalBasementComplete;
     // Review-only noclip remains available for inspecting the Baisha asset.
     // The medical school used to need it because the teaching floor plate sat
     // inside the collision slice; the loader now shifts the asset down 0.5 m
@@ -794,6 +915,110 @@ export class Interior3D {
     };
   }
 
+  completeMedicalGarageModal(kind: MedicalGarageModal["kind"]): void {
+    if (!this.medicalGarageMeta) return;
+    if (kind === "opening" && this.medicalGarageStage === "opening") {
+      this.medicalGarageStage = "dark";
+      this.medicalGarageStageStartedAt = this.clock.elapsedTime;
+      this.scheduleMedicalGarageLightning();
+    } else if (kind === "document" && this.medicalGarageStage === "document") {
+      this.medicalGarageDocumentRead = true;
+      this.medicalGarageStage = "dark";
+      this.medicalGarageStageStartedAt = this.clock.elapsedTime;
+      // The seventh point sits inside the narrow stair approach. Give the
+      // player two extra seconds to clear the doorway before the next ghost pass.
+      this.scheduleMedicalGarageLightning(3.8);
+    } else {
+      return;
+    }
+    this.setGameplayPaused(false);
+    this.emitMedicalGarageState();
+  }
+
+  getMedicalGarageSnapshot(): MedicalGarageSnapshot | null {
+    if (!this.medicalGarageMeta || this.medicalSegment !== "garage") return null;
+    const allNodes = this.medicalGarageActivatedNodes >= this.medicalGarageNodes.length;
+    const target = this.medicalGarageStage === "stairs" || this.medicalGarageStage === "transition"
+      ? "stairs"
+      : allNodes && !this.medicalGarageHasCandle
+        ? "candle"
+        : "node";
+    return {
+      stage: this.medicalGarageStage,
+      violations: this.medicalGarageViolations,
+      activatedNodes: this.medicalGarageActivatedNodes,
+      totalNodes: this.medicalGarageNodes.length,
+      currentNode: allNodes ? null : this.medicalGarageActivatedNodes,
+      hasCandle: this.medicalGarageHasCandle,
+      target,
+      ghostVisible: this.medicalGarageStage === "visible" || this.medicalGarageStage === "fading" || this.medicalGarageStage === "seal",
+      loadingText: this.medicalGarageLoadingText,
+    };
+  }
+
+  getMedicalBasementSnapshot(): MedicalBasementSnapshot | null {
+    if (!this.medicalBasementMeta || this.medicalSegment !== "basement") return null;
+    const target = this.medicalBasementStage === "approach" || this.medicalBasementStage === "clutter"
+      ? "feather"
+      : this.medicalBasementStage === "notebook"
+        ? "notebook"
+        : "exit";
+    return {
+      stage: this.medicalBasementStage,
+      hasFeather: this.medicalBasementHasFeather,
+      evidenceIds: [...this.medicalBasementEvidenceIds],
+      notebookComplete: this.medicalBasementNotebookComplete,
+      wrongPasswordAttempts: this.medicalBasementWrongPasswordAttempts,
+      target,
+      loadingText: this.medicalBasementLoadingText,
+    };
+  }
+
+  completeMedicalBasementClutter(evidenceIds: MedicalBasementEvidenceId[]): void {
+    if (!this.medicalBasementMeta || this.medicalBasementStage !== "clutter") return;
+    this.medicalBasementEvidenceIds = [...new Set(evidenceIds)];
+    this.medicalBasementModalOpen = false;
+    this.medicalBasementStage = "notebook";
+    this.openMedicalBasementAnatomyDoor();
+    if (this.medicalBasementNotebook) this.medicalBasementNotebook.visible = true;
+    if (this.medicalBasementNotebookLight) this.medicalBasementNotebookLight.visible = true;
+    this.setGameplayPaused(false);
+    this.emitMedicalBasementState();
+  }
+
+  completeMedicalBasementNotebook(conclusion: MedicalBasementConclusionId): void {
+    if (!this.medicalBasementMeta || this.medicalBasementStage !== "notebook") return;
+    this.medicalBasementConclusion = conclusion;
+    this.medicalBasementNotebookComplete = true;
+    this.medicalBasementModalOpen = false;
+    this.medicalBasementStage = "locked";
+    if (this.medicalBasementNotebookLight) this.medicalBasementNotebookLight.visible = false;
+    this.setGameplayPaused(false);
+    this.emitMedicalBasementState();
+  }
+
+  submitMedicalBasementPassword(value: string): void {
+    if (!this.medicalBasementMeta || this.medicalBasementStage !== "locked") return;
+    if (value !== "2347") {
+      this.medicalBasementWrongPasswordAttempts++;
+      this.emitMedicalBasementState();
+      return;
+    }
+    this.medicalBasementModalOpen = false;
+    this.medicalBasementStage = "transition";
+    this.setGameplayPaused(true);
+    this.emitMedicalBasementState();
+    if (this.medicalBasementCompleteReported) return;
+    this.medicalBasementCompleteReported = true;
+    window.setTimeout(() => {
+      if (this.disposed) return;
+      this.onMedicalBasementComplete?.({
+        evidenceIds: [...this.medicalBasementEvidenceIds],
+        conclusion: this.medicalBasementConclusion,
+      });
+    }, 460);
+  }
+
   setBaishaGameplayPhase(phase: BaishaGameplayPhase): void {
     if (this.baishaGameplayPhase === phase) return;
     this.baishaGameplayPhase = phase;
@@ -931,6 +1156,24 @@ export class Interior3D {
         const roomId: MedicalTopRoomId = target === "602" ? "603" : target;
         objective = { x: this.medicalTopMeta.rooms[roomId].door.x, z: this.medicalTopMeta.rooms[roomId].door.z };
       }
+    } else if (this.roomKind === "medical" && this.medicalSegment === "garage" && this.medicalGarageMeta) {
+      if (this.medicalGarageStage === "stairs" || this.medicalGarageStage === "transition") {
+        objective = { x: this.medicalGarageStairsPoint.x, z: this.medicalGarageStairsPoint.z };
+      } else if (this.medicalGarageActivatedNodes >= this.medicalGarageNodes.length && !this.medicalGarageHasCandle) {
+        objective = { x: this.medicalGarageCandlePoint.x, z: this.medicalGarageCandlePoint.z };
+      } else if (this.medicalGarageActivatedNodes < this.medicalGarageNodes.length) {
+        const node = this.medicalGarageNodes[this.medicalGarageActivatedNodes];
+        objective = { x: node.x, z: node.z };
+      }
+    } else if (this.roomKind === "medical" && this.medicalSegment === "basement" && this.medicalBasementMeta) {
+      const target = this.getMedicalBasementSnapshot()?.target;
+      if (target === "feather") {
+        objective = { x: this.medicalBasementMeta.feather.x, z: this.medicalBasementMeta.feather.z };
+      } else if (target === "notebook") {
+        objective = { x: this.medicalBasementMeta.notebook.x, z: this.medicalBasementMeta.notebook.z };
+      } else if (target === "exit") {
+        objective = { x: this.medicalBasementMeta.anatomyDoor.x, z: this.medicalBasementMeta.anatomyDoor.z };
+      }
     }
     const fallReveal = this.assetHandle?.meta?.fallReveal;
     const baishaMinimap = this.roomKind === "dorm"
@@ -955,7 +1198,13 @@ export class Interior3D {
       obstacles: mapObstacles,
       player: { x: this.camera.position.x, z: this.camera.position.z },
       objective,
-      ghost: this.baishaGhostState === "chase"
+      ghost: this.medicalGarageGhost?.visible && this.medicalGarageMeta
+        ? {
+            x: this.medicalGarageGhost.position.x,
+            z: this.medicalGarageGhost.position.z,
+            state: "garage" as const,
+          }
+        : this.baishaGhostState === "chase"
         ? {
             x: this.baishaGhostPosition.x,
             z: this.baishaGhostPosition.y,
@@ -968,6 +1217,15 @@ export class Interior3D {
       exitSegment: baishaExitSegment
         ?? (sceneId === "dorm_baiqiu" ? this.assetHandle?.meta?.exitSegment : undefined),
       layoutPaths: baishaMinimap?.paths,
+      routeLines: this.medicalGarageMeta && this.medicalSegment === "garage"
+        ? this.medicalGarageNodes.slice(1).map((to, index) => ({
+            from: { x: this.medicalGarageNodes[index].x, z: this.medicalGarageNodes[index].z },
+            to: { x: to.x, z: to.z },
+            // Once a node is checked in, reveal the route from that node to
+            // the next one. This mirrors the red strip on the garage floor.
+            complete: index < this.medicalGarageActivatedNodes,
+          }))
+        : undefined,
       labels: this.roomKind === "medical" && this.medicalSegment === "top" && this.medicalTopMeta
         ? (["601", "603", "605"] as const).map((roomId) => {
             const target = this.medicalTopCurrentTarget === roomId
@@ -982,6 +1240,37 @@ export class Interior3D {
               state: abnormal ? "abnormal" as const : target ? "target" as const : complete ? "complete" as const : "normal" as const,
             };
           })
+        : this.medicalGarageMeta && this.medicalSegment === "garage"
+          ? [
+              ...this.medicalGarageNodes.map((node, index) => ({
+                id: `garage-node-${index}`,
+                label: `${index + 1}`,
+                x: node.x,
+                z: node.z,
+                marker: "garage-node" as const,
+                state: index < this.medicalGarageActivatedNodes
+                  ? "complete" as const
+                  : index === this.medicalGarageActivatedNodes
+                    ? "target" as const
+                    : "normal" as const,
+              })),
+              {
+                id: "garage-stairs",
+                label: this.medicalGarageMeta.stairs.label,
+                x: this.medicalGarageStairsPoint.x,
+                z: this.medicalGarageStairsPoint.z,
+                state: this.medicalGarageStage === "stairs" ? "target" as const : "normal" as const,
+              },
+              ...(!this.medicalGarageHasCandle ? [{
+                id: "garage-candle",
+                label: "蜡烛",
+                x: this.medicalGarageCandlePoint.x,
+                z: this.medicalGarageCandlePoint.z,
+                state: this.medicalGarageActivatedNodes >= 4 ? "target" as const : "normal" as const,
+              }] : []),
+            ]
+        : this.medicalBasementMeta && this.medicalSegment === "basement"
+          ? []
         : undefined,
     };
   }
@@ -1072,6 +1361,44 @@ export class Interior3D {
   }
 
   debugTeleportToMedicalTarget(): string {
+    if (this.medicalBasementMeta && this.medicalSegment === "basement") {
+      const meta = this.medicalBasementMeta;
+      if (this.medicalBasementDoorProgress < 0.96) {
+        const x = meta.outerDoor.x + Math.min(8, meta.outerDoor.openingDistance - 1);
+        const z = meta.outerDoor.z;
+        this.camera.position.set(x, this.room.floorHeightAt(x, z) + this.crouchState.eyeHeight, z);
+        this.cameraController.setLook(Math.atan2(-(meta.outerDoor.x - x), -(meta.outerDoor.z - z)), -0.03);
+        this.resolvePenetration();
+        return "已前往拱门前：门将缓慢打开，苏婉始终位于门后";
+      }
+      const snapshot = this.getMedicalBasementSnapshot();
+      const target = snapshot?.target === "notebook"
+        ? meta.notebook
+        : snapshot?.target === "exit" ? meta.anatomyDoor : meta.feather;
+      const safe = this.findNearestAssetClearPoint(new THREE.Vector3(target.x, EYE_HEIGHT, target.z));
+      this.camera.position.copy(safe);
+      this.cameraController.setLook(0, -0.22);
+      this.resolvePenetration();
+      return `已前往地下仓库目标：${snapshot?.target ?? "feather"}`;
+    }
+    if (this.medicalGarageMeta && this.medicalSegment === "garage") {
+      let target: THREE.Vector3;
+      let label: string;
+      if (this.medicalGarageStage === "stairs" || this.medicalGarageStage === "transition") {
+        target = this.medicalGarageStairsPoint;
+        label = "地下仓库楼梯";
+      } else if (this.medicalGarageActivatedNodes >= this.medicalGarageNodes.length && !this.medicalGarageHasCandle) {
+        target = this.medicalGarageCandlePoint;
+        label = "封印蜡烛";
+      } else {
+        target = this.medicalGarageNodes[Math.min(this.medicalGarageActivatedNodes, this.medicalGarageNodes.length - 1)];
+        label = `封印柱 ${Math.min(this.medicalGarageActivatedNodes + 1, this.medicalGarageNodes.length)}`;
+      }
+      const safe = this.findNearestAssetClearPoint(new THREE.Vector3(target.x, EYE_HEIGHT, target.z));
+      this.camera.position.copy(safe);
+      this.resolvePenetration();
+      return `已前往车库目标：${label}`;
+    }
     const meta = this.medicalTopMeta;
     if (!meta || this.medicalSegment !== "top") return "当前场景不是医学院顶层";
     let x = this.camera.position.x;
@@ -1275,6 +1602,10 @@ export class Interior3D {
   /** Nearest door interaction hint text, or "" when nothing is in range. */
   get doorHint(): string {
     if (this.medicalTopMeta && this.medicalSegment === "top") return this.medicalTopInteractionHint();
+    // The authored garage/basement GLBs own their navigation. Do not expose
+    // the obsolete procedural medical-room door that still exists behind the
+    // loaded model as an interaction prompt.
+    if (this.roomKind === "medical" && (this.medicalSegment === "garage" || this.medicalSegment === "basement")) return "";
     const door = this.findNearestDoor();
     if (!door) return "";
     return door.interactionLabel + " — 按 E";
@@ -1390,6 +1721,37 @@ export class Interior3D {
     this.medicalTopClueGlows.clear();
     for (const fixture of this.medicalTopFixtures) this.scene.remove(fixture.light);
     this.medicalTopFixtures.length = 0;
+    if (this.medicalGarageRouteGroup) {
+      const geometries = new Set<THREE.BufferGeometry>();
+      const materials = new Set<THREE.Material>();
+      this.medicalGarageRouteGroup.traverse((object) => {
+        if (!(object instanceof THREE.Mesh) && !(object instanceof THREE.Line)) return;
+        geometries.add(object.geometry);
+        const source = Array.isArray(object.material) ? object.material : [object.material];
+        source.forEach((material) => materials.add(material));
+      });
+      geometries.forEach((geometry) => geometry.dispose());
+      materials.forEach((material) => material.dispose());
+      this.scene.remove(this.medicalGarageRouteGroup);
+      this.medicalGarageRouteGroup = undefined;
+    }
+    this.medicalGarageCandleLight?.dispose();
+    this.medicalGarageGhostLight?.dispose();
+    this.medicalGaragePropsAsset?.dispose();
+    this.medicalGaragePropsAsset = undefined;
+    this.medicalBasementFeatherLight?.dispose();
+    this.medicalBasementNotebookLight?.dispose();
+    this.medicalBasementPropsAsset?.dispose();
+    this.medicalBasementPropsAsset = undefined;
+    if (this.medicalBasementApparition) {
+      this.medicalBasementApparition.geometry.dispose();
+      this.medicalBasementApparition.material.dispose();
+      this.scene.remove(this.medicalBasementApparition);
+      this.medicalBasementApparition = undefined;
+    }
+    this.medicalBasementApparitionTexture?.dispose();
+    this.medicalBasementApparitionTexture = undefined;
+    this.medicalBasementAnatomyDoorVisuals = [];
     this.assetHandle?.dispose();
     this.assetHandle = undefined;
     this.assetPickupVisuals.clear();
@@ -1402,6 +1764,7 @@ export class Interior3D {
     this.scene.remove(this.libraryPursuitLight);
     stopLibraryStorm();
     window.dispatchEvent(new CustomEvent("zju-horror-library-lightning", { detail: { active: false } }));
+    window.dispatchEvent(new CustomEvent("zju-horror-medical-garage-lightning", { detail: { active: false } }));
     this.clearAssetFlickerLights();
     this.clearAssetCeilingLights();
     this.clearBaishaLighting();
@@ -1468,6 +1831,8 @@ export class Interior3D {
       this.bindInteriorAssetMetadata(handle);
       this.addAssetCeilingLights(handle);
       this.setupMedicalTopGameplay(handle);
+      await this.setupMedicalGarageGameplay(handle);
+      await this.setupMedicalBasementGameplay(handle);
       this.addBaishaLighting(handle);
       this.setupBaishaGameplay(handle);
       this.suppressLegacyGuidance = this.roomKind === "library" || !handle.meta;
@@ -1757,6 +2122,486 @@ export class Interior3D {
     this.emitMedicalTopState();
   }
 
+  private async setupMedicalGarageGameplay(handle: InteriorAssetHandle): Promise<void> {
+    if (this.medicalSegment !== "garage" || !handle.meta?.medicalGarageGameplay) return;
+    const meta = handle.meta.medicalGarageGameplay;
+    this.medicalGarageMeta = meta;
+    this.medicalGarageLoadingText = "地下车库 / 白布下的东西正在醒来";
+    this.renderer.toneMappingExposure = 0.92;
+    this.scene.background = new THREE.Color(0x0b0e14);
+    this.scene.fog = new THREE.Fog(0x0c1017, 6.5, 58);
+    this.ambientLight.color.setHex(0x718096);
+    this.fillLight.color.setHex(0xb5c2d3);
+    this.fillLight.groundColor.setHex(0x171c24);
+    this.nearFillLight.color.setHex(0xd3dce8);
+    this.tuneMedicalGaragePerimeterWalls(handle.root);
+
+    this.medicalGarageNodes.length = 0;
+    for (const node of meta.nodes) {
+      this.medicalGarageNodes.push(this.findNearestAssetClearPoint(new THREE.Vector3(node.x, 0.025, node.z)));
+    }
+    const spawn = this.chooseMedicalGarageSpawn(meta);
+    this.medicalGarageSpawnPoint.copy(spawn);
+    const firstNode = this.medicalGarageNodes[0];
+    this.medicalGarageSpawnYaw = firstNode
+      ? Math.atan2(-(firstNode.x - spawn.x), -(firstNode.z - spawn.z))
+      : meta.spawn.yaw;
+    this.camera.position.copy(spawn);
+    this.cameraController.setLook(this.medicalGarageSpawnYaw, -0.04);
+    this.medicalGarageCandlePoint.copy(this.findNearestAssetClearPoint(new THREE.Vector3(meta.candle.x, 0, meta.candle.z)));
+    if (this.medicalGarageNodes[4] && this.medicalGarageCandlePoint.distanceTo(this.medicalGarageNodes[4]) > 1.2) {
+      this.medicalGarageCandlePoint.copy(this.medicalGarageNodes[4]);
+    }
+    this.medicalGarageStairsPoint.copy(this.findNearestAssetClearPoint(new THREE.Vector3(meta.stairs.x, 0, meta.stairs.z)));
+    const props = await loadMedicalTopAuxiliary(meta.propsModel);
+    if (this.disposed) {
+      props.dispose();
+      return;
+    }
+    this.medicalGaragePropsAsset = props;
+    this.scene.add(props.root);
+    this.medicalGarageGhost = getInteriorAssetObject(props.root, meta.ghostObjectName);
+    this.medicalGarageCandle = getInteriorAssetObject(props.root, meta.candleObjectName);
+    if (!this.medicalGarageGhost || !this.medicalGarageCandle) {
+      throw new Error("Medical garage prop package is missing its ghost or candle semantic root");
+    }
+    // The authored semantic root carries the offset that places the normalized
+    // cloth mesh on the floor. Preserve it whenever X/Z is respawned; replacing
+    // the whole position with a y=0 gameplay point would bury half the ghost.
+    this.medicalGarageGhostBaseY = this.medicalGarageGhost.position.y;
+    this.medicalGarageGhost.visible = false;
+    this.medicalGarageCandle.position.copy(this.medicalGarageCandlePoint);
+    this.medicalGarageCandle.visible = true;
+
+    this.medicalGarageGhostOpacityMaterials = [];
+    this.medicalGarageGhost.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      const source = Array.isArray(object.material) ? object.material : [object.material];
+      const cloned = source.map((material) => {
+        const copy = material.clone() as THREE.MeshStandardMaterial;
+        copy.transparent = true;
+        copy.opacity = 1;
+        copy.depthWrite = true;
+        if (/dirty_gauze|ghost_web/i.test(copy.name)) {
+          // During the three-second lightning window the sheet must remain
+          // readable against the almost-black garage, independent of which
+          // authored surface happens to be behind it.
+          copy.color.setHex(/ghost_web/i.test(copy.name) ? 0x727781 : 0x555b65);
+          copy.emissive = new THREE.Color(0x202630);
+          copy.emissiveIntensity = 0.72;
+        }
+        this.medicalGarageGhostOpacityMaterials.push(copy);
+        return copy;
+      });
+      object.material = Array.isArray(object.material) ? cloned : cloned[0];
+      object.castShadow = false;
+    });
+
+    this.medicalGarageGhostLight = new THREE.PointLight(0xff001f, 0, 5.5, 2);
+    this.medicalGarageGhostLight.visible = true;
+    this.medicalGarageGhostLight.castShadow = false;
+    this.medicalGarageGhostLight.position.set(0, 0.45, 0);
+    this.medicalGarageGhost.add(this.medicalGarageGhostLight);
+
+    this.medicalGarageCandleLight = new THREE.PointLight(0xb90716, 1.25, 3.2, 2);
+    this.medicalGarageCandleLight.visible = true;
+    this.medicalGarageCandleLight.castShadow = false;
+    this.medicalGarageCandleLight.position.copy(this.medicalGarageCandlePoint).add(new THREE.Vector3(0, 0.22, 0));
+    this.scene.add(this.medicalGarageCandleLight);
+
+    this.createMedicalGarageRouteVisuals();
+    this.medicalGarageStage = "opening";
+    this.medicalGarageStageStartedAt = this.clock.elapsedTime;
+    this.medicalGarageLoadingText = undefined;
+    startLibraryStorm();
+    this.setGameplayPaused(true);
+    this.emitMedicalGarageState();
+    this.onMedicalGarageModal?.({ kind: "opening" });
+
+    try {
+      await this.renderer.compileAsync(this.scene, this.camera);
+    } catch (error) {
+      console.warn("[Interior3D] Garage shader warm-up was unavailable:", error);
+    }
+  }
+
+  private async setupMedicalBasementGameplay(handle: InteriorAssetHandle): Promise<void> {
+    if (this.medicalSegment !== "basement" || !handle.meta?.medicalBasementGameplay) return;
+    const meta = handle.meta.medicalBasementGameplay;
+    this.medicalBasementMeta = meta;
+    this.medicalBasementLoadingText = "地下仓库 / R-1953档案正在显影";
+    this.renderer.toneMappingExposure = 0.96;
+    this.scene.background = new THREE.Color(0x09070a);
+    this.scene.fog = new THREE.Fog(0x13070a, 8, 46);
+
+    // Clear only the real arched doorway. The source GLB contains a wall-sized
+    // collision slice here, which is why the player previously stuck to the
+    // long wall even while the door leaves were visibly ajar.
+    this.colliders = this.colliders.flatMap((obstacle) => cutAabbByClearZone(obstacle, meta.outerDoor.clearZone));
+    if (this.interiorMapObstacles) {
+      this.interiorMapObstacles = this.interiorMapObstacles.flatMap((obstacle) => (
+        cutObstacleByClearZone(obstacle, meta.outerDoor.clearZone)
+      ));
+    }
+    this.staticColliderSet = false;
+
+    const leftLeaf = getInteriorAssetObject(handle.root, meta.outerDoor.leftVisualName);
+    const rightLeaf = getInteriorAssetObject(handle.root, meta.outerDoor.rightVisualName);
+    if (!leftLeaf || !rightLeaf) {
+      throw new Error("Medical basement authored arched-door leaves were not found");
+    }
+    handle.root.updateMatrixWorld(true);
+    const createWorldHinge = (leaf: THREE.Object3D, side: "left" | "right"): THREE.Group => {
+      const box = new THREE.Box3().setFromObject(leaf);
+      const center = box.getCenter(new THREE.Vector3());
+      // The leaves meet at meta.outerDoor.z. Their hinges are therefore the
+      // outer Z edge of each real mesh, not the imported empty's remote DCC
+      // pivot (which sits tens of metres away in source coordinates).
+      const hingeZ = center.z >= meta.outerDoor.z ? box.max.z : box.min.z;
+      const hinge = new THREE.Group();
+      hinge.name = `medical_basement_${side}_door_hinge`;
+      hinge.position.set(center.x, 0, hingeZ);
+      this.scene.add(hinge);
+      hinge.attach(leaf);
+      handle.root.attach(hinge);
+      return hinge;
+    };
+    this.medicalBasementLeftDoor = createWorldHinge(leftLeaf, "left");
+    this.medicalBasementRightDoor = createWorldHinge(rightLeaf, "right");
+    this.medicalBasementLeftDoorClosed.identity();
+    this.medicalBasementRightDoorClosed.identity();
+    this.medicalBasementLeftDoorOpen.setFromAxisAngle(new THREE.Vector3(0, 1, 0), meta.outerDoor.openRadians);
+    this.medicalBasementRightDoorOpen.setFromAxisAngle(new THREE.Vector3(0, 1, 0), -meta.outerDoor.openRadians);
+
+    const [props, apparitionTexture] = await Promise.all([
+      loadMedicalTopAuxiliary(meta.propsModel),
+      new THREE.TextureLoader().loadAsync(assetUrl(meta.apparition.image, "medical-basement-v1")),
+    ]);
+    if (this.disposed) {
+      props.dispose();
+      apparitionTexture.dispose();
+      return;
+    }
+    this.medicalBasementPropsAsset = props;
+    this.scene.add(props.root);
+    this.medicalBasementFeather = getInteriorAssetObject(props.root, meta.featherObjectName);
+    this.medicalBasementNotebook = getInteriorAssetObject(props.root, meta.notebookObjectName);
+    if (!this.medicalBasementFeather || !this.medicalBasementNotebook) {
+      throw new Error("Medical basement prop package is missing the feather or archive notebook root");
+    }
+    this.medicalBasementFeather.position.set(meta.feather.x, meta.feather.y, meta.feather.z);
+    this.medicalBasementFeather.rotation.y = -0.32;
+    this.medicalBasementFeather.traverse((object) => {
+      const mesh = object as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const sourceMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      const visibleMaterials = sourceMaterials.map((source) => {
+        const material = source.clone() as THREE.MeshStandardMaterial;
+        material.side = THREE.DoubleSide;
+        material.transparent = false;
+        material.opacity = 1;
+        if ("color" in material) material.color.setHex(0xd9ccb4);
+        if ("emissive" in material) {
+          material.emissive.setHex(0x351012);
+          material.emissiveIntensity = 0.78;
+        }
+        material.needsUpdate = true;
+        return material;
+      });
+      mesh.material = Array.isArray(mesh.material) ? visibleMaterials : visibleMaterials[0];
+      mesh.renderOrder = 1;
+    });
+    this.medicalBasementNotebook.position.set(meta.notebook.x, meta.notebook.y, meta.notebook.z);
+    this.medicalBasementNotebook.visible = false;
+
+    this.medicalBasementFeatherLight = new THREE.PointLight(0x850813, 1.45, 3.2, 2);
+    this.medicalBasementFeatherLight.position.set(meta.feather.x, meta.feather.y + 0.42, meta.feather.z);
+    this.medicalBasementFeatherLight.castShadow = false;
+    this.scene.add(this.medicalBasementFeatherLight);
+    this.medicalBasementNotebookLight = new THREE.PointLight(0x76050d, 1.15, 3.4, 2);
+    this.medicalBasementNotebookLight.position.set(meta.notebook.x, meta.notebook.y + 0.32, meta.notebook.z);
+    this.medicalBasementNotebookLight.castShadow = false;
+    this.medicalBasementNotebookLight.visible = false;
+    this.scene.add(this.medicalBasementNotebookLight);
+
+    apparitionTexture.colorSpace = THREE.SRGBColorSpace;
+    apparitionTexture.minFilter = THREE.LinearMipmapLinearFilter;
+    this.medicalBasementApparitionTexture = apparitionTexture;
+    const apparitionMaterial = new THREE.MeshBasicMaterial({
+      map: apparitionTexture,
+      transparent: true,
+      opacity: 0.9,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      toneMapped: false,
+    });
+    this.medicalBasementApparition = new THREE.Mesh(
+      new THREE.PlaneGeometry(meta.apparition.width, meta.apparition.height),
+      apparitionMaterial,
+    );
+    this.medicalBasementApparition.name = "medical_basement_suwan_behind_door";
+    this.medicalBasementApparition.position.set(meta.apparition.x, meta.apparition.y, meta.apparition.z);
+    this.medicalBasementApparition.rotation.y = Math.PI / 2;
+    this.medicalBasementApparition.renderOrder = 2;
+    this.scene.add(this.medicalBasementApparition);
+
+    this.medicalBasementAnatomyDoorVisuals = meta.anatomyDoor.visualNames
+      .map((name) => getInteriorAssetObject(handle.root, name))
+      .filter((object): object is THREE.Object3D => Boolean(object));
+    if (this.medicalBasementAnatomyDoorVisuals.length !== meta.anatomyDoor.visualNames.length) {
+      console.warn("[Interior3D] Some authored medical-basement anatomy door panels were not found");
+    }
+    // The authored door leaves are thin enough that the generic collision
+    // projection can miss them. Register the explicit blocker immediately;
+    // the feather investigation removes it and opening the notebook restores it.
+    this.restoreMedicalBasementAnatomyDoor();
+    this.medicalBasementLoadingText = undefined;
+    this.emitMedicalBasementState();
+    try {
+      await this.renderer.compileAsync(this.scene, this.camera);
+    } catch (error) {
+      console.warn("[Interior3D] Basement shader warm-up was unavailable:", error);
+    }
+  }
+
+  private openMedicalBasementAnatomyDoor(): void {
+    const meta = this.medicalBasementMeta;
+    if (!meta) return;
+    this.medicalBasementAnatomyDoorOpen = true;
+    this.medicalBasementAnatomyDoorVisuals.forEach((object) => {
+      object.visible = false;
+    });
+    this.colliders = this.colliders.flatMap((obstacle) => (
+      cutAabbByClearZone(obstacle, meta.anatomyDoor.clearZone)
+    ));
+    this.interiorMapObstacles = (this.interiorMapObstacles ?? []).flatMap((obstacle) => (
+      cutObstacleByClearZone(obstacle, meta.anatomyDoor.clearZone)
+    ));
+    this.medicalBasementAnatomyDoorCollider = undefined;
+    this.staticColliderSet = false;
+  }
+
+  private restoreMedicalBasementAnatomyDoor(): void {
+    const meta = this.medicalBasementMeta;
+    if (!meta) return;
+    this.medicalBasementAnatomyDoorOpen = false;
+    this.medicalBasementAnatomyDoorVisuals.forEach((object) => {
+      object.visible = true;
+    });
+    if (this.medicalBasementAnatomyDoorCollider) return;
+    this.medicalBasementAnatomyDoorCollider = { ...meta.anatomyDoor.collisionBounds };
+    this.colliders.push(this.medicalBasementAnatomyDoorCollider);
+    this.interiorMapObstacles?.push({ ...meta.anatomyDoor.collisionBounds, kind: "wall" });
+    this.staticColliderSet = false;
+  }
+
+  private updateMedicalBasementGameplay(dt: number): void {
+    const meta = this.medicalBasementMeta;
+    if (!meta || this.medicalSegment !== "basement") return;
+    const dx = this.camera.position.x - meta.outerDoor.x;
+    const dz = this.camera.position.z - meta.outerDoor.z;
+    const doorDistance = Math.hypot(dx, dz);
+
+    if (doorDistance <= meta.outerDoor.openingDistance && this.medicalBasementDoorProgress < 1) {
+      this.medicalBasementDoorProgress = Math.min(1, this.medicalBasementDoorProgress + dt / 3.15);
+      const eased = THREE.MathUtils.smoothstep(this.medicalBasementDoorProgress, 0, 1);
+      this.medicalBasementLeftDoor?.quaternion.slerpQuaternions(
+        this.medicalBasementLeftDoorClosed,
+        this.medicalBasementLeftDoorOpen,
+        eased,
+      );
+      this.medicalBasementRightDoor?.quaternion.slerpQuaternions(
+        this.medicalBasementRightDoorClosed,
+        this.medicalBasementRightDoorOpen,
+        eased,
+      );
+    }
+
+    // Su Wan exists behind the leaves from the first rendered frame. Opening
+    // only reveals more of her; proximity, not door progress, removes her.
+    if (this.medicalBasementApparition) {
+      const apparition = meta.apparition;
+      const apparitionDistance = Math.hypot(
+        this.camera.position.x - apparition.x,
+        this.camera.position.z - apparition.z,
+      );
+      const fade = THREE.MathUtils.smoothstep(
+        apparitionDistance,
+        apparition.vanishDistance,
+        apparition.fadeStartDistance,
+      );
+      const flicker = 0.56 + Math.sin(this.clock.elapsedTime * 18.7) * 0.25
+        + Math.sin(this.clock.elapsedTime * 7.3) * 0.16;
+      this.medicalBasementApparition.material.opacity = THREE.MathUtils.clamp(fade * flicker, 0, 0.94);
+      this.medicalBasementApparition.visible = fade > 0.015;
+    }
+
+    if (this.gameplayPaused || this.medicalBasementModalOpen) return;
+    if (!this.medicalBasementHasFeather && this.medicalBasementFeather) {
+      const featherDistance = Math.hypot(
+        this.camera.position.x - meta.feather.x,
+        this.camera.position.z - meta.feather.z,
+      );
+      if (featherDistance <= meta.feather.radius) {
+        this.medicalBasementHasFeather = true;
+        this.medicalBasementStage = "clutter";
+        this.medicalBasementFeather.visible = false;
+        if (this.medicalBasementFeatherLight) this.medicalBasementFeatherLight.visible = false;
+        this.medicalBasementModalOpen = true;
+        this.onPickup?.("owl_feather", "猫头鹰羽毛");
+        this.setGameplayPaused(true);
+        this.onMedicalBasementModal?.({ kind: "clutter" });
+        this.emitMedicalBasementState();
+      }
+      return;
+    }
+
+    if (this.medicalBasementStage === "notebook" && this.medicalBasementNotebook) {
+      const notebookDistance = Math.hypot(
+        this.camera.position.x - meta.notebook.x,
+        this.camera.position.z - meta.notebook.z,
+      );
+      if (notebookDistance <= meta.notebook.radius) {
+        this.restoreMedicalBasementAnatomyDoor();
+        this.medicalBasementModalOpen = true;
+        this.setGameplayPaused(true);
+        this.onMedicalBasementModal?.({ kind: "notebook" });
+      }
+      return;
+    }
+
+    if (this.medicalBasementStage === "locked" && this.medicalBasementAnatomyDoorCollider) {
+      const lockDistance = Math.hypot(
+        this.camera.position.x - meta.anatomyDoor.x,
+        this.camera.position.z - meta.anatomyDoor.z,
+      );
+      if (lockDistance <= meta.anatomyDoor.radius) {
+        this.medicalBasementModalOpen = true;
+        this.setGameplayPaused(true);
+        this.onMedicalBasementModal?.({ kind: "password" });
+      }
+    }
+  }
+
+  private tuneMedicalGaragePerimeterWalls(root: THREE.Object3D): void {
+    root.updateMatrixWorld(true);
+    const sceneBounds = new THREE.Box3().setFromObject(root);
+    const boundsSize = sceneBounds.getSize(new THREE.Vector3());
+    if (sceneBounds.isEmpty() || boundsSize.x < 1 || boundsSize.z < 1) return;
+
+    const box = new THREE.Box3();
+    const size = new THREE.Vector3();
+    const center = new THREE.Vector3();
+    root.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      box.setFromObject(object);
+      if (box.isEmpty()) return;
+      box.getSize(size);
+      box.getCenter(center);
+      const horizontalLong = Math.max(size.x, size.z);
+      const horizontalThin = Math.min(size.x, size.z);
+      const nearPerimeter = Math.min(
+        Math.abs(center.x - sceneBounds.min.x),
+        Math.abs(center.x - sceneBounds.max.x),
+        Math.abs(center.z - sceneBounds.min.z),
+        Math.abs(center.z - sceneBounds.max.z),
+      ) <= 3.2;
+      // Long, thin, full-height meshes near the model bounds are exterior
+      // walls. The long-side requirement deliberately excludes columns.
+      if (!nearPerimeter || size.y < 1.8 || horizontalLong < 6 || horizontalThin > 2.4) return;
+      const source = Array.isArray(object.material) ? object.material : [object.material];
+      const materials = source.map((material) => {
+        const copy = material.clone();
+        if (copy instanceof THREE.MeshStandardMaterial || copy instanceof THREE.MeshPhysicalMaterial) {
+          copy.emissive.setHex(0xd8e2ee);
+          copy.emissiveIntensity = Math.max(copy.emissiveIntensity, 0.22);
+          copy.color.lerp(new THREE.Color(0xc4ccd6), 0.2);
+        }
+        copy.needsUpdate = true;
+        return copy;
+      });
+      object.material = Array.isArray(object.material) ? materials : materials[0];
+    });
+  }
+
+  private createMedicalGarageRouteVisuals(): void {
+    if (!this.medicalGarageMeta) return;
+    const group = new THREE.Group();
+    group.name = "medical_garage_seal_route";
+    const ringGeometry = new THREE.TorusGeometry(0.54, 0.035, 8, 28);
+    ringGeometry.rotateX(Math.PI / 2);
+    const fillGeometry = new THREE.CircleGeometry(0.48, 32);
+    fillGeometry.rotateX(-Math.PI / 2);
+    for (let index = 0; index < this.medicalGarageNodes.length; index++) {
+      const ringMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.72 });
+      const fillMaterial = new THREE.MeshBasicMaterial({
+        color: 0xd50a20,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+      });
+      this.medicalGarageRouteMaterials.push(ringMaterial, fillMaterial);
+      const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+      ring.name = `medical_garage_node_ring_${index}`;
+      ring.position.copy(this.medicalGarageNodes[index]);
+      ring.position.y = 0.038;
+      group.add(ring);
+      const fill = new THREE.Mesh(fillGeometry, fillMaterial);
+      fill.name = `medical_garage_node_fill_${index}`;
+      fill.position.copy(this.medicalGarageNodes[index]);
+      fill.position.y = 0.031;
+      fill.visible = false;
+      group.add(fill);
+      if (index === 0) continue;
+      const from = this.medicalGarageNodes[index - 1];
+      const to = this.medicalGarageNodes[index];
+      const dx = to.x - from.x;
+      const dz = to.z - from.z;
+      const length = Math.hypot(dx, dz);
+      const geometry = new THREE.BoxGeometry(length, 0.014, 0.075);
+      const lineMaterial = new THREE.MeshBasicMaterial({
+        color: 0xc40720,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+      });
+      this.medicalGarageRouteMaterials.push(lineMaterial);
+      const strip = new THREE.Mesh(geometry, lineMaterial);
+      strip.name = `medical_garage_segment_${index}`;
+      strip.position.set((from.x + to.x) / 2, 0.045, (from.z + to.z) / 2);
+      strip.rotation.y = -Math.atan2(dz, dx);
+      group.add(strip);
+    }
+    this.medicalGarageRouteGroup = group;
+    this.scene.add(group);
+    this.refreshMedicalGarageRouteVisuals();
+  }
+
+  private refreshMedicalGarageRouteVisuals(): void {
+    if (!this.medicalGarageRouteGroup) return;
+    for (let index = 0; index < this.medicalGarageNodes.length; index++) {
+      const ring = this.medicalGarageRouteGroup.getObjectByName(`medical_garage_node_ring_${index}`) as THREE.Mesh | undefined;
+      const fill = this.medicalGarageRouteGroup.getObjectByName(`medical_garage_node_fill_${index}`) as THREE.Mesh | undefined;
+      const ringMaterial = ring?.material as THREE.MeshBasicMaterial | undefined;
+      const fillMaterial = fill?.material as THREE.MeshBasicMaterial | undefined;
+      const complete = index < this.medicalGarageActivatedNodes;
+      const target = index === this.medicalGarageActivatedNodes && this.medicalGarageActivatedNodes < this.medicalGarageNodes.length;
+      if (ringMaterial) {
+        ringMaterial.color.setHex(complete || target ? 0xf20d2b : 0xffffff);
+        ringMaterial.opacity = complete ? 1 : target ? 0.98 : 0.7;
+      }
+      if (fill && fillMaterial) {
+        fill.visible = complete;
+        fillMaterial.opacity = complete ? 0.88 : 0;
+      }
+      if (index > 0) {
+        const segment = this.medicalGarageRouteGroup.getObjectByName(`medical_garage_segment_${index}`) as THREE.Mesh | undefined;
+        const lineMaterial = segment?.material as THREE.MeshBasicMaterial | undefined;
+        if (lineMaterial) lineMaterial.opacity = index <= this.medicalGarageActivatedNodes ? 0.94 : 0;
+      }
+    }
+  }
+
   private createMedicalDoorPlate(label: string): THREE.Mesh {
     const canvas = document.createElement("canvas");
     canvas.width = 384;
@@ -2031,6 +2876,471 @@ export class Interior3D {
   private emitMedicalTopState(): void {
     const snapshot = this.getMedicalTopSnapshot();
     if (snapshot) this.onMedicalTopStateChange?.(snapshot);
+  }
+
+  private emitMedicalGarageState(): void {
+    const snapshot = this.getMedicalGarageSnapshot();
+    if (snapshot) this.onMedicalGarageStateChange?.(snapshot);
+  }
+
+  private emitMedicalBasementState(): void {
+    const snapshot = this.getMedicalBasementSnapshot();
+    if (snapshot) this.onMedicalBasementStateChange?.(snapshot);
+  }
+
+  private chooseMedicalGarageSpawn(meta: MedicalGarageGameplayMeta): THREE.Vector3 {
+    const firstNode = this.medicalGarageNodes[0];
+    if (!firstNode) {
+      return this.findNearestAssetClearPoint(new THREE.Vector3(meta.spawn.x, EYE_HEIGHT, meta.spawn.z));
+    }
+    const angles = [-2.75, -2.1, -1.35, -0.55, 0.2, 0.95, 1.7, 2.45];
+    const radii = [5.0, 5.6, 6.2, 6.8];
+    const angleOffset = pickSeeded(
+      this.getSessionSeed?.() ?? 0,
+      "medical-garage-spawn-angle",
+      angles.map((_, index) => index),
+    ) ?? 0;
+    const radiusOffset = pickSeeded(
+      this.getSessionSeed?.() ?? 0,
+      "medical-garage-spawn-radius",
+      radii.map((_, index) => index),
+    ) ?? 0;
+    for (let radiusStep = 0; radiusStep < radii.length; radiusStep++) {
+      const radius = radii[(radiusOffset + radiusStep) % radii.length];
+      for (let angleStep = 0; angleStep < angles.length; angleStep++) {
+        const angle = angles[(angleOffset + angleStep) % angles.length];
+        const candidate = new THREE.Vector3(
+          firstNode.x + Math.cos(angle) * radius,
+          EYE_HEIGHT,
+          firstNode.z + Math.sin(angle) * radius,
+        );
+        if (
+          candidate.x <= this.bounds.minX + 0.6 || candidate.x >= this.bounds.maxX - 0.6
+          || candidate.z <= this.bounds.minZ + 0.6 || candidate.z >= this.bounds.maxZ - 0.6
+          || this.collides(candidate.x, candidate.z)
+        ) continue;
+        const blocked = this.colliders.some((obstacle) => segmentHitsObstacleBeforeTarget(
+          candidate.x,
+          candidate.z,
+          firstNode.x,
+          firstNode.z,
+          obstacle,
+          0.94,
+        ));
+        if (!blocked) return candidate;
+      }
+    }
+    return this.findNearestAssetClearPoint(new THREE.Vector3(meta.spawn.x, EYE_HEIGHT, meta.spawn.z));
+  }
+
+  private scheduleMedicalGarageLightning(minimumDelay?: number): void {
+    const delays = minimumDelay !== undefined
+      ? [minimumDelay]
+      : [3.0, 3.35, 3.7, 4.05, 4.4, 4.75, 5.0];
+    const delay = pickSeeded(
+      this.getSessionSeed?.() ?? 0,
+      `medical-garage-dark-${this.medicalGarageCycle}`,
+      delays,
+    ) ?? 4;
+    this.medicalGarageNextLightningAt = this.clock.elapsedTime + delay;
+  }
+
+  private beginMedicalGarageGhostPass(): void {
+    const ghost = this.medicalGarageGhost;
+    if (!ghost) return;
+    const distances = [8.5, 9.15, 9.8, 10.45, 11.1, 11.75, 12.4];
+    const distance = pickSeeded(
+      this.getSessionSeed?.() ?? 0,
+      `medical-garage-ghost-distance-${this.medicalGarageCycle}`,
+      distances,
+    ) ?? 11;
+    const forward = this.camera.getWorldDirection(new THREE.Vector3());
+    forward.y = 0;
+    if (forward.lengthSq() < 0.001) forward.set(0, 0, -1);
+    forward.normalize();
+    let spawn: THREE.Vector3 | undefined;
+    const baseAngle = Math.atan2(forward.z, forward.x);
+    const angleOffsets = [0, 0.14, -0.14, 0.28, -0.28, 0.42, -0.42];
+    const candidateDistances = [distance, Math.max(8.5, distance - 1.4), 8.5];
+    for (const candidateDistance of candidateDistances) {
+      for (const offset of angleOffsets) {
+        const angle = baseAngle + offset;
+        const candidate = new THREE.Vector3(
+          this.camera.position.x + Math.cos(angle) * candidateDistance,
+          0,
+          this.camera.position.z + Math.sin(angle) * candidateDistance,
+        );
+        if (
+          candidate.x <= this.bounds.minX || candidate.x >= this.bounds.maxX
+          || candidate.z <= this.bounds.minZ || candidate.z >= this.bounds.maxZ
+          || this.collides(candidate.x, candidate.z)
+        ) continue;
+        const blocked = this.colliders.some((obstacle) => segmentHitsObstacleBeforeTarget(
+          this.camera.position.x,
+          this.camera.position.z,
+          candidate.x,
+          candidate.z,
+          obstacle,
+          0.9,
+        ));
+        if (!blocked) {
+          spawn = candidate;
+          break;
+        }
+      }
+      if (spawn) break;
+    }
+    if (!spawn) {
+      for (const fallbackDistance of [8.5, 7.25, 6, 4.75]) {
+        const candidate = new THREE.Vector3(
+          this.camera.position.x + forward.x * fallbackDistance,
+          0,
+          this.camera.position.z + forward.z * fallbackDistance,
+        );
+        if (this.collides(candidate.x, candidate.z)) continue;
+        const blocked = this.colliders.some((obstacle) => segmentHitsObstacleBeforeTarget(
+          this.camera.position.x,
+          this.camera.position.z,
+          candidate.x,
+          candidate.z,
+          obstacle,
+          0.9,
+        ));
+        if (!blocked) {
+          spawn = candidate;
+          break;
+        }
+      }
+    }
+    spawn ??= this.findNearestAssetClearPoint(new THREE.Vector3(
+      this.camera.position.x + forward.x * 4.25,
+      0,
+      this.camera.position.z + forward.z * 4.25,
+    ));
+    ghost.position.set(spawn.x, this.medicalGarageGhostBaseY, spawn.z);
+    ghost.lookAt(this.camera.position.x, 1.0, this.camera.position.z);
+    ghost.rotation.y += Math.PI;
+    ghost.visible = true;
+    for (const material of this.medicalGarageGhostOpacityMaterials) {
+      material.opacity = 1;
+      material.depthWrite = true;
+    }
+    if (this.medicalGarageGhostLight) this.medicalGarageGhostLight.intensity = 5.6;
+    this.medicalGarageOutOfViewSeconds = 0;
+    const initialDistance = Math.hypot(
+      this.camera.position.x - ghost.position.x,
+      this.camera.position.z - ghost.position.z,
+    );
+    // Solve v(t)=v0+a*t so a stationary player is reached before the
+    // three-second light window closes, regardless of the sampled distance.
+    const pursuitDuration = 2.75;
+    const requiredTravel = Math.max(0.8, initialDistance - 0.92);
+    const averageSpeed = requiredTravel / pursuitDuration;
+    this.medicalGarageGhostBaseSpeed = Math.max(0.65, averageSpeed * 0.28);
+    this.medicalGarageGhostAcceleration = Math.max(
+      0.2,
+      (2 * (requiredTravel - this.medicalGarageGhostBaseSpeed * pursuitDuration))
+        / (pursuitDuration * pursuitDuration),
+    );
+    this.medicalGarageStage = "visible";
+    this.medicalGarageStageStartedAt = this.clock.elapsedTime;
+    this.medicalGarageCycle++;
+    this.medicalGarageLightningFlashUntil = this.clock.elapsedTime + 0.18;
+    playBaishaThunder();
+    window.dispatchEvent(new CustomEvent("zju-horror-medical-garage-lightning", { detail: { active: true } }));
+    this.emitMedicalGarageState();
+  }
+
+  private moveMedicalGarageGhostInFrontOfObstacle(ghost: THREE.Object3D): boolean {
+    const dx = ghost.position.x - this.camera.position.x;
+    const dz = ghost.position.z - this.camera.position.z;
+    const distance = Math.hypot(dx, dz);
+    if (distance < 1.4) return false;
+    const directionX = dx / distance;
+    const directionZ = dz / distance;
+    let lastClear: THREE.Vector3 | undefined;
+    let reachedObstacle = false;
+    for (let sampleDistance = 1.25; sampleDistance < distance; sampleDistance += 0.22) {
+      const candidate = new THREE.Vector3(
+        this.camera.position.x + directionX * sampleDistance,
+        this.medicalGarageGhostBaseY,
+        this.camera.position.z + directionZ * sampleDistance,
+      );
+      if (this.collides(candidate.x, candidate.z)) {
+        reachedObstacle = true;
+        break;
+      }
+      lastClear = candidate;
+    }
+    if (!reachedObstacle || !lastClear) return false;
+    ghost.position.copy(lastClear);
+    return true;
+  }
+
+  private medicalGarageGhostIsWatched(): boolean {
+    const ghost = this.medicalGarageGhost;
+    if (!ghost?.visible) return false;
+    const world = ghost.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 1.18, 0));
+    const projected = world.clone().project(this.camera);
+    if (projected.z < -1 || projected.z > 1 || Math.abs(projected.x) > 0.8 || Math.abs(projected.y) > 0.8) return false;
+    return !this.colliders.some((obstacle) => segmentHitsObstacleBeforeTarget(
+      this.camera.position.x,
+      this.camera.position.z,
+      world.x,
+      world.z,
+      obstacle,
+      0.9,
+    ));
+  }
+
+  private failMedicalGarage(reason: "gaze" | "contact"): void {
+    if (this.medicalGarageFailurePending || !this.medicalGarageMeta) return;
+    this.medicalGarageFailurePending = true;
+    this.medicalGarageViolations++;
+    if (this.medicalGarageGhost) this.medicalGarageGhost.visible = false;
+    if (this.medicalGarageGhostLight) this.medicalGarageGhostLight.intensity = 0;
+    this.medicalGarageStage = "recovery";
+    this.medicalGarageRecoveryAt = this.clock.elapsedTime + 1.45;
+    this.setGameplayPaused(true);
+    JumpscarePipeline.executeStoryEffect(
+      "ghost_caught",
+      1,
+      reason === "gaze" ? "它在你背后" : "白布里有眼睛",
+      "medical-garage",
+      0,
+    );
+    this.emitMedicalGarageState();
+  }
+
+  private recoverMedicalGarage(): void {
+    if (!this.medicalGarageMeta) return;
+    this.medicalGarageFailurePending = false;
+    if (this.medicalGarageViolations >= 3) {
+      this.medicalGarageViolations = 0;
+      this.medicalGarageActivatedNodes = 0;
+      this.medicalGarageHasCandle = false;
+      this.medicalGarageDocumentRead = false;
+      this.medicalGarageCycle = 0;
+      this.medicalGarageSegmentValid = true;
+      this.medicalGarageSegmentWarningShown = false;
+      if (this.medicalGarageCandle) this.medicalGarageCandle.visible = true;
+      if (this.medicalGarageCandleLight) this.medicalGarageCandleLight.intensity = 1.25;
+      this.camera.position.copy(this.medicalGarageSpawnPoint);
+      this.cameraController.setLook(this.medicalGarageSpawnYaw, -0.04);
+      this.refreshMedicalGarageRouteVisuals();
+      this.medicalGarageStage = "opening";
+      this.setGameplayPaused(true);
+      this.onMedicalGarageModal?.({ kind: "opening" });
+    } else {
+      // A non-fatal encounter only dismisses the current apparition. Keep the
+      // player exactly where the jumpscare happened so cleared route sections
+      // never need to be walked again.
+      this.medicalGarageStage = "dark";
+      this.medicalGarageStageStartedAt = this.clock.elapsedTime;
+      this.scheduleMedicalGarageLightning(2.4);
+      this.setGameplayPaused(false);
+      this.medicalGarageSegmentValid = true;
+      this.medicalGarageSegmentWarningShown = false;
+    }
+    this.moveCtx.velocity.x = 0;
+    this.moveCtx.velocity.y = 0;
+    this.emitMedicalGarageState();
+  }
+
+  private updateMedicalGarageObjectives(): void {
+    const meta = this.medicalGarageMeta;
+    if (!meta || this.medicalGarageStage === "opening" || this.medicalGarageStage === "document"
+      || this.medicalGarageStage === "recovery" || this.medicalGarageStage === "seal"
+      || this.medicalGarageStage === "transition") return;
+    const player = this.camera.position;
+
+    if (!this.medicalGarageHasCandle) {
+      const candleDistance = Math.hypot(player.x - this.medicalGarageCandlePoint.x, player.z - this.medicalGarageCandlePoint.z);
+      if (candleDistance <= meta.candle.radius) {
+        this.medicalGarageHasCandle = true;
+        if (this.medicalGarageCandle) this.medicalGarageCandle.visible = false;
+        if (this.medicalGarageCandleLight) this.medicalGarageCandleLight.intensity = 0;
+        window.dispatchEvent(new CustomEvent("zju-horror-pickup", { detail: { itemId: "garage_candle", name: "封印蜡烛" } }));
+        this.emitMedicalGarageState();
+      }
+    }
+
+    if (this.medicalGarageStage === "stairs") {
+      if (Math.hypot(player.x - this.medicalGarageStairsPoint.x, player.z - this.medicalGarageStairsPoint.z) <= meta.stairs.radius) {
+        this.medicalGarageStage = "transition";
+        this.medicalGarageStageStartedAt = this.clock.elapsedTime;
+        this.setGameplayPaused(true);
+        this.emitMedicalGarageState();
+        if (!this.medicalGarageCompleteReported) {
+          this.medicalGarageCompleteReported = true;
+          window.setTimeout(() => this.onMedicalGarageComplete?.(), 460);
+        }
+      }
+      return;
+    }
+
+    if (this.medicalGarageActivatedNodes >= this.medicalGarageNodes.length) {
+      if (this.medicalGarageHasCandle) this.beginMedicalGarageSeal();
+      return;
+    }
+    const targetIndex = this.medicalGarageActivatedNodes;
+    const target = this.medicalGarageNodes[targetIndex];
+    const radius = meta.nodes[targetIndex]?.radius ?? 1.5;
+    if (Math.hypot(player.x - target.x, player.z - target.z) > radius) return;
+    const ghostWasVisible = this.medicalGarageStage === "visible" || this.medicalGarageStage === "fading";
+    this.medicalGarageActivatedNodes++;
+    this.medicalGarageSegmentValid = true;
+    this.medicalGarageSegmentWarningShown = false;
+    this.refreshMedicalGarageRouteVisuals();
+    if (this.medicalGarageActivatedNodes === 6 && !this.medicalGarageDocumentRead) {
+      if (this.medicalGarageGhost) this.medicalGarageGhost.visible = false;
+      if (this.medicalGarageGhostLight) this.medicalGarageGhostLight.intensity = 0;
+      this.medicalGarageStage = "document";
+      this.medicalGarageStageStartedAt = this.clock.elapsedTime;
+      this.setGameplayPaused(true);
+      this.onMedicalGarageModal?.({ kind: "document" });
+    } else if (this.medicalGarageActivatedNodes >= this.medicalGarageNodes.length && this.medicalGarageHasCandle) {
+      this.beginMedicalGarageSeal();
+    } else if (ghostWasVisible) {
+      // Entering an array eye breaks the current apparition immediately. The
+      // authored feedback is thunder + white flash + text, not a ghost fade.
+      if (this.medicalGarageGhost) this.medicalGarageGhost.visible = false;
+      if (this.medicalGarageGhostLight) this.medicalGarageGhostLight.intensity = 0;
+      for (const material of this.medicalGarageGhostOpacityMaterials) {
+        material.opacity = 1;
+        material.depthWrite = true;
+      }
+      this.medicalGarageStage = "dark";
+      this.medicalGarageStageStartedAt = this.clock.elapsedTime;
+      this.scheduleMedicalGarageLightning(1.4);
+      playBaishaThunder(1.4);
+      this.medicalGarageLightningFlashUntil = this.clock.elapsedTime + 0.3;
+      window.dispatchEvent(new CustomEvent("zju-horror-medical-garage-lightning", {
+        detail: { active: true, duration: 300 },
+      }));
+      window.dispatchEvent(new CustomEvent("zju-horror-medical-garage-text-scare", {
+        detail: { text: "阵眼已破", duration: 820 },
+      }));
+    } else if (this.medicalGarageStage === "warning") {
+      // A checkpoint reached during the lightning pre-flash cancels that pass.
+      this.medicalGarageStage = "dark";
+      this.medicalGarageStageStartedAt = this.clock.elapsedTime;
+      this.medicalGarageNextLightningAt = this.clock.elapsedTime + 1.2 + Math.random() * 1.2;
+    }
+    this.emitMedicalGarageState();
+  }
+
+  private beginMedicalGarageSeal(): void {
+    const meta = this.medicalGarageMeta;
+    const ghost = this.medicalGarageGhost;
+    if (!meta || !ghost || this.medicalGarageStage === "seal" || this.medicalGarageStage === "stairs") return;
+    this.medicalGarageStage = "seal";
+    this.medicalGarageStageStartedAt = this.clock.elapsedTime;
+    this.setGameplayPaused(true);
+    this.medicalGarageNextLightningAt = Number.POSITIVE_INFINITY;
+    ghost.visible = false;
+    if (this.medicalGarageGhostLight) this.medicalGarageGhostLight.intensity = 0;
+    if (this.medicalGarageCandle) this.medicalGarageCandle.visible = false;
+    if (this.medicalGarageCandleLight) this.medicalGarageCandleLight.intensity = 0;
+    playBaishaThunder(1.45);
+    this.medicalGarageLightningFlashUntil = this.clock.elapsedTime + 0.38;
+    window.dispatchEvent(new CustomEvent("zju-horror-medical-garage-lightning", {
+      detail: { active: true, duration: 380 },
+    }));
+    window.dispatchEvent(new CustomEvent("zju-horror-medical-garage-text-scare", {
+      detail: { text: "阵法已破", duration: 900 },
+    }));
+    this.emitMedicalGarageState();
+  }
+
+  private updateMedicalGarageSeal(elapsed: number): void {
+    // Final sealing no longer renders the ghost, ropes, particles or a
+    // dissolve. The only authored beat is the thunder/white-flash/text fired
+    // by beginMedicalGarageSeal; release the player shortly afterwards.
+    if (elapsed < 1.05) return;
+    this.medicalGarageStage = "stairs";
+    this.medicalGarageStageStartedAt = this.clock.elapsedTime;
+    this.setGameplayPaused(false);
+    this.emitMedicalGarageState();
+  }
+
+  private updateMedicalGarageGameplay(dt: number): void {
+    if (!this.medicalGarageMeta || this.medicalSegment !== "garage") return;
+    const now = this.clock.elapsedTime;
+    if (this.medicalGarageStage === "opening" || this.medicalGarageStage === "document" || this.medicalGarageStage === "transition") return;
+    if (this.medicalGarageStage === "recovery") {
+      if (now >= this.medicalGarageRecoveryAt) this.recoverMedicalGarage();
+      return;
+    }
+    if (this.medicalGarageStage === "seal") {
+      this.updateMedicalGarageSeal(now - this.medicalGarageStageStartedAt);
+      return;
+    }
+
+    this.updateMedicalGarageObjectives();
+    if (this.medicalGarageStage === "stairs") return;
+    if (this.medicalGarageStage === "dark" && now >= this.medicalGarageNextLightningAt) {
+      this.medicalGarageStage = "warning";
+      this.medicalGarageStageStartedAt = now;
+      playBaishaThunder();
+      this.emitMedicalGarageState();
+      return;
+    }
+    if (this.medicalGarageStage === "warning" && now - this.medicalGarageStageStartedAt >= 0.7) {
+      this.beginMedicalGarageGhostPass();
+      return;
+    }
+    if (this.medicalGarageStage === "visible") {
+      const elapsed = now - this.medicalGarageStageStartedAt;
+      const ghost = this.medicalGarageGhost;
+      if (!ghost) return;
+      const dx = this.camera.position.x - ghost.position.x;
+      const dz = this.camera.position.z - ghost.position.z;
+      const distance = Math.hypot(dx, dz);
+      if (distance < 1.1) {
+        this.failMedicalGarage("contact");
+        return;
+      }
+      const phaseProgress = this.medicalGarageActivatedNodes / Math.max(1, this.medicalGarageNodes.length);
+      const speed = this.medicalGarageGhostBaseSpeed
+        + this.medicalGarageGhostAcceleration * elapsed
+        + phaseProgress * 0.28;
+      if (distance > 0.001) {
+        const step = Math.min(distance - 0.8, speed * dt);
+        const nextX = ghost.position.x + dx / distance * step;
+        const nextZ = ghost.position.z + dz / distance * step;
+        if (!this.collides(nextX, nextZ)) {
+          ghost.position.x = nextX;
+          ghost.position.z = nextZ;
+        } else {
+          this.moveMedicalGarageGhostInFrontOfObstacle(ghost);
+        }
+      }
+      ghost.lookAt(this.camera.position.x, 1, this.camera.position.z);
+      ghost.rotation.y += Math.PI;
+      if (elapsed >= 0.3) {
+        this.medicalGarageOutOfViewSeconds = this.medicalGarageGhostIsWatched()
+          ? Math.max(0, this.medicalGarageOutOfViewSeconds - dt * 1.7)
+          : this.medicalGarageOutOfViewSeconds + dt;
+        if (this.medicalGarageOutOfViewSeconds > 0.65) {
+          this.failMedicalGarage("gaze");
+          return;
+        }
+      }
+      if (elapsed >= 3) {
+        ghost.visible = false;
+        if (this.medicalGarageGhostLight) this.medicalGarageGhostLight.intensity = 0;
+        for (const material of this.medicalGarageGhostOpacityMaterials) {
+          material.opacity = 1;
+          material.depthWrite = true;
+        }
+        this.medicalGarageStage = "dark";
+        this.medicalGarageStageStartedAt = now;
+        this.scheduleMedicalGarageLightning();
+        this.emitMedicalGarageState();
+      }
+      return;
+    }
   }
 
   private setMedicalTopLampState(on: boolean, offCount: number): void {
@@ -3111,8 +4421,12 @@ export class Interior3D {
   }
 
   private addAssetCeilingLights(handle: InteriorAssetHandle): void {
-    if (this.roomKind !== "library") return;
     handle.root.updateMatrixWorld(true);
+    if (this.roomKind === "medical" && this.medicalSegment === "basement") {
+      this.addMedicalBasementCeilingLights(handle);
+      return;
+    }
+    if (this.roomKind !== "library") return;
     handle.root.traverse((object) => {
       if (!/^legacy_crimson_fluorescent_\d+_tube$/.test(object.name)) return;
       const mesh = object as THREE.Mesh;
@@ -3137,8 +4451,108 @@ export class Interior3D {
     this.nextAssetCeilingPoolUpdateAt = Number.NEGATIVE_INFINITY;
   }
 
+  private addMedicalBasementCeilingLights(handle: InteriorAssetHandle): void {
+    let shellBounds: THREE.Box3 | undefined;
+    let shellVolume = 0;
+    handle.root.traverse((object) => {
+      const mesh = object as THREE.Mesh;
+      if (!mesh.isMesh || !mesh.geometry) return;
+      const candidate = new THREE.Box3().setFromObject(mesh);
+      const size = candidate.getSize(new THREE.Vector3());
+      const volume = size.x * size.y * size.z;
+      if (size.y < 3 || volume <= shellVolume) return;
+      shellVolume = volume;
+      shellBounds = candidate;
+    });
+    if (!shellBounds) return;
+
+    const bounds = shellBounds as THREE.Box3;
+    // The imported warehouse shell starts beyond the stair approach, while
+    // the basement spawn is at the top of that approach. Cover both areas so
+    // the player sees the first tubes immediately after the scene switch.
+    const coverage = bounds.clone();
+    const spawn = handle.viewpoint?.position;
+    if (spawn) {
+      coverage.expandByPoint(new THREE.Vector3(spawn.x - 2.4, bounds.min.y, spawn.z - 2.4));
+      coverage.expandByPoint(new THREE.Vector3(spawn.x + 2.4, bounds.max.y, spawn.z + 2.4));
+    }
+    const size = coverage.getSize(new THREE.Vector3());
+    const center = coverage.getCenter(new THREE.Vector3());
+    const longAxisX = size.x >= size.z;
+    const longLength = longAxisX ? size.x : size.z;
+    const shortLength = longAxisX ? size.z : size.x;
+    const alongCount = THREE.MathUtils.clamp(Math.floor(longLength / 5), 6, 9);
+    const rowOffsets = shortLength >= 16
+      ? [-shortLength * 0.36, 0, shortLength * 0.36]
+      : shortLength >= 8 ? [-shortLength * 0.22, shortLength * 0.22] : [0];
+    const group = new THREE.Group();
+    group.name = "medical_basement_ceiling_fixtures";
+    const housingGeometry = new THREE.BoxGeometry(1.7, 0.11, 0.34);
+    const tubeGeometry = new THREE.BoxGeometry(1.46, 0.045, 0.13);
+    const housingMaterial = new THREE.MeshStandardMaterial({ color: 0x32383a, roughness: 0.74, metalness: 0.32 });
+    const tubeMaterial = new THREE.MeshBasicMaterial({
+      color: 0xff0018,
+      toneMapped: false,
+    });
+    const ceilingY = bounds.max.y - 0.16;
+    for (let alongIndex = 0; alongIndex < alongCount; alongIndex++) {
+      const along = -longLength * 0.39 + longLength * 0.78 * (alongIndex / Math.max(1, alongCount - 1));
+      for (const rowOffset of rowOffsets) {
+        const fixture = new THREE.Group();
+        fixture.position.set(
+          center.x + (longAxisX ? along : rowOffset),
+          ceilingY,
+          center.z + (longAxisX ? rowOffset : along),
+        );
+        if (longAxisX) fixture.rotation.y = Math.PI * 0.5;
+        fixture.add(new THREE.Mesh(housingGeometry, housingMaterial));
+        const tube = new THREE.Mesh(tubeGeometry, tubeMaterial);
+        tube.position.y = -0.075;
+        fixture.add(tube);
+        group.add(fixture);
+        this.assetCeilingFixtures.push(fixture.position.clone());
+      }
+    }
+    // The bounds above are already in world space. Keep the generated fixture
+    // group in the scene root so the authored segment offset is not applied a
+    // second time.
+    this.scene.add(group);
+    group.updateMatrixWorld(true);
+    this.assetCeilingFixtures.length = 0;
+    for (const fixture of group.children) {
+      this.assetCeilingFixtures.push(fixture.getWorldPosition(new THREE.Vector3()));
+    }
+    this.assetCeilingFixtureGroup = group;
+    const poolSize = Math.min(6, this.assetCeilingFixtures.length);
+    for (let index = 0; index < poolSize; index++) {
+      const light = new THREE.PointLight(0xff0018, 11.4, 14.5, 1.45);
+      light.name = `medical_basement_ceiling_light_pool_${index}`;
+      this.scene.add(light);
+      this.assetCeilingLights.push(light);
+    }
+    this.nextAssetCeilingPoolUpdateAt = Number.NEGATIVE_INFINITY;
+  }
+
   private clearAssetCeilingLights(): void {
-    for (const light of this.assetCeilingLights) this.scene.remove(light);
+    for (const light of this.assetCeilingLights) {
+      this.scene.remove(light);
+      light.dispose();
+    }
+    if (this.assetCeilingFixtureGroup) {
+      const geometries = new Set<THREE.BufferGeometry>();
+      const materials = new Set<THREE.Material>();
+      this.assetCeilingFixtureGroup.traverse((object) => {
+        const mesh = object as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        geometries.add(mesh.geometry);
+        const source = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        source.forEach((material) => materials.add(material));
+      });
+      geometries.forEach((geometry) => geometry.dispose());
+      materials.forEach((material) => material.dispose());
+      this.assetCeilingFixtureGroup.removeFromParent();
+      this.assetCeilingFixtureGroup = undefined;
+    }
     this.assetCeilingLights.length = 0;
     this.assetCeilingFixtures.length = 0;
     this.nextAssetCeilingPoolUpdateAt = Number.NEGATIVE_INFINITY;
@@ -4138,6 +5552,18 @@ export class Interior3D {
     // Review-only noclip lets the authored model be inspected before its
     // static door receives approved interaction/animation gameplay.
     if (this.visualReviewMode) return false;
+    const anatomyDoor = this.medicalBasementMeta?.anatomyDoor;
+    if (this.medicalSegment === "basement" && anatomyDoor && !this.medicalBasementAnatomyDoorOpen) {
+      const bounds = anatomyDoor.collisionBounds;
+      if (
+        x > bounds.minX - this.playerRadius
+        && x < bounds.maxX + this.playerRadius
+        && z > bounds.minZ - this.playerRadius
+        && z < bounds.maxZ + this.playerRadius
+      ) {
+        return true;
+      }
+    }
     for (const c of this.colliders) {
       if (!this.isColliderActive(c)) continue;
       if (
@@ -4304,10 +5730,22 @@ export class Interior3D {
     const libraryProfile = this.roomKind === "library";
     const baishaProfile = this.roomKind === "dorm" && this.baishaTubes.length > 0;
     const medicalProfile = this.roomKind === "medical" && Boolean(this.assetHandle);
-    const medicalBlackout = medicalProfile && this.isMedicalTopBlackout(t);
+    const medicalGarageProfile = medicalProfile && this.medicalSegment === "garage" && Boolean(this.medicalGarageMeta);
+    const medicalBasementProfile = medicalProfile && this.medicalSegment === "basement";
+    const medicalGarageLightWindow = medicalGarageProfile && (
+      this.medicalGarageStage === "visible"
+      || this.medicalGarageStage === "fading"
+      || this.medicalGarageStage === "seal"
+      || this.medicalGarageStage === "stairs"
+    );
+    const medicalGarageLightning = medicalGarageProfile && t < this.medicalGarageLightningFlashUntil;
+    const medicalBlackout = medicalProfile && (
+      this.isMedicalTopBlackout(t) || (medicalGarageProfile && !medicalGarageLightWindow)
+    );
     const medicalBedPulse = medicalProfile && this.medicalTopStage === "bed" && !medicalBlackout;
-    const suppressMedicalFlashlight = medicalProfile
-      && (medicalBlackout || this.medicalTopStage === "bed" || this.medicalTopStage === "bed-blackout");
+    const suppressMedicalFlashlight = medicalProfile && (
+      medicalBlackout || this.medicalTopStage === "bed" || this.medicalTopStage === "bed-blackout"
+    );
     if (suppressMedicalFlashlight !== this.medicalTopFlashlightShadowPaused) {
       this.medicalTopFlashlightShadowPaused = suppressMedicalFlashlight;
       this.flashlight.shadow.autoUpdate = !suppressMedicalFlashlight;
@@ -4318,24 +5756,30 @@ export class Interior3D {
     // for genuinely unmapped model previews.
     const previewingUnmappedAsset = Boolean(this.assetHandle && !this.assetHandle.meta && !medicalProfile);
     const targetAmbient = medicalProfile
-      ? medicalBlackout ? 0.005 : medicalBedPulse ? 0.48 : hasFlashlight ? 0.28 : 0.18
+      ? medicalGarageLightning ? 1.08
+        : medicalBlackout ? medicalGarageProfile ? 0.18 : 0.005
+          : medicalGarageProfile ? 0.23 : medicalBasementProfile ? 0.34 : medicalBedPulse ? 0.48 : hasFlashlight ? 0.28 : 0.18
       : previewingUnmappedAsset
       ? 0.32
       : baishaProfile ? 0.18
       : hasFlashlight ? (libraryProfile ? 0.34 : 0.85) : libraryProfile ? 0.18 : 0.22;
     const targetFill = medicalProfile
-      ? medicalBlackout ? 0 : medicalBedPulse ? 0.34 : hasFlashlight ? 0.18 : 0.1
+      ? medicalGarageLightning ? 0.9
+        : medicalBlackout ? medicalGarageProfile ? 0.13 : 0
+          : medicalGarageProfile ? 0.18 : medicalBasementProfile ? 0.24 : medicalBedPulse ? 0.34 : hasFlashlight ? 0.18 : 0.1
       : previewingUnmappedAsset
       ? 0.18
       : baishaProfile ? 0.1
       : hasFlashlight ? (libraryProfile ? 0.22 : 0.55) : libraryProfile ? 0.11 : 0.14;
     const targetNear = medicalProfile
-      ? medicalBlackout ? 0 : medicalBedPulse ? 0.38 : hasFlashlight ? 0.16 : 0.08
+      ? medicalGarageLightning ? 0.82
+        : medicalBlackout ? medicalGarageProfile ? 0.11 : 0
+          : medicalGarageProfile ? 0.19 : medicalBasementProfile ? 0.27 : medicalBedPulse ? 0.38 : hasFlashlight ? 0.16 : 0.08
       : previewingUnmappedAsset
       ? 0.25
       : baishaProfile ? 0.2
       : hasFlashlight ? (libraryProfile ? 0.18 : 0.85) : libraryProfile ? 0.24 : 0.24;
-    const k = Math.min(1, dt * 6);
+    const k = medicalGarageLightning ? 1 : Math.min(1, dt * 6);
 
     this.ambientLight.intensity = THREE.MathUtils.lerp(this.ambientLight.intensity, targetAmbient, k);
     this.fillLight.intensity = THREE.MathUtils.lerp(this.fillLight.intensity, targetFill, k);
@@ -4345,7 +5789,7 @@ export class Interior3D {
     if (hasFlashlight || previewingUnmappedAsset) {
       this.flashlightSys.update(dt, t);
       if (previewingUnmappedAsset) this.flashlight.intensity *= 8;
-      if (medicalProfile) this.flashlight.intensity *= 0.48;
+      if (medicalProfile) this.flashlight.intensity *= medicalGarageProfile ? 1.05 : 0.48;
       if (this.fallRevealed) {
         // Outside, retain a readable beam while letting the red streetlamp own
         // the body reveal. Back in the shelf room it returns to full strength.
@@ -4419,9 +5863,13 @@ export class Interior3D {
   }
 
   private updateLibraryCeilingLights(t: number): void {
-    if (this.roomKind !== "library") return;
-    if (this.fallRevealed && this.camera.position.z > 32) this.hasLeftShelfAfterFall = true;
-    if (this.hasLeftShelfAfterFall && this.camera.position.z < 29.5) this.libraryReturnFlicker = true;
+    const libraryProfile = this.roomKind === "library";
+    const basementProfile = this.roomKind === "medical" && this.medicalSegment === "basement";
+    if (!libraryProfile && !basementProfile) return;
+    if (libraryProfile) {
+      if (this.fallRevealed && this.camera.position.z > 32) this.hasLeftShelfAfterFall = true;
+      if (this.hasLeftShelfAfterFall && this.camera.position.z < 29.5) this.libraryReturnFlicker = true;
+    }
 
     if (t >= this.nextAssetCeilingPoolUpdateAt) {
       this.nextAssetCeilingPoolUpdateAt = t + 0.25;
@@ -4444,6 +5892,10 @@ export class Interior3D {
     for (let index = 0; index < this.assetCeilingLights.length; index++) {
       const light = this.assetCeilingLights[index];
       const fixtureIndex = Number(light.userData.fixtureIndex ?? index);
+      if (basementProfile) {
+        light.intensity = 11.2 + Math.sin(t * 1.25 + fixtureIndex * 0.71) * 0.36;
+        continue;
+      }
       if (!this.libraryReturnFlicker) {
         light.intensity = 4.75 + Math.sin(t * 1.7 + fixtureIndex * 0.83) * 0.22;
         continue;
@@ -4746,6 +6198,24 @@ export class Interior3D {
       this.updateGuideLine();
       return;
     }
+    this.updateMedicalGarageGameplay(dt);
+    if (this.medicalGarageMeta && this.medicalSegment === "garage") {
+      this.updateGuideLine();
+      return;
+    }
+    this.updateMedicalBasementGameplay(dt);
+    if (this.medicalBasementMeta && this.medicalSegment === "basement") {
+      this.updateGuideLine();
+      return;
+    }
+    // Top and garage own their narrative state machines.  The segment is
+    // known before asynchronous GLB loading finishes, so block legacy
+    // procedural story spots during that loading window as well.
+    if (this.roomKind === "medical" && (
+      this.medicalSegment === "top"
+      || this.medicalSegment === "garage"
+      || this.medicalSegment === "basement"
+    )) return;
 
     // 8. Collect pickups (automatic proximity or E within the wider manual range).
     this.collectPickups();

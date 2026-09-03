@@ -427,9 +427,10 @@ export function playLibraryThunder(delaySeconds = 0.22): void {
 }
 
 /** White-flash thunder used by Baisha's authored photo and balcony beats. */
-export function playBaishaThunder(): void {
+export function playBaishaThunder(intensity = 1): void {
   const audioCtx = getCtx();
   const now = audioCtx.currentTime;
+  const level = Math.max(0.6, Math.min(1.45, intensity));
   const compressor = audioCtx.createDynamicsCompressor();
   compressor.threshold.value = -18;
   compressor.knee.value = 8;
@@ -450,7 +451,7 @@ export function playBaishaThunder(): void {
   crackFilter.frequency.value = 1350;
   crackFilter.Q.value = 0.5;
   const crackGain = audioCtx.createGain();
-  crackGain.gain.setValueAtTime(0.68, now);
+  crackGain.gain.setValueAtTime(0.68 * level, now);
   crackGain.gain.exponentialRampToValueAtTime(0.001, now + 0.42);
   crack.connect(crackFilter).connect(crackGain).connect(compressor);
 
@@ -461,7 +462,7 @@ export function playBaishaThunder(): void {
   rumbleFilter.frequency.setValueAtTime(620, now);
   rumbleFilter.frequency.exponentialRampToValueAtTime(58, now + 2.9);
   const rumbleGain = audioCtx.createGain();
-  rumbleGain.gain.setValueAtTime(0.62, now);
+  rumbleGain.gain.setValueAtTime(0.62 * level, now);
   rumbleGain.gain.exponentialRampToValueAtTime(0.001, now + 3.0);
   rumble.connect(rumbleFilter).connect(rumbleGain).connect(compressor);
 

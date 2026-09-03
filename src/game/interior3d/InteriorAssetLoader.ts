@@ -173,6 +173,8 @@ export interface InteriorAssetMeta {
     yaw?: number;
   }>>;
   medicalTopGameplay?: MedicalTopGameplayMeta;
+  medicalGarageGameplay?: MedicalGarageGameplayMeta;
+  medicalBasementGameplay?: MedicalBasementGameplayMeta;
   notes?: string[];
 }
 
@@ -208,6 +210,52 @@ export interface MedicalTopGameplayMeta {
   checkpoints: {
     bed: { x: number; y: number; z: number; yaw: number };
     escape: { x: number; y: number; z: number; yaw: number };
+  };
+}
+
+export interface MedicalGarageGameplayMeta {
+  propsModel: string;
+  ghostObjectName: string;
+  candleObjectName: string;
+  spawn: { x: number; y: number; z: number; yaw: number };
+  nodes: Array<{ id: string; label: string; x: number; y: number; z: number; radius: number }>;
+  candle: { x: number; y: number; z: number; radius: number };
+  sealCenter: { x: number; y: number; z: number };
+  stairs: { x: number; y: number; z: number; radius: number; label: string };
+}
+
+export interface MedicalBasementGameplayMeta {
+  propsModel: string;
+  featherObjectName: string;
+  notebookObjectName: string;
+  outerDoor: {
+    leftVisualName: string;
+    rightVisualName: string;
+    x: number;
+    z: number;
+    openingDistance: number;
+    openRadians: number;
+    clearZone: { minX: number; maxX: number; minZ: number; maxZ: number };
+  };
+  apparition: {
+    image: string;
+    x: number;
+    y: number;
+    z: number;
+    width: number;
+    height: number;
+    fadeStartDistance: number;
+    vanishDistance: number;
+  };
+  feather: { x: number; y: number; z: number; radius: number };
+  notebook: { x: number; y: number; z: number; radius: number };
+  anatomyDoor: {
+    visualNames: string[];
+    x: number;
+    z: number;
+    radius: number;
+    clearZone: { minX: number; maxX: number; minZ: number; maxZ: number };
+    collisionBounds: { minX: number; maxX: number; minZ: number; maxZ: number };
   };
 }
 
@@ -290,7 +338,7 @@ const ASSET_SOURCES: Record<string, InteriorAssetSource> = {
   "medical-college:medical": {
     rootPath: "models/interiors/medical-school",
     model: "medical-top.glb",
-    cacheVersion: "medical-school-v7-top-gameplay",
+    cacheVersion: "medical-school-v17-basement-door-wall",
     metaFile: "top-gameplay.meta.json",
     segmentModels: {
       top: "medical-top.glb",
@@ -441,7 +489,7 @@ export async function preloadNextMedicalInteriorSegment(
 }
 
 const MEDICAL_TOP_ROOT = "models/interiors/medical-school";
-const MEDICAL_TOP_CACHE_VERSION = "medical-top-gameplay-v8";
+const MEDICAL_TOP_CACHE_VERSION = "medical-gameplay-v17-basement-door-wall";
 
 function medicalTopAuxiliaryUrl(file: string): string {
   return assetUrl(`${MEDICAL_TOP_ROOT}/${file}`, MEDICAL_TOP_CACHE_VERSION);

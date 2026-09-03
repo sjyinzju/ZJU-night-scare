@@ -1,5 +1,5 @@
 {
-  "assetVersion": 8,
+  "assetVersion": 17,
   "buildingId": "medical-college",
   "roomKind": "medical",
   "model": "medical-top.glb",
@@ -7,7 +7,7 @@
   "medicalSegmentSpawns": {
     "top": { "x": 13.42, "y": 1.6, "z": 0.34, "yaw": 1.5707963267948966 },
     "garage": { "x": 0, "y": 1.6, "z": 0, "yaw": 1.5707963267948966 },
-    "basement": { "x": 0, "y": 1.6, "z": 0, "yaw": 1.5707963267948966 }
+    "basement": { "x": 24.0, "y": 1.6, "z": 16.5, "yaw": 1.5707963267948966 }
   },
   "medicalTopGameplay": {
     "spawn": { "x": 13.42, "y": 1.6, "z": 0.34, "yaw": 1.5707963267948966 },
@@ -62,6 +62,58 @@
     "checkpoints": {
       "bed": { "x": 10.8, "y": 1.6, "z": -3.05, "yaw": 1.5707963267948966 },
       "escape": { "x": 5.8, "y": 1.6, "z": -2.4, "yaw": 1.5707963267948966 }
+    }
+  },
+  "medicalGarageGameplay": {
+    "propsModel": "medical-garage-props.glb",
+    "ghostObjectName": "medical_garage_ghost",
+    "candleObjectName": "medical_garage_candle",
+    "spawn": { "x": -12.0, "y": 1.6, "z": -35.0, "yaw": 0.0 },
+    "nodes": [
+      { "id": "garage-seal-1", "label": "一", "x": -10.0, "y": 0, "z": -29.0, "radius": 1.5 },
+      { "id": "garage-seal-2", "label": "二", "x": -2.0, "y": 0, "z": -20.0, "radius": 1.5 },
+      { "id": "garage-seal-3", "label": "三", "x": -10.0, "y": 0, "z": -10.0, "radius": 1.5 },
+      { "id": "garage-seal-4", "label": "四", "x": 0.0, "y": 0, "z": -2.0, "radius": 1.5 },
+      { "id": "garage-seal-5", "label": "五", "x": 9.0, "y": 0, "z": 5.0, "radius": 1.5 },
+      { "id": "garage-seal-6", "label": "六", "x": 13.0, "y": 0, "z": 14.0, "radius": 1.5 },
+      { "id": "garage-seal-7", "label": "七", "x": 21.5, "y": 0, "z": 16.0, "radius": 1.6 }
+    ],
+    "candle": { "x": 8.7, "y": 0, "z": 5.8, "radius": 1.35 },
+    "sealCenter": { "x": 17.0, "y": 0, "z": 15.0 },
+    "stairs": { "x": 24.0, "y": 0, "z": 16.5, "radius": 1.8, "label": "↓ 地下仓库" }
+  },
+  "medicalBasementGameplay": {
+    "propsModel": "medical-basement-props.glb",
+    "featherObjectName": "medical_basement_owl_feathers",
+    "notebookObjectName": "medical_basement_notebook",
+    "outerDoor": {
+      "leftVisualName": "Left Door",
+      "rightVisualName": "Right Door",
+      "x": -3.3,
+      "z": 16.03,
+      "openingDistance": 12.0,
+      "openRadians": 1.56,
+      "clearZone": { "minX": -5.0, "maxX": -1.5, "minZ": 14.82, "maxZ": 17.24 }
+    },
+    "apparition": {
+      "image": "images/medical-basement/suwan-door-v1.png",
+      "x": -3.92,
+      "y": 1.48,
+      "z": 16.03,
+      "width": 1.72,
+      "height": 2.72,
+      "fadeStartDistance": 5.5,
+      "vanishDistance": 1.8
+    },
+    "feather": { "x": -6.0, "y": 0.08, "z": 16.05, "radius": 0.7 },
+    "notebook": { "x": -7.9, "y": 0.71, "z": 21.8, "radius": 1.25 },
+    "anatomyDoor": {
+      "visualNames": ["Geom3D.447", "Geom3D.454", "Geom3D.455", "Geom3D.456"],
+      "x": -8.0,
+      "z": 18.79,
+      "radius": 1.35,
+      "clearZone": { "minX": -9.62, "maxX": -6.22, "minZ": 18.05, "maxZ": 19.55 },
+      "collisionBounds": { "minX": -9.59, "maxX": -6.26, "minZ": 18.67, "maxZ": 18.94 }
     }
   },
   "notes": [

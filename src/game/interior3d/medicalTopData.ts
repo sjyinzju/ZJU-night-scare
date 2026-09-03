@@ -72,8 +72,8 @@ export const MEDICAL_TOP_RULES: ReadonlyArray<{ lines: ReadonlyArray<MedicalRule
   ] },
   { lines: [
     { text: "走廊方形灯具共十二盏。" },
-    { text: "请不要数。" },
-    { text: "请确认它们一共有十二盏。" },
+    { text: "请不要数。", tone: "red" },
+    { text: "请确认它们一共有十二盏。", tone: "red" },
   ] },
   { lines: [
     { text: "夜间可能听见病床经过走廊。请站到墙边，为医护运输让出通道。" },
@@ -125,8 +125,8 @@ export const MEDICAL_TOP_RULES: ReadonlyArray<{ lines: ReadonlyArray<MedicalRule
   ] },
   { lines: [
     { text: "电梯到达前请保持呼吸。" },
-    { text: "请保　呼吸。", tone: "red" },
-    { text: "请停止呼吸。", tone: "red" },
+    { text: "电梯到达前请保　呼吸。", tone: "red" },
+    { text: "电梯到达前请停止呼吸。", tone: "red" },
     { text: "呼吸呼吸呼吸呼吸呼吸呼吸呼吸呼吸", tone: "corrupt" },
   ] },
   { lines: [

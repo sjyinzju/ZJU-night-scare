@@ -258,6 +258,11 @@ export const audioManager = {
     playPageTurn();
   },
 
+  playPageTurn() {
+    if (!unlocked) return;
+    playPageTurn();
+  },
+
   playHover() {
     if (!unlocked) return;
     playOneShot("hover");

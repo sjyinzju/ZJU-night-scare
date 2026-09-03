@@ -2174,6 +2174,52 @@ button {
   to { opacity: 1; }
 }
 
+.medicalGarageViolations {
+  position: absolute;
+  right: 326px;
+  top: 18px;
+  z-index: 24;
+  min-width: 116px;
+  padding: 10px 13px;
+  border: 1px solid rgba(139, 25, 38, .55);
+  border-radius: 10px;
+  background: rgba(5, 6, 9, .82);
+  color: #806f67;
+  font-family: Inter, "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+  backdrop-filter: blur(8px);
+}
+
+.medicalGarageViolations > span {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 11px;
+  letter-spacing: .28em;
+}
+
+.medicalGarageViolations > div { display: flex; gap: 8px; line-height: 1; }
+.medicalGarageViolations b { color: #51484a; font-size: 27px; font-weight: 400; }
+.medicalGarageViolations b.active { color: #e4142c; text-shadow: 0 0 12px rgba(255, 0, 30, .8); }
+
+.medicalGarageLoading {
+  position: absolute;
+  left: 50%;
+  bottom: 18%;
+  z-index: 40;
+  transform: translateX(-50%);
+  color: #bb2030;
+  letter-spacing: .18em;
+  text-shadow: 0 0 15px #66000b;
+  animation: interiorLoadingPulse 1.1s steps(2, end) infinite;
+}
+
+.medicalGarageBlackout {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: #000;
+  animation: medicalBlackout .45s ease-in both;
+}
+
 /* Medical documents deliberately reuse the same borderless story language as
    every other narrative beat. Only the actual CCTV feed keeps a framed UI. */
 .medicalStoryBackdrop {
@@ -2192,6 +2238,10 @@ button {
   height: min(88vh, 840px);
 }
 
+.storyModal.medicalGarageDocumentModal {
+  height: min(88vh, 840px);
+}
+
 .storyText.medicalRulesScroll,
 .storyText.medicalRecordBody {
   width: 100%;
@@ -2202,6 +2252,11 @@ button {
 }
 
 .storyText.medicalRulesScroll {
+  flex: 1;
+  display: block;
+}
+
+.storyText.medicalRecordBody {
   flex: 1;
   display: block;
 }
@@ -2325,6 +2380,391 @@ button {
   max-height: 38vh;
   overflow-y: auto;
   padding-right: 12px;
+}
+
+.storyModal.medicalBasementClutter {
+  height: min(90vh, 880px);
+}
+
+.medicalBasementScrollableText {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 18px;
+}
+
+.medicalBasementChoices {
+  flex: 0 0 auto;
+  width: min(880px, 100%);
+  margin-top: 12px;
+}
+
+.medicalBasementChoices small {
+  color: rgba(219, 67, 77, .84);
+  font-size: 11px;
+  letter-spacing: .12em;
+}
+
+.medicalNotebookBackdrop {
+  z-index: 84;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  user-select: none;
+  background:
+    radial-gradient(ellipse at center, rgba(8, 4, 4, .12) 38%, rgba(2, 1, 2, .88) 100%),
+    rgba(3, 1, 2, .72);
+}
+
+.medicalNotebook {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  padding: clamp(26px, 4vh, 54px) clamp(68px, 7vw, 118px) clamp(34px, 5vh, 64px);
+  overflow: hidden;
+  color: #160d09;
+  font-family: "STKaiti", "KaiTi", "Microsoft YaHei", "PingFang SC", sans-serif;
+  background:
+    radial-gradient(circle at 9% 18%, rgba(90, 35, 17, .24), transparent 16%),
+    radial-gradient(circle at 88% 79%, rgba(80, 28, 13, .2), transparent 21%),
+    radial-gradient(ellipse at 72% 13%, rgba(110, 53, 25, .13), transparent 11%),
+    repeating-linear-gradient(0deg, transparent 0 27px, rgba(54, 29, 17, .055) 28px),
+    linear-gradient(90deg, #9f8357 0, #d0b983 5%, #e1cd9e 47.8%, #9d7a50 49.4%, #6d4b31 50%, #a68358 50.6%, #e4d1a2 52.2%, #cfb47e 95%, #95774e 100%);
+  border: 0;
+  box-shadow:
+    inset 0 0 105px rgba(35, 14, 7, .48),
+    inset 0 0 26px rgba(27, 10, 5, .42),
+    0 0 110px rgba(0, 0, 0, .95);
+  animation: medicalNotebookOpen 620ms cubic-bezier(.2, .8, .25, 1) both;
+}
+
+.medicalNotebook__paperTexture {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+  filter: brightness(1.26) contrast(.98) saturate(.76);
+}
+
+.medicalNotebook::before,
+.medicalNotebook::after {
+  position: absolute;
+  z-index: 1;
+  content: "";
+  pointer-events: none;
+}
+
+.medicalNotebook::before {
+  inset: 0;
+  opacity: .24;
+  background:
+    repeating-radial-gradient(circle at 17% 31%, rgba(53, 26, 14, .1) 0 1px, transparent 1px 8px),
+    linear-gradient(103deg, transparent 0 17%, rgba(57, 22, 10, .08) 17.2%, transparent 17.7% 66%, rgba(57, 22, 10, .07) 66.2%, transparent 66.8%);
+  mix-blend-mode: multiply;
+}
+
+.medicalNotebook::after {
+  inset: 0;
+  box-shadow: inset 0 0 8vw 2.6vw rgba(8, 3, 3, .38);
+}
+
+.medicalNotebook__binding {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  z-index: 3;
+  width: 34px;
+  transform: translateX(-50%);
+  background: linear-gradient(90deg, transparent, rgba(51, 26, 14, .24), rgba(255, 245, 210, .2), rgba(49, 25, 14, .25), transparent);
+  pointer-events: none;
+}
+
+.medicalNotebook__spread {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(42px, 5vw, 92px);
+  width: 100%;
+  height: 100%;
+}
+
+.medicalNotebook__folio {
+  position: relative;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  padding: 0 clamp(16px, 2.2vw, 38px) 24px;
+}
+
+.medicalNotebook__folio:nth-child(1) { padding-right: clamp(18px, 2.6vw, 48px); }
+.medicalNotebook__folio:nth-child(2) { padding-left: clamp(18px, 2.6vw, 48px); }
+
+.medicalNotebook__folioBody {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.medicalNotebook__pageKicker {
+  display: block;
+  color: rgba(45, 24, 17, .86);
+  font-size: 12px;
+  letter-spacing: .22em;
+  text-align: center;
+}
+
+.medicalNotebook h1 {
+  margin: 9px 0 18px;
+  color: #160b08;
+  font-size: clamp(21px, 2.15vw, 34px);
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-align: center;
+  -webkit-text-stroke: .38px currentColor;
+}
+
+.medicalNotebook__copy p,
+.medicalNotebook__conclusionResult p {
+  margin: 0 0 clamp(7px, 1vh, 12px);
+  font-size: clamp(14px, 1.22vw, 18px);
+  font-weight: 700;
+  line-height: 1.72;
+  letter-spacing: .055em;
+  text-indent: 2em;
+  -webkit-text-stroke: .32px currentColor;
+  text-shadow: .25px 0 currentColor, 0 .25px currentColor;
+}
+
+.medicalNotebook__copy p.shock {
+  color: #a20b19;
+  font-weight: 750;
+  text-shadow: 0 0 11px rgba(121, 5, 17, .2);
+  animation: medicalNotebookInkPulse 1.7s steps(2, end) infinite;
+}
+
+.medicalNotebook__photo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+  filter: sepia(.48) contrast(1.13) brightness(.78) saturate(.72);
+  background: rgba(30, 19, 14, .28);
+  box-shadow: 0 9px 24px rgba(48, 24, 12, .34);
+  transform: rotate(.45deg);
+}
+
+.medicalNotebook__photoFrame {
+  display: grid;
+  grid-template-rows: minmax(180px, 30vh) auto;
+  gap: 7px;
+  width: min(100%, 620px);
+  margin: 0 auto 16px;
+}
+
+.medicalNotebook__photoFrame figcaption {
+  color: rgba(68, 36, 23, .58);
+  font-size: 10px;
+  letter-spacing: .15em;
+  text-align: right;
+}
+
+.medicalNotebook__copy--contaminated p:nth-last-child(2) {
+  animation: medicalNotebookWrongCount 2.4s steps(2, end) infinite;
+}
+
+.medicalNotebook__futureInk {
+  margin-top: 22px !important;
+  color: #900918;
+  font-weight: 750;
+  text-indent: 0 !important;
+  text-align: center;
+  animation: medicalTextBleed 1.8s ease both, medicalNotebookInkPulse 1.5s steps(2, end) 1.8s infinite;
+}
+
+.medicalNotebook__blood {
+  position: absolute;
+  inset: clamp(76px, 11vh, 120px) 2% 7%;
+  z-index: 5;
+  width: 96%;
+  height: calc(93% - clamp(76px, 11vh, 120px));
+  cursor: crosshair;
+  touch-action: none;
+  mix-blend-mode: multiply;
+}
+
+.medicalNotebook__wipeHint {
+  position: absolute;
+  z-index: 7;
+  right: 0;
+  bottom: 2px;
+  width: max-content;
+  max-width: 90%;
+  margin: 0;
+  color: #711019;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .16em;
+  text-align: center;
+  text-shadow: 0 1px rgba(255, 233, 186, .5);
+  animation: medicalNotebookInkPulse 1.4s steps(2, end) infinite;
+}
+
+.medicalNotebook__nav {
+  position: absolute;
+  top: 50%;
+  z-index: 10;
+  width: 54px;
+  height: 86px;
+  transform: translateY(-50%);
+  border: 0;
+  background: transparent;
+  color: rgba(70, 38, 25, .72);
+  font-family: Georgia, serif;
+  font-size: 58px;
+  cursor: pointer;
+  transition: color 160ms ease, transform 160ms ease;
+}
+
+.medicalNotebook__nav:hover:not(:disabled) {
+  color: #7d0713;
+  transform: translateY(-50%) scale(1.08);
+}
+
+.medicalNotebook__nav:disabled { opacity: .18; cursor: default; }
+.medicalNotebook__nav--previous { left: 20px; }
+.medicalNotebook__nav--next { right: 20px; }
+
+.medicalNotebook__counter {
+  position: absolute;
+  right: 28px;
+  bottom: 20px;
+  color: rgba(66, 35, 23, .55);
+  font-family: Georgia, serif;
+  font-size: 13px;
+  letter-spacing: .14em;
+}
+
+.medicalNotebook__conclusions {
+  display: grid;
+  gap: clamp(18px, 2.25vh, 28px);
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(74, 36, 20, .24);
+}
+
+.medicalNotebook__conclusions .choiceButton {
+  min-height: 48px;
+  padding: 11px 16px;
+  font-size: clamp(14px, 1.15vw, 18px);
+  font-weight: 800;
+  line-height: 1.62;
+  letter-spacing: .045em;
+  -webkit-text-stroke: .24px currentColor;
+}
+
+.medicalNotebook__conclusions .choiceButton {
+  color: #3c2419;
+  border-color: rgba(77, 37, 20, .22);
+  text-shadow: none;
+}
+
+.medicalNotebook__conclusions .choiceButton:hover:not(:disabled) {
+  color: #7c0713;
+  background: linear-gradient(90deg, rgba(117, 13, 21, .08), transparent 76%);
+}
+
+.medicalNotebook__conclusionResult .choiceButton {
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.storyModal.medicalBasementPassword {
+  width: min(620px, 90vw);
+  text-align: center;
+}
+
+.medicalBasementPassword form {
+  display: grid;
+  justify-items: center;
+  gap: 22px;
+  margin-top: 22px;
+}
+
+.medicalBasementPassword input {
+  width: min(310px, 72vw);
+  padding: 10px 8px 13px;
+  border: 0;
+  border-bottom: 1px solid rgba(222, 58, 65, .54);
+  outline: 0;
+  background: transparent;
+  color: #e53c49;
+  font-family: "Courier New", monospace;
+  font-size: clamp(34px, 6vw, 58px);
+  letter-spacing: .48em;
+  text-align: center;
+  text-indent: .48em;
+  text-shadow: 0 0 18px rgba(211, 11, 29, .54);
+}
+
+.medicalBasementClock {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 14px;
+  margin: 14px 0 4px;
+  color: rgba(220, 54, 63, .64);
+}
+
+.medicalBasementClock i {
+  display: block;
+  width: 58px;
+  height: 16px;
+  border-top: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: skewX(-18deg);
+}
+
+.medicalBasementClock b { animation: medicalNotebookInkPulse 1.2s steps(2, end) infinite; }
+.medicalBasementPassword__hint { margin-top: 18px !important; text-align: center !important; text-indent: 0 !important; }
+
+@keyframes medicalNotebookOpen {
+  from { opacity: 0; transform: perspective(900px) rotateX(12deg) scale(.9); filter: blur(4px); }
+  to { opacity: 1; transform: perspective(900px) rotateX(0) scale(1); filter: blur(0); }
+}
+
+@keyframes medicalNotebookInkPulse {
+  0%, 78%, 100% { opacity: .72; filter: blur(0); }
+  82% { opacity: 1; filter: blur(.5px); }
+  88% { opacity: .44; filter: blur(0); }
+}
+
+@keyframes medicalNotebookWrongCount {
+  0%, 62%, 100% { color: inherit; transform: translateX(0); }
+  66% { color: #830814; transform: translateX(-2px); }
+  72% { color: #830814; transform: translateX(2px); }
+}
+
+@media (max-width: 760px) {
+  .medicalNotebook {
+    width: 100vw;
+    height: 100vh;
+    padding: 24px 30px 34px;
+  }
+  .medicalNotebook__spread { gap: 18px; }
+  .medicalNotebook__folio { padding-right: 7px !important; padding-left: 7px !important; }
+  .medicalNotebook__copy p,
+  .medicalNotebook__conclusionResult p { font-size: 10px; line-height: 1.48; }
+  .medicalNotebook__photoFrame { grid-template-rows: minmax(90px, 20vh) auto; }
+  .medicalNotebook__nav { width: 38px; font-size: 44px; }
+  .medicalNotebook__nav--previous { left: 0; }
+  .medicalNotebook__nav--next { right: 0; }
 }
 
 @keyframes medicalTextBleed {

@@ -1,11 +1,13 @@
 import { assetUrl } from "./assetPath";
 import type { JumpscareContext } from "./jumpscareTexts";
 
-export type JumpscareSpriteId = "library-shelf" | "library-fall";
+export type JumpscareSpriteId = "library-shelf" | "library-fall" | "medical-garage" | "medical-basement";
 
 const spriteFiles: Record<JumpscareSpriteId, string> = {
-  "library-shelf": "library-shelf-ghost.png",
-  "library-fall": "library-fall-ghost.png",
+  "library-shelf": "jumpscares/library-shelf-ghost.png",
+  "library-fall": "jumpscares/library-fall-ghost.png",
+  "medical-garage": "jumpscares/medical-garage-ghost.png",
+  "medical-basement": "medical-basement/suwan-door-v1.png",
 };
 
 export const JUMPSCARE_SPRITE_IDS = Object.keys(spriteFiles) as JumpscareSpriteId[];
@@ -18,7 +20,12 @@ type SpriteRecord = {
 const spriteRecords = new Map<JumpscareSpriteId, SpriteRecord>();
 
 export function jumpscareSpriteUrl(spriteId: JumpscareSpriteId): string {
-  return assetUrl(`images/jumpscares/${spriteFiles[spriteId]}`);
+  return assetUrl(
+    `images/${spriteFiles[spriteId]}`,
+    spriteId === "medical-garage"
+      ? "medical-garage-v1"
+      : spriteId === "medical-basement" ? "medical-basement-v1" : undefined,
+  );
 }
 
 /**

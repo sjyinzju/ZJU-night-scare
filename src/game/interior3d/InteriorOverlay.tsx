@@ -10,6 +10,16 @@ import BaishaDormExperience, { type BaishaDormStage } from "./BaishaDormExperien
 import { shouldUseBaishaDirectChaseTest } from "./baishaDebug";
 import MedicalTopExperience from "./MedicalTopExperience";
 import type { MedicalTopModal, MedicalTopSnapshot } from "./medicalTopData";
+import MedicalGarageExperience from "./MedicalGarageExperience";
+import { MEDICAL_GARAGE_STEPS, type MedicalGarageModal, type MedicalGarageSnapshot } from "./medicalGarageData";
+import MedicalBasementExperience from "./MedicalBasementExperience";
+import {
+  MEDICAL_BASEMENT_STEPS,
+  type MedicalBasementConclusionId,
+  type MedicalBasementEvidenceId,
+  type MedicalBasementModal,
+  type MedicalBasementSnapshot,
+} from "./medicalBasementData";
 
 export interface InteriorOverlayProps {
   building: { id: string; name: string; zone?: string };
@@ -25,6 +35,11 @@ export interface InteriorOverlayProps {
   blockUntilAssetReady?: boolean;
   onAssetStateChange?: (state: InteriorAssetState) => void;
   onMedicalTopComplete?: (detail: { hasFuse: boolean; evidence?: string }) => void;
+  onMedicalGarageComplete?: () => void;
+  onMedicalBasementComplete?: (detail: {
+    evidenceIds: MedicalBasementEvidenceId[];
+    conclusion: MedicalBasementConclusionId;
+  }) => void;
 }
 
 const JOYSTICK_RADIUS = 56;
@@ -65,6 +80,24 @@ function medicalTopStepState(snapshot: MedicalTopSnapshot, index: number): { act
   return { active, complete: snapshot.stage === "transition" };
 }
 
+function medicalGarageStepState(snapshot: MedicalGarageSnapshot, index: number): { active: boolean; complete: boolean } {
+  if (index === 0) return { active: snapshot.stage === "opening", complete: snapshot.stage !== "opening" };
+  if (index === 1) return { active: snapshot.activatedNodes < 5 && snapshot.stage !== "opening", complete: snapshot.activatedNodes >= 5 };
+  if (index === 2) return { active: snapshot.activatedNodes >= 4 && !snapshot.hasCandle, complete: snapshot.hasCandle };
+  if (index === 3) return { active: snapshot.stage === "document", complete: snapshot.activatedNodes >= 6 && snapshot.stage !== "document" };
+  if (index === 4) return { active: snapshot.stage === "seal", complete: ["stairs", "transition"].includes(snapshot.stage) };
+  return { active: snapshot.stage === "stairs", complete: snapshot.stage === "transition" };
+}
+
+function medicalBasementStepState(snapshot: MedicalBasementSnapshot, index: number): { active: boolean; complete: boolean } {
+  if (index === 0) return { active: snapshot.stage === "approach", complete: snapshot.stage !== "approach" };
+  if (index === 1) return { active: ["approach", "clutter"].includes(snapshot.stage) && !snapshot.hasFeather, complete: snapshot.hasFeather };
+  if (index === 2) return { active: snapshot.stage === "clutter", complete: snapshot.evidenceIds.length >= 2 };
+  if (index === 3) return { active: snapshot.stage === "notebook" && !snapshot.notebookComplete, complete: snapshot.notebookComplete };
+  if (index === 4) return { active: snapshot.stage === "notebook", complete: snapshot.notebookComplete };
+  return { active: snapshot.stage === "locked", complete: snapshot.stage === "transition" };
+}
+
 /**
  * Full-screen overlay hosting a first-person interior exploration scene.
  * Owns the Interior3D lifecycle: creates it on mount, disposes on unmount.
@@ -80,6 +113,8 @@ export default function InteriorOverlay({
   blockUntilAssetReady = false,
   onAssetStateChange,
   onMedicalTopComplete,
+  onMedicalGarageComplete,
+  onMedicalBasementComplete,
 }: InteriorOverlayProps): React.ReactElement {
   const hostRef = useRef<HTMLDivElement>(null);
   const floorPlanRef = useRef<HTMLCanvasElement>(null);
@@ -90,6 +125,8 @@ export default function InteriorOverlay({
   const onExitTriggerRef = useRef(onExitTrigger);
   const onAssetStateChangeRef = useRef(onAssetStateChange);
   const onMedicalTopCompleteRef = useRef(onMedicalTopComplete);
+  const onMedicalGarageCompleteRef = useRef(onMedicalGarageComplete);
+  const onMedicalBasementCompleteRef = useRef(onMedicalBasementComplete);
   // WebGL 初始化失败（部分低端/受限浏览器无法创建 WebGL 上下文）时降级为提示。
   const [failed, setFailed] = useState(false);
   const [assetState, setAssetState] = useState<InteriorAssetState>("loading");
@@ -102,11 +139,17 @@ export default function InteriorOverlay({
   const [debugMessage, setDebugMessage] = useState("");
   const [lightningFlash, setLightningFlash] = useState(false);
   const lightningTimer = useRef<number | null>(null);
+  const [medicalGarageTextScare, setMedicalGarageTextScare] = useState<string | null>(null);
+  const medicalGarageTextScareTimer = useRef<number | null>(null);
   const [baishaTrigger, setBaishaTrigger] = useState<BaishaGameplayTrigger | null>(null);
   const [baishaStage, setBaishaStage] = useState<BaishaDormStage>("photo_target");
   const [baishaChaseStarted, setBaishaChaseStarted] = useState(false);
   const [medicalTopSnapshot, setMedicalTopSnapshot] = useState<MedicalTopSnapshot | null>(null);
   const [medicalTopModal, setMedicalTopModal] = useState<MedicalTopModal | null>(null);
+  const [medicalGarageSnapshot, setMedicalGarageSnapshot] = useState<MedicalGarageSnapshot | null>(null);
+  const [medicalGarageModal, setMedicalGarageModal] = useState<MedicalGarageModal | null>(null);
+  const [medicalBasementSnapshot, setMedicalBasementSnapshot] = useState<MedicalBasementSnapshot | null>(null);
+  const [medicalBasementModal, setMedicalBasementModal] = useState<MedicalBasementModal | null>(null);
   const baishaEnergyBoost = useGameStore((state) => Boolean(state.storyState.flags.baishaEnergyBoost));
   const scene01Debug = building.id === "medical-library"
     && new URLSearchParams(window.location.search).get("debugScene01") === "1";
@@ -148,7 +191,9 @@ export default function InteriorOverlay({
   useEffect(() => {
     onAssetStateChangeRef.current = onAssetStateChange;
     onMedicalTopCompleteRef.current = onMedicalTopComplete;
-  }, [onAssetStateChange, onMedicalTopComplete]);
+    onMedicalGarageCompleteRef.current = onMedicalGarageComplete;
+    onMedicalBasementCompleteRef.current = onMedicalBasementComplete;
+  }, [onAssetStateChange, onMedicalBasementComplete, onMedicalGarageComplete, onMedicalTopComplete]);
 
   useEffect(() => {
     onExitRef.current = onExit;
@@ -238,6 +283,24 @@ export default function InteriorOverlay({
           engineRef.current?.exitPointerLock();
           onMedicalTopCompleteRef.current?.(detail);
         },
+        onMedicalGarageStateChange: setMedicalGarageSnapshot,
+        onMedicalGarageModal: (modal) => {
+          engineRef.current?.exitPointerLock();
+          setMedicalGarageModal(modal);
+        },
+        onMedicalGarageComplete: () => {
+          engineRef.current?.exitPointerLock();
+          onMedicalGarageCompleteRef.current?.();
+        },
+        onMedicalBasementStateChange: setMedicalBasementSnapshot,
+        onMedicalBasementModal: (modal) => {
+          engineRef.current?.exitPointerLock();
+          setMedicalBasementModal(modal);
+        },
+        onMedicalBasementComplete: (detail) => {
+          engineRef.current?.exitPointerLock();
+          onMedicalBasementCompleteRef.current?.(detail);
+        },
       });
       engineRef.current = engine;
       engine.start();
@@ -265,12 +328,14 @@ export default function InteriorOverlay({
     if (toastTimer.current !== null) window.clearTimeout(toastTimer.current);
     if (doorMessageTimer.current !== null) window.clearTimeout(doorMessageTimer.current);
     if (lightningTimer.current !== null) window.clearTimeout(lightningTimer.current);
+    if (medicalGarageTextScareTimer.current !== null) window.clearTimeout(medicalGarageTextScareTimer.current);
   }, []);
 
   useEffect(() => {
-    if (building.id !== "medical-library") return;
+    if (building.id !== "medical-library" && building.id !== "medical-college") return;
     const handleLightning = (event: Event): void => {
-      const active = (event as CustomEvent<{ active?: boolean }>).detail?.active;
+      const detail = (event as CustomEvent<{ active?: boolean; duration?: number }>).detail;
+      const active = detail?.active;
       if (!active) {
         setLightningFlash(false);
         return;
@@ -280,10 +345,31 @@ export default function InteriorOverlay({
       lightningTimer.current = window.setTimeout(() => {
         lightningTimer.current = null;
         setLightningFlash(false);
-      }, 190);
+      }, detail?.duration ?? 190);
     };
     window.addEventListener("zju-horror-library-lightning", handleLightning);
-    return () => window.removeEventListener("zju-horror-library-lightning", handleLightning);
+    window.addEventListener("zju-horror-medical-garage-lightning", handleLightning);
+    return () => {
+      window.removeEventListener("zju-horror-library-lightning", handleLightning);
+      window.removeEventListener("zju-horror-medical-garage-lightning", handleLightning);
+    };
+  }, [building.id]);
+
+  useEffect(() => {
+    if (building.id !== "medical-college") return;
+    const showTextScare = (event: Event): void => {
+      const detail = (event as CustomEvent<{ text?: string; duration?: number }>).detail;
+      if (!detail?.text) return;
+      setMedicalGarageTextScare(null);
+      window.requestAnimationFrame(() => setMedicalGarageTextScare(detail.text ?? null));
+      if (medicalGarageTextScareTimer.current !== null) window.clearTimeout(medicalGarageTextScareTimer.current);
+      medicalGarageTextScareTimer.current = window.setTimeout(() => {
+        medicalGarageTextScareTimer.current = null;
+        setMedicalGarageTextScare(null);
+      }, detail.duration ?? 820);
+    };
+    window.addEventListener("zju-horror-medical-garage-text-scare", showTextScare);
+    return () => window.removeEventListener("zju-horror-medical-garage-text-scare", showTextScare);
   }, [building.id]);
 
   useEffect(() => {
@@ -419,7 +505,12 @@ export default function InteriorOverlay({
         context.shadowBlur = 0;
       }
 
-      if (snapshot.objective) {
+      const objectiveIsGarageNode = Boolean(snapshot.objective && snapshot.labels?.some((label) => (
+        label.marker === "garage-node"
+        && label.state === "target"
+        && Math.hypot(label.x - snapshot.objective!.x, label.z - snapshot.objective!.z) < 0.1
+      )));
+      if (snapshot.objective && !objectiveIsGarageNode) {
         const objectiveX = mapX(snapshot.objective.x);
         const objectiveY = mapY(snapshot.objective.z);
         context.beginPath();
@@ -431,6 +522,23 @@ export default function InteriorOverlay({
         context.shadowBlur = 0;
       }
 
+      if (snapshot.routeLines?.length) {
+        context.save();
+        context.lineCap = "round";
+        context.lineJoin = "round";
+        for (const segment of snapshot.routeLines) {
+          context.beginPath();
+          context.moveTo(mapX(segment.from.x), mapY(segment.from.z));
+          context.lineTo(mapX(segment.to.x), mapY(segment.to.z));
+          context.strokeStyle = segment.complete ? "#d10a20" : "rgba(75, 24, 31, .42)";
+          context.shadowColor = segment.complete ? "rgba(255, 8, 35, .9)" : "transparent";
+          context.shadowBlur = segment.complete ? 7 : 0;
+          context.lineWidth = segment.complete ? 2.2 : 1;
+          context.stroke();
+        }
+        context.restore();
+      }
+
       if (snapshot.labels?.length) {
         context.save();
         context.font = "700 11px Microsoft YaHei, sans-serif";
@@ -438,14 +546,34 @@ export default function InteriorOverlay({
         context.textBaseline = "bottom";
         for (const label of snapshot.labels) {
           const x = mapX(label.x);
-          const y = mapY(label.z) - 5;
-          context.fillStyle = label.state === "target"
-            ? "#ff2537"
-            : label.state === "complete"
-              ? "#b99a57"
-              : label.state === "abnormal"
-                ? "#ff001d"
-                : "#cbd3d3";
+          const markerY = mapY(label.z);
+          const y = markerY - (label.marker === "garage-node" ? 5.5 : 5);
+          if (label.marker === "garage-node") {
+            context.beginPath();
+            context.arc(x, markerY, 3.35, 0, Math.PI * 2);
+            if (label.state === "complete") {
+              context.fillStyle = "#e3102b";
+              context.shadowColor = "rgba(255, 12, 43, .95)";
+              context.shadowBlur = 7;
+              context.fill();
+            } else {
+              context.strokeStyle = label.state === "target" ? "#ff1835" : "rgba(245,248,250,.92)";
+              context.lineWidth = label.state === "target" ? 2 : 1.35;
+              context.shadowColor = label.state === "target" ? "rgba(255, 15, 45, .95)" : "rgba(255,255,255,.4)";
+              context.shadowBlur = label.state === "target" ? 7 : 2;
+              context.stroke();
+            }
+            context.shadowBlur = 0;
+          }
+          context.fillStyle = label.marker === "garage-node"
+            ? label.state === "normal" ? "#ffffff" : "#ff2840"
+            : label.state === "target"
+              ? "#ff2537"
+              : label.state === "complete"
+                ? "#b99a57"
+                : label.state === "abnormal"
+                  ? "#ff001d"
+                  : "#cbd3d3";
           context.shadowColor = label.state === "target" || label.state === "abnormal"
             ? "rgba(255,0,28,.95)"
             : "rgba(0,0,0,.9)";
@@ -455,7 +583,7 @@ export default function InteriorOverlay({
         context.restore();
       }
 
-      if (snapshot.ghost?.state === "chase") {
+      if (snapshot.ghost?.state === "chase" || snapshot.ghost?.state === "garage") {
         const ghostX = mapX(snapshot.ghost.x);
         const ghostY = mapY(snapshot.ghost.z);
         const pulse = 4.1 + Math.sin(time * 0.012) * 0.8;
@@ -628,6 +756,9 @@ export default function InteriorOverlay({
           ...(blockUntilAssetReady && assetState !== "ready" ? styles.hostBlocked : undefined),
         }}
       />
+      <div className={["jumpscareText", medicalGarageTextScare ? "active" : ""].join(" ")}>
+        {medicalGarageTextScare}
+      </div>
 
       {/* Required authored scenes stay veiled until their GLB is ready. */}
       {concealUntilAuthoredAssetReady && (
@@ -654,7 +785,11 @@ export default function InteriorOverlay({
       <div style={styles.scanline} aria-hidden="true" />
       <div
         aria-hidden="true"
-        style={{ ...styles.lightningFlash, opacity: lightningFlash ? 0.78 : 0 }}
+        style={{
+          ...styles.lightningFlash,
+          background: currentSceneId === "medical_garage" ? "#ffffff" : styles.lightningFlash.background,
+          opacity: lightningFlash ? (currentSceneId === "medical_garage" ? 1 : 0.78) : 0,
+        }}
       />
 
       <BaishaDormExperience
@@ -666,11 +801,27 @@ export default function InteriorOverlay({
       />
 
       <MedicalTopExperience
-        active={building.id === "medical-college" && currentSceneId !== "medical_garage"}
+        active={building.id === "medical-college" && Boolean(medicalTopSnapshot)}
         engineRef={engineRef}
         snapshot={medicalTopSnapshot}
         modal={medicalTopModal}
         onModalClosed={() => setMedicalTopModal(null)}
+      />
+
+      <MedicalGarageExperience
+        active={building.id === "medical-college" && currentSceneId === "medical_garage"}
+        engineRef={engineRef}
+        snapshot={medicalGarageSnapshot}
+        modal={medicalGarageModal}
+        onModalClosed={() => setMedicalGarageModal(null)}
+      />
+
+      <MedicalBasementExperience
+        active={building.id === "medical-college" && currentSceneId === "medical_vault"}
+        engineRef={engineRef}
+        snapshot={medicalBasementSnapshot}
+        modal={medicalBasementModal}
+        onModalClosed={() => setMedicalBasementModal(null)}
       />
 
       {building.id === "medical-college" && medicalTopSnapshot && (
@@ -703,6 +854,68 @@ export default function InteriorOverlay({
                     ...(state.active ? styles.storyStepActive : undefined),
                   }}
                 >
+                  <i style={styles.storyStepDot} />
+                  <span>{label}</span>
+                </div>
+              );
+            })}
+          </aside>
+        </>
+      )}
+
+      {building.id === "medical-college" && medicalGarageSnapshot && (
+        <>
+          <aside style={styles.inventoryRail} aria-label="地下车库道具栏">
+            <strong style={styles.sideRailTitle}>道具</strong>
+            <div style={{ ...styles.inventorySlot, ...(medicalGarageSnapshot.hasCandle ? styles.inventorySlotOwned : undefined) }}>
+              <i style={styles.inventoryIcon}>{medicalGarageSnapshot.hasCandle ? "烛" : "·"}</i>
+              <span>
+                封印蜡烛
+                {medicalGarageSnapshot.hasCandle && <small style={styles.inventorySlotStatus}>阵眼所需</small>}
+              </span>
+            </div>
+          </aside>
+          <aside style={{ ...styles.storyChain, ...styles.medicalStoryChain }} aria-label="地下车库剧情链">
+            <strong style={styles.sideRailTitle}>剧情链</strong>
+            {MEDICAL_GARAGE_STEPS.map((label, index) => {
+              const state = medicalGarageStepState(medicalGarageSnapshot, index);
+              return (
+                <div key={label} style={{
+                  ...styles.storyStep,
+                  ...(state.complete ? styles.storyStepComplete : undefined),
+                  ...(state.active ? styles.storyStepActive : undefined),
+                }}>
+                  <i style={styles.storyStepDot} />
+                  <span>{label}</span>
+                </div>
+              );
+            })}
+          </aside>
+        </>
+      )}
+
+      {building.id === "medical-college" && medicalBasementSnapshot && (
+        <>
+          <aside style={styles.inventoryRail} aria-label="地下仓库道具栏">
+            <strong style={styles.sideRailTitle}>道具</strong>
+            <div style={{ ...styles.inventorySlot, ...(medicalBasementSnapshot.hasFeather ? styles.inventorySlotOwned : undefined) }}>
+              <i style={styles.inventoryIcon}>{medicalBasementSnapshot.hasFeather ? "羽" : "·"}</i>
+              <span>
+                猫头鹰羽毛
+                {medicalBasementSnapshot.hasFeather && <small style={styles.inventorySlotStatus}>固定变化中的档案文字</small>}
+              </span>
+            </div>
+          </aside>
+          <aside style={{ ...styles.storyChain, ...styles.medicalStoryChain }} aria-label="地下仓库剧情链">
+            <strong style={styles.sideRailTitle}>剧情链</strong>
+            {MEDICAL_BASEMENT_STEPS.map((label, index) => {
+              const state = medicalBasementStepState(medicalBasementSnapshot, index);
+              return (
+                <div key={label} style={{
+                  ...styles.storyStep,
+                  ...(state.complete ? styles.storyStepComplete : undefined),
+                  ...(state.active ? styles.storyStepActive : undefined),
+                }}>
                   <i style={styles.storyStepDot} />
                   <span>{label}</span>
                 </div>

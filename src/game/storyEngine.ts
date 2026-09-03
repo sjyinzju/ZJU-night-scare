@@ -81,7 +81,6 @@ const INTERIOR_STORY_TRIGGERS: Record<string, InteriorStoryTriggerDefinition[]> 
   medical: [
     { sceneId: "medical_window", position: "window", action: "story", activeSceneIds: ["medical_window"], radius: 1.2 },
     { sceneId: "medical_garage", position: "garage", action: "story", activeSceneIds: ["medical_garage"], radius: 1.15 },
-    { sceneId: "medical_vault", position: "vault", action: "story", activeSceneIds: ["medical_vault"], radius: 1.15 },
     { sceneId: "ghost_choice", position: "ghost", action: "story", activeSceneIds: ["ghost_choice"] },
     { sceneId: "stand_ground", position: "stand", action: "story", activeSceneIds: ["stand_ground"] },
   ],
