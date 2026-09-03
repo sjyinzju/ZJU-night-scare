@@ -1,0 +1,23 @@
+{
+  "assetVersion": 1,
+  "contractVersion": 1,
+  "buildingId": "medical-college",
+  "roomKind": "medical",
+  "model": "scene.glb",
+  "lodModel": "scene.lod.glb",
+  "units": "meters",
+  "qualityProfile": "desktop-and-mobile",
+  "assetStats": {
+    "desktop": {
+      "triangles": 0,
+      "bytes": 0
+    },
+    "mobile": {
+      "triangles": 0,
+      "bytes": 0
+    }
+  },
+  "notes": [
+    "Node contract: VIS_ / COL_ / TRG_ / PICK_ / DOOR_ / HIDE_ / SPAWN_ / BOUNDS_."
+  ]
+}

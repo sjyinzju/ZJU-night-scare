@@ -210,7 +210,7 @@ export const horrorZones: Record<string, HorrorZone> = {
   theater: {
     id: "theater",
     name: "小剧场",
-    center: { x: 12.0, y: 10.6 },
+    center: { x: 12.1, y: 10.3 },
     radius: 3.2,
     strength: 0.2,
   },

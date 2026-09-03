@@ -4,6 +4,7 @@ import {
   campusRoads,
   campusPlazas,
   campusWaters,
+  ROAD,
   type CampusBuilding,
   type IsoPoint,
 } from "./mapData";
@@ -32,55 +33,142 @@ import {
   type StoryHotspotInteraction,
 } from "./storyEngine";
 
-const TILE_W = 96;
-const TILE_H = 48;
+// Stretch the visual projection without touching the logical map coordinates.
+// Roads, entrances, collisions and ghost routing continue to use mapData's
+// original IsoPoint values, while the campus gets a less cramped silhouette.
+const TILE_W = 112;
+const TILE_H = 50;
+const MAP_Y_AXIS_STRETCH = 1.18;
 const ORIGIN_X = 980;
 const ORIGIN_Y = 120;
 const MAP_W = 42;
 const MAP_D = 34;
 const EXTERIOR_SPRITE_KEYS: Record<string, string> = {
+  "main-gate": "exterior-main-gate",
+  "dorm-lantian": "exterior-dorm-lantian",
+  "dorm-danyang": "exterior-dorm-danyang",
+  "dorm-cuibai": "exterior-dorm-cuibai",
   "medical-library": "exterior-medical-library",
   "medical-college": "exterior-medical-college",
   "dorm-baisha": "exterior-dorm-baisha",
   "little-theater": "exterior-little-theater",
   "linhu-canteen": "exterior-linhu-canteen",
+  "west-teaching": "exterior-west-teaching",
+  "ocean-building": "exterior-ocean-building",
+  "qiushi-auditorium": "exterior-qiushi-auditorium",
+  "marine-lab": "exterior-marine-lab",
+  "engineering-lab": "exterior-engineering-lab",
+  "agri-life": "exterior-agri-life",
+  "library": "exterior-library",
   "east-teaching-1": "exterior-east-teaching-1",
   "east-teaching-2": "exterior-east-teaching-2",
   "east-teaching-3": "exterior-east-teaching-3",
   "east-teaching-4": "exterior-east-teaching-4",
+  "east-teaching-5": "exterior-east-teaching-5",
+  "east-teaching-6": "exterior-east-teaching-6",
+  "east-teaching-7": "exterior-east-teaching-7",
+  "gym": "exterior-gym",
+  "life-science": "exterior-life-science",
+  "environment-college": "exterior-environment-college",
 };
 
-// Blender exports keep transparent breathing room around each render.  Anchor
-// the visible pixels (rather than the full 1280x960 canvas) to the building's
-// front edge so the model actually sits on the map.
-const EXTERIOR_SPRITE_ORIGINS: Record<string, { x: number; y: number }> = {
-  "medical-library": { x: 0.5, y: 0.8833 },
-  "medical-college": { x: 0.5, y: 0.899 },
-  "dorm-baisha": { x: 0.5, y: 0.8896 },
-  "little-theater": { x: 0.5, y: 0.8729 },
-  "linhu-canteen": { x: 0.5121, y: 0.9427 },
-  "east-teaching-1": { x: 0.4746, y: 0.9885 },
-  "east-teaching-2": { x: 0.477, y: 0.9896 },
-  "east-teaching-3": { x: 0.4754, y: 0.9854 },
-  "east-teaching-4": { x: 0.4777, y: 0.9813 },
+const LANDMARK_SPRITE_KEYS = {
+  crescent: "exterior-crescent-building",
+  admin: "exterior-admin-center",
+} as const;
+
+// Blender renders come from two batches with very different transparent
+// margins. These values are measured from the alpha channel, so Phaser scales
+// and anchors the visible building rather than the full PNG canvas.
+const EXTERIOR_SPRITE_METRICS: Record<string, { x: number; y: number; visibleW: number; visibleH: number }> = {
+  "main-gate": { x: 0.4994, y: 0.9479, visibleW: 0.9173, visibleH: 0.9003 },
+  "dorm-lantian": { x: 0.5, y: 0.9562, visibleW: 0.9062, visibleH: 0.915 },
+  "dorm-danyang": { x: 0.4986, y: 0.9514, visibleW: 0.9093, visibleH: 0.9057 },
+  "dorm-cuibai": { x: 0.4993, y: 0.9477, visibleW: 0.912, visibleH: 0.897 },
+  "medical-library": { x: 0.4996, y: 0.8833, visibleW: 0.8719, visibleH: 0.7969 },
+  "medical-college": { x: 0.4996, y: 0.899, visibleW: 0.9453, visibleH: 0.8292 },
+  "dorm-baisha": { x: 0.4996, y: 0.8885, visibleW: 0.8328, visibleH: 0.7844 },
+  "little-theater": { x: 0.4996, y: 0.8719, visibleW: 0.9094, visibleH: 0.6552 },
+  "linhu-canteen": { x: 0.5117, y: 0.9417, visibleW: 0.7102, visibleH: 0.9125 },
+  "west-teaching": { x: 0.4994, y: 0.9611, visibleW: 0.9227, visibleH: 0.9257 },
+  "ocean-building": { x: 0.5, y: 0.9581, visibleW: 0.8885, visibleH: 0.9188 },
+  "qiushi-auditorium": { x: 0.4993, y: 0.9591, visibleW: 0.9099, visibleH: 0.9218 },
+  "marine-lab": { x: 0.4994, y: 0.9618, visibleW: 0.9215, visibleH: 0.9421 },
+  "engineering-lab": { x: 0.4993, y: 0.9582, visibleW: 0.9066, visibleH: 0.9508 },
+  "agri-life": { x: 0.4996, y: 0.9564, visibleW: 0.9437, visibleH: 0.9167 },
+  "library": { x: 0.4994, y: 0.9625, visibleW: 0.9177, visibleH: 0.9394 },
+  "east-teaching-1": { x: 0.4738, y: 0.9875, visibleW: 0.7984, visibleH: 0.8031 },
+  "east-teaching-2": { x: 0.4762, y: 0.9885, visibleW: 0.7406, visibleH: 0.8323 },
+  "east-teaching-3": { x: 0.4746, y: 0.9854, visibleW: 0.7969, visibleH: 0.8042 },
+  "east-teaching-4": { x: 0.4773, y: 0.9812, visibleW: 0.707, visibleH: 0.8448 },
+  "east-teaching-5": { x: 0.4995, y: 0.9604, visibleW: 0.9276, visibleH: 0.9233 },
+  "east-teaching-6": { x: 0.4994, y: 0.9625, visibleW: 0.9249, visibleH: 0.9353 },
+  "east-teaching-7": { x: 0.4994, y: 0.9603, visibleW: 0.929, visibleH: 0.923 },
+  "gym": { x: 0.5, y: 0.9452, visibleW: 0.8992, visibleH: 0.8937 },
+  "life-science": { x: 0.4994, y: 0.9586, visibleW: 0.9163, visibleH: 0.9196 },
+  "environment-college": { x: 0.5, y: 0.9599, visibleW: 0.8988, visibleH: 0.9303 },
+};
+
+// Only correct visual proportions here. Gameplay footprints, collision and
+// entrance coordinates continue to use the original mapData values.
+const EXTERIOR_SPRITE_SCALES: Record<string, number> = {
+  "dorm-lantian": 0.72,
+  "dorm-baisha": 0.94,
+  "medical-college": 0.84,
+  "medical-library": 0.94,
+  "marine-lab": 0.86,
+  "linhu-canteen": 0.84,
+  "library": 0.92,
+  "east-teaching-1": 0.94,
+  "east-teaching-2": 0.94,
+  "east-teaching-3": 0.94,
+  "east-teaching-4": 0.94,
+  "east-teaching-5": 0.94,
+  "east-teaching-6": 0.94,
+  "east-teaching-7": 0.94,
+  "environment-college": 0.84,
+};
+
+// The legacy Lantian and Baisha logical rectangles overlap. Keep both gameplay
+// footprints untouched, but place the Lantian render farther north inside its
+// own large footprint so the two facades no longer merge into one building.
+const EXTERIOR_SPRITE_ISO_OFFSETS: Record<string, IsoPoint> = {
+  "dorm-lantian": { x: -1.15, y: -1.15 },
+  "environment-college": { x: 0.7, y: -0.08 },
+  "medical-college": { x: 0, y: -0.72 },
+  "marine-lab": { x: 0.68, y: 0 },
+  "linhu-canteen": { x: 0, y: -0.7 },
+};
+
+const EXTERIOR_SPRITE_GRADES: Record<string, { brightness: number; saturation: number; hue?: number; contrast?: number }> = {
+  "main-gate": { brightness: 0.86, saturation: -0.34, hue: 3, contrast: 0.04 },
+  "dorm-lantian": { brightness: 0.84, saturation: -0.36, hue: 3, contrast: 0.04 },
+  "dorm-danyang": { brightness: 0.84, saturation: -0.36, hue: 3, contrast: 0.04 },
+  "dorm-cuibai": { brightness: 0.84, saturation: -0.36, hue: 3, contrast: 0.04 },
+  "medical-library": { brightness: 1.1, saturation: -0.16, hue: -3, contrast: 0.02 },
+  "medical-college": { brightness: 0.98, saturation: -0.2, hue: -2, contrast: 0.03 },
+  "dorm-baisha": { brightness: 0.94, saturation: -0.24, hue: 2, contrast: 0.03 },
+  "little-theater": { brightness: 0.92, saturation: -0.2, hue: -2, contrast: 0.04 },
+  "linhu-canteen": { brightness: 0.94, saturation: -0.26, hue: -2, contrast: 0.03 },
 };
 // Old movement used 0.075 * speed per frame. Keep the 60fps feel while
 // making movement frame-rate independent.
 const PLAYER_SPEED = 18.9;
 const ROAD_SNAP_RADIUS = 0.9;
-const JUNCTION_RADIUS = 1.85;
+const JUNCTION_RADIUS = 1.2;
 // 玩家中心距离可进入建筑中心小于此值时，判定为"可进入"。
 const ENTER_RADIUS = 2.6;
-const WORLD_BOUNDS = { x: -1200, y: 0, width: 4300, height: 2200 };
+const WORLD_BOUNDS = { x: -1500, y: 0, width: 5200, height: 2300 };
 // The red ghost is a relentless pursuer. It is still slightly slower than a
 // player running flat-out (PLAYER_SPEED), but it never wastes time patrolling.
 const GHOST_CHASE_SPEED = 16;
 const GHOST_CLOSE_RADIUS = 1.65;
 const GHOST_CAUGHT_RADIUS = 0.55;
 const GHOST_SANITY_COOLDOWN = 2200;
-// Recalculate against the player's latest road position often enough that a
-// turn at a junction is reflected immediately, including on mobile screens.
-const GHOST_ROUTE_REFRESH_INTERVAL = 140;
+// Re-path when the player has moved a junction-scale distance, not every
+// frame. 140ms Dijkstra was hitching at every crossroads.
+const GHOST_ROUTE_REFRESH_INTERVAL = 650;
+const GHOST_ROUTE_RETARGET = 1.15;
 const GHOST_SPAWN_DELAY = 5000;
 const GHOST_MIN_SPAWN_DISTANCE = 13;
 const GHOST_MIN_SPAWN_ROUTE_DISTANCE = 22;
@@ -264,6 +352,8 @@ export class CampusScene extends Phaser.Scene {
     Object.entries(EXTERIOR_SPRITE_KEYS).forEach(([buildingId, textureKey]) => {
       this.load.image(textureKey, assetUrl(`assets/exterior/${buildingId}/${buildingId}.png`));
     });
+    this.load.image(LANDMARK_SPRITE_KEYS.crescent, assetUrl("assets/exterior/crescent-building/crescent-building.png"));
+    this.load.image(LANDMARK_SPRITE_KEYS.admin, assetUrl("assets/exterior/admin-center/admin-center.png"));
   }
 
   create() {
@@ -336,6 +426,7 @@ export class CampusScene extends Phaser.Scene {
     window.addEventListener("zju-horror-map-move-input", this.handleMapMoveInput as EventListener);
     window.addEventListener("zju-horror-player-relocate", this.handlePlayerRelocate as EventListener);
     window.addEventListener("zju-horror-player-revive", this.handlePlayerRevive as EventListener);
+    window.addEventListener("zju-horror-confirm-interact", this.handleConfirmInteract);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.sceneReady = false;
       this.cancelGhostSpawnTimer();
@@ -346,6 +437,7 @@ export class CampusScene extends Phaser.Scene {
       window.removeEventListener("zju-horror-map-move-input", this.handleMapMoveInput as EventListener);
       window.removeEventListener("zju-horror-player-relocate", this.handlePlayerRelocate as EventListener);
       window.removeEventListener("zju-horror-player-revive", this.handlePlayerRevive as EventListener);
+      window.removeEventListener("zju-horror-confirm-interact", this.handleConfirmInteract);
     });
 
     this.emitHud("", "沿红色虚线路线前进，绕开红鬼。");
@@ -368,9 +460,10 @@ export class CampusScene extends Phaser.Scene {
   }
 
   private toScreen(point: IsoPoint) {
+    const visualY = point.y * MAP_Y_AXIS_STRETCH;
     return {
-      x: ORIGIN_X + (point.x - point.y) * (TILE_W / 2),
-      y: ORIGIN_Y + (point.x + point.y) * (TILE_H / 2),
+      x: ORIGIN_X + (point.x - visualY) * (TILE_W / 2),
+      y: ORIGIN_Y + (point.x + visualY) * (TILE_H / 2),
     };
   }
 
@@ -383,11 +476,13 @@ export class CampusScene extends Phaser.Scene {
    */
   private drawExteriorMapV2() {
     this.drawGroundV2();
+    this.drawCampusSurfaceDetails();
     this.drawSwampField();
     this.drawWater();
     this.drawMapLandmarksV2();
     this.drawPlazas();
     this.drawRoads();
+    this.drawRoadsideFurniture();
     this.drawBuildings();
   }
 
@@ -403,8 +498,8 @@ export class CampusScene extends Phaser.Scene {
     // A single continuous campus slab makes the map read as one place instead
     // of a collection of disconnected tiles. The old tile texture remains as
     // a low-opacity overlay later in the pipeline.
-    g.fillStyle(0x0b1719, 0.98);
-    g.lineStyle(7, 0x1b3030, 0.88);
+    g.fillStyle(0x102326, 0.99);
+    g.lineStyle(8, 0x34504d, 0.9);
     g.beginPath();
     corners.forEach((point, index) => {
       if (index === 0) g.moveTo(point.x, point.y);
@@ -415,10 +510,11 @@ export class CampusScene extends Phaser.Scene {
     g.strokePath();
 
     const districts = [
-      { x: 2.0, y: 2.1, w: 8.0, d: 6.4, color: 0x182829, alpha: 0.58 },
-      { x: 28.4, y: 8.0, w: 9.0, d: 8.5, color: 0x192a2c, alpha: 0.48 },
-      { x: 9.0, y: 27.0, w: 12.0, d: 4.2, color: 0x1b292a, alpha: 0.44 },
-      { x: 28.8, y: 26.4, w: 9.6, d: 4.0, color: 0x192927, alpha: 0.42 },
+      { x: 1.7, y: 1.8, w: 19.2, d: 7.2, color: 0x29443c, alpha: 0.82 },
+      { x: 2.0, y: 9.0, w: 11.5, d: 14.4, color: 0x263a36, alpha: 0.72 },
+      { x: 12.8, y: 5.3, w: 15.1, d: 19.0, color: 0x24413e, alpha: 0.7 },
+      { x: 27.1, y: 7.0, w: 12.0, d: 20.6, color: 0x2b3d3e, alpha: 0.78 },
+      { x: 8.8, y: 27.0, w: 30.2, d: 5.2, color: 0x3d3937, alpha: 0.76 },
     ];
     districts.forEach((district, index) => {
       const points = [
@@ -435,7 +531,7 @@ export class CampusScene extends Phaser.Scene {
       });
       g.closePath();
       g.fillPath();
-      g.lineStyle(1, index % 2 ? 0x42605b : 0x385653, 0.22);
+      g.lineStyle(2, index % 2 ? 0x53746c : 0x496a64, 0.3);
       g.strokePath();
     });
 
@@ -445,13 +541,118 @@ export class CampusScene extends Phaser.Scene {
       const y = 3.3 + i * 3.55;
       const start = this.toScreen({ x: 2.0, y });
       const end = this.toScreen({ x: MAP_W - 2.0, y: y + 0.18 * Math.sin(i * 1.7) });
-      g.lineStyle(1, 0x34504e, 0.12);
+      g.lineStyle(1, 0x51736e, 0.14);
       g.beginPath();
       g.moveTo(start.x, start.y);
       g.lineTo(end.x, end.y);
       g.strokePath();
     }
     g.setDepth(0);
+  }
+
+  private drawCampusSurfaceDetails() {
+    const g = this.add.graphics();
+    g.setDepth(3);
+
+    const drawIsoArea = (x: number, y: number, w: number, d: number, color: number, alpha: number) => {
+      const points = [
+        this.toScreen({ x, y }),
+        this.toScreen({ x: x + w, y }),
+        this.toScreen({ x: x + w, y: y + d }),
+        this.toScreen({ x, y: y + d }),
+      ];
+      g.fillStyle(color, alpha);
+      g.lineStyle(2, this.shade(color, 34), 0.28);
+      g.beginPath();
+      points.forEach((point, index) => {
+        if (index === 0) g.moveTo(point.x, point.y);
+        else g.lineTo(point.x, point.y);
+      });
+      g.closePath();
+      g.fillPath();
+      g.strokePath();
+    };
+
+    const lawns = [
+      { x: 2.1, y: 2.1, w: 7.4, d: 5.9, color: 0x315348 },
+      { x: 10.3, y: 2.3, w: 9.8, d: 5.2, color: 0x2f5147 },
+      { x: 13.3, y: 8.8, w: 3.4, d: 7.1, color: 0x2b5148 },
+      { x: 22.7, y: 8.8, w: 4.2, d: 6.4, color: 0x2d534a },
+      { x: 14.0, y: 20.7, w: 4.0, d: 2.8, color: 0x31554a },
+      { x: 22.0, y: 20.4, w: 4.8, d: 3.0, color: 0x2d5048 },
+    ];
+    lawns.forEach((lawn, lawnIndex) => {
+      drawIsoArea(lawn.x, lawn.y, lawn.w, lawn.d, lawn.color, 0.8);
+      const columns = Math.max(3, Math.floor(lawn.w * 1.35));
+      const rows = Math.max(2, Math.floor(lawn.d * 1.15));
+      for (let row = 1; row < rows; row += 1) {
+        for (let column = 1; column < columns; column += 1) {
+          if ((row * 7 + column * 11 + lawnIndex) % 4 !== 0) continue;
+          const point = this.toScreen({
+            x: lawn.x + (lawn.w * column) / columns,
+            y: lawn.y + (lawn.d * row) / rows,
+          });
+          g.lineStyle(2, lawnIndex % 2 ? 0x68816a : 0x587861, 0.34);
+          g.beginPath();
+          g.moveTo(point.x - 3, point.y + 2);
+          g.lineTo(point.x, point.y - 5);
+          g.lineTo(point.x + 4, point.y + 1);
+          g.strokePath();
+        }
+      }
+    });
+
+    const pavedZones = [
+      { x: 27.8, y: 8.2, w: 9.1, d: 17.7, color: 0x394b49, spacing: 1.1 },
+      { x: 9.2, y: 27.4, w: 29.1, d: 4.4, color: 0x514642, spacing: 1.35 },
+      { x: 2.3, y: 9.5, w: 9.4, d: 12.8, color: 0x354744, spacing: 1.45 },
+    ];
+    pavedZones.forEach((zone, zoneIndex) => {
+      drawIsoArea(zone.x, zone.y, zone.w, zone.d, zone.color, zoneIndex === 1 ? 0.68 : 0.6);
+      g.lineStyle(1, zoneIndex === 1 ? 0x9b7770 : 0x7d9790, 0.16);
+      for (let x = zone.x + zone.spacing; x < zone.x + zone.w; x += zone.spacing) {
+        const start = this.toScreen({ x, y: zone.y + 0.08 });
+        const end = this.toScreen({ x, y: zone.y + zone.d - 0.08 });
+        g.beginPath();
+        g.moveTo(start.x, start.y);
+        g.lineTo(end.x, end.y);
+        g.strokePath();
+      }
+      for (let y = zone.y + zone.spacing; y < zone.y + zone.d; y += zone.spacing) {
+        const start = this.toScreen({ x: zone.x + 0.08, y });
+        const end = this.toScreen({ x: zone.x + zone.w - 0.08, y });
+        g.beginPath();
+        g.moveTo(start.x, start.y);
+        g.lineTo(end.x, end.y);
+        g.strokePath();
+      }
+    });
+
+    // Building forecourts create a transition from the broad district surface
+    // to each facade. They are visual only and do not create new walkable data.
+    campusBuildings.forEach((building, index) => {
+      if (building.id === "east-track" || building.id === "main-gate") return;
+      const frontY = building.y + building.d + 0.08;
+      const left = this.toScreen({ x: building.x + 0.08, y: frontY });
+      const right = this.toScreen({ x: building.x + building.w - 0.08, y: frontY });
+      const frontLeft = this.toScreen({ x: building.x + 0.18, y: frontY + 0.42 });
+      const frontRight = this.toScreen({ x: building.x + building.w - 0.18, y: frontY + 0.42 });
+      g.fillStyle(building.zone === "living" ? 0x67524a : building.zone === "story" ? 0x5a4c50 : 0x53625d, 0.36);
+      g.beginPath();
+      g.moveTo(left.x, left.y);
+      g.lineTo(right.x, right.y);
+      g.lineTo(frontRight.x, frontRight.y);
+      g.lineTo(frontLeft.x, frontLeft.y);
+      g.closePath();
+      g.fillPath();
+      if (index % 2 === 0) {
+        g.lineStyle(1, 0xa6b4ad, 0.16);
+        g.beginPath();
+        g.moveTo(frontLeft.x, frontLeft.y);
+        g.lineTo(frontRight.x, frontRight.y);
+        g.strokePath();
+      }
+    });
   }
 
   private drawMapLandmarksV2() {
@@ -531,17 +732,35 @@ export class CampusScene extends Phaser.Scene {
       bridgeGraphics.setDepth(16.4);
     }
 
-    // 月牙楼先用可替换的几何地标占位，后续贴图只需替换这个对象，不触碰
-    // 任何剧情或路线数据。
-    const crescent = this.toScreen({ x: 23.1, y: 6.3 });
-    const crescentGraphics = this.add.graphics();
-    crescentGraphics.fillStyle(0x52615d, 0.88);
-    crescentGraphics.fillEllipse(crescent.x, crescent.y - 12, 112, 52);
-    crescentGraphics.fillStyle(0x0b1719, 1);
-    crescentGraphics.fillEllipse(crescent.x + 17, crescent.y - 18, 88, 42);
-    crescentGraphics.lineStyle(3, 0x9aafa3, 0.42);
-    crescentGraphics.strokeEllipse(crescent.x, crescent.y - 12, 112, 52);
-    crescentGraphics.setDepth(crescent.y + 18);
+    // 月牙楼与行政楼是纯导航地标。它们使用 Blender 外观，但不写入
+    // campusBuildings，因此不会新增碰撞、改变道路或影响剧情触发坐标。
+    const drawDecorativeLandmark = (
+      textureKey: string,
+      anchorIso: IsoPoint,
+      displayHeight: number,
+      originY: number,
+      labelText: string,
+    ) => {
+      if (!this.textures.exists(textureKey)) return;
+      const anchor = this.toScreen(anchorIso);
+      const shadow = this.add.ellipse(anchor.x + 6, anchor.y + 5, displayHeight * 1.18, displayHeight * 0.24, 0x010405, 0.30);
+      shadow.setDepth(anchor.y - 1);
+      const sprite = this.add.image(anchor.x, anchor.y + 2, textureKey).setOrigin(0.5, originY);
+      sprite.setDisplaySize(displayHeight * (sprite.width / sprite.height), displayHeight);
+      sprite.setDepth(anchor.y + 1);
+      const label = this.add.text(anchor.x, anchor.y - displayHeight * 0.78, labelText, {
+        fontFamily: "Microsoft YaHei, sans-serif",
+        fontSize: "13px",
+        color: "#c7d7cf",
+        backgroundColor: "rgba(0, 3, 3, 0.72)",
+        padding: { x: 7, y: 3 },
+      }).setOrigin(0.5);
+      label.setAlpha(0.46);
+      label.setDepth(anchor.y + 2);
+    };
+
+    drawDecorativeLandmark(LANDMARK_SPRITE_KEYS.crescent, { x: 23.1, y: 7.45 }, 176, 0.9577, "月牙楼");
+    drawDecorativeLandmark(LANDMARK_SPRITE_KEYS.admin, { x: 38.2, y: 18.9 }, 196, 0.9505, "行政楼");
   }
 
   private drawDiamond(graphics: Phaser.GameObjects.Graphics, x: number, y: number, color: number, alpha = 1) {
@@ -639,10 +858,10 @@ export class CampusScene extends Phaser.Scene {
       const g = this.add.graphics();
       const points = water.points.map((p) => this.toScreen(p));
       const isQizhenLake = water.id === "qizhen-lake";
-      const waterFill = isQizhenLake ? 0x143a4a : water.color;
-      const waterStroke = isQizhenLake ? 0x1e5a6a : 0x1d5660;
-      g.fillStyle(this.shade(waterFill, -28), 0.94);
-      g.lineStyle(4, waterStroke, isQizhenLake ? 0.56 : 0.42);
+      const waterFill = isQizhenLake ? 0x174b5e : water.color;
+      const waterStroke = isQizhenLake ? 0x3a7b85 : 0x2a6770;
+      g.fillStyle(this.shade(waterFill, -16), 0.96);
+      g.lineStyle(isQizhenLake ? 12 : 7, 0x31584f, isQizhenLake ? 0.62 : 0.42);
       g.beginPath();
       points.forEach((p, index) => {
         if (index === 0) g.moveTo(p.x, p.y);
@@ -650,6 +869,8 @@ export class CampusScene extends Phaser.Scene {
       });
       g.closePath();
       g.fillPath();
+      g.strokePath();
+      g.lineStyle(3, waterStroke, isQizhenLake ? 0.74 : 0.52);
       g.strokePath();
       g.setDepth(12);
 
@@ -798,8 +1019,8 @@ export class CampusScene extends Phaser.Scene {
       const ne = this.toScreen({ x: plaza.x + plaza.w, y: plaza.y });
       const se = this.toScreen({ x: plaza.x + plaza.w, y: plaza.y + plaza.d });
       const sw = this.toScreen({ x: plaza.x, y: plaza.y + plaza.d });
-      g.fillStyle(this.shade(plaza.color, -38), 0.84);
-      g.lineStyle(2, 0x9fb8ad, 0.1);
+      g.fillStyle(0x2b403b, 0.9);
+      g.lineStyle(2, 0x9fb8ad, 0.22);
       g.beginPath();
       g.moveTo(nw.x, nw.y);
       g.lineTo(ne.x, ne.y);
@@ -808,6 +1029,20 @@ export class CampusScene extends Phaser.Scene {
       g.closePath();
       g.fillPath();
       g.strokePath();
+      g.lineStyle(1, 0x8eaaa0, 0.14);
+      for (let index = 1; index < 4; index += 1) {
+        const t = index / 4;
+        g.beginPath();
+        g.moveTo(
+          Phaser.Math.Linear(nw.x, ne.x, t),
+          Phaser.Math.Linear(nw.y, ne.y, t),
+        );
+        g.lineTo(
+          Phaser.Math.Linear(sw.x, se.x, t),
+          Phaser.Math.Linear(sw.y, se.y, t),
+        );
+        g.strokePath();
+      }
       g.setDepth(14);
 
       const center = this.toScreen({ x: plaza.x + plaza.w / 2, y: plaza.y + plaza.d / 2 });
@@ -818,7 +1053,7 @@ export class CampusScene extends Phaser.Scene {
   private drawRoads() {
     campusRoads.forEach((road) => {
       const kind = road.kind ?? (road.id === "south-main-axis" ? "main" : "branch");
-      const widthScale = (road.width ?? (kind === "main" ? 1.1 : kind === "ring" ? 0.96 : 0.72)) * 1.22;
+      const widthScale = road.width ?? (kind === "main" ? 1.1 : kind === "ring" ? 0.96 : 0.72);
       const isMainAxis = kind === "main";
       const isWetLoop = kind === "ring";
       const points = road.points.map((p) => this.toScreen(p));
@@ -831,48 +1066,137 @@ export class CampusScene extends Phaser.Scene {
         graphics.strokePath();
       };
       const shadow = this.add.graphics();
-      shadow.lineStyle(Math.round(13 * widthScale), 0x010303, isMainAxis ? 0.54 : 0.42);
-      stroke(shadow, 4);
+      shadow.lineStyle(Math.max(28, Math.round(44 * widthScale)), 0x010303, isMainAxis ? 0.5 : 0.4);
+      stroke(shadow, 6);
       shadow.setDepth(15);
 
-      const dampEdge = this.add.graphics();
-      dampEdge.lineStyle(Math.round(8 * widthScale), isMainAxis ? 0x3d2024 : isWetLoop ? 0x173634 : 0x101a18, 0.88);
-      stroke(dampEdge);
-      dampEdge.setDepth(15.5);
+      const sidewalk = this.add.graphics();
+      sidewalk.lineStyle(
+        Math.max(24, Math.round(36 * widthScale)),
+        isMainAxis ? 0x6d5d57 : isWetLoop ? 0x526b63 : 0x4c5f59,
+        0.96,
+      );
+      stroke(sidewalk);
+      sidewalk.setDepth(15.2);
+
+      const curb = this.add.graphics();
+      curb.lineStyle(
+        Math.max(18, Math.round(27 * widthScale)),
+        isMainAxis ? 0x9a8177 : isWetLoop ? 0x82968c : 0x788a83,
+        0.72,
+      );
+      stroke(curb);
+      curb.setDepth(15.45);
 
       const g = this.add.graphics();
-      g.lineStyle(Math.max(3, Math.round(5 * widthScale)), isMainAxis ? 0x56383a : this.shade(road.color, isWetLoop ? -38 : -58), 0.95);
+      g.lineStyle(
+        Math.max(13, Math.round(20 * widthScale)),
+        isMainAxis ? 0x493838 : isWetLoop ? 0x243f3c : this.shade(road.color, -16),
+        0.98,
+      );
       stroke(g);
       g.setDepth(16);
 
-      const stripe = this.add.graphics();
-      stripe.lineStyle(1, isMainAxis ? 0xd17a6d : isWetLoop ? 0xb5d8d2 : 0x9cb2aa, isMainAxis ? 0.24 : 0.18);
-      stroke(stripe);
-      stripe.setDepth(17);
+      // A broad, translucent wet reflection reads as material variation rather
+      // than a painted lane line; campus roads should not look like highways.
+      const wetReflection = this.add.graphics();
+      wetReflection.lineStyle(
+        Math.max(4, Math.round(6 * widthScale)),
+        isMainAxis ? 0xb26159 : isWetLoop ? 0x4b8b85 : 0x78928b,
+        isMainAxis ? 0.14 : 0.1,
+      );
+      stroke(wetReflection, -1);
+      wetReflection.setDepth(16.4);
+    });
 
-      const grit = this.add.graphics();
-      grit.setDepth(17.2);
-      for (let i = 0; i < points.length - 1; i += 1) {
-        const a = points[i];
-        const b = points[i + 1];
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-        const len = Math.hypot(dx, dy);
-        const count = Math.max(1, Math.floor(len / (isMainAxis ? 62 : 78)));
-        for (let j = 1; j <= count; j += 1) {
-          const t = (j - 0.35 + ((i + j) % 4) * 0.16) / (count + 0.2);
-          const x = a.x + dx * t + Math.sin(i * 8.1 + j * 2.7) * 5;
-          const y = a.y + dy * t + Math.cos(i * 4.6 + j * 3.2) * 2;
-          const w = (isMainAxis ? 14 : 9) * widthScale;
-          grit.fillStyle(isWetLoop ? 0x153332 : 0x050807, isWetLoop ? 0.18 : 0.14);
-          grit.fillEllipse(x, y + 1, w, Math.max(2, w * 0.22));
-          if ((i + j) % 3 === 0) {
-            grit.lineStyle(1, isWetLoop ? 0xa8cfc8 : 0x87978e, isWetLoop ? 0.13 : 0.08);
-            grit.beginPath();
-            grit.moveTo(x - w * 0.35, y);
-            grit.lineTo(x + w * 0.35, y + 1);
-            grit.strokePath();
+    // 路口节点和桥头用统一的小标记强调，位置直接来自 campusRoads，便于
+    // 玩家辨认路线，也方便后续把这层替换为美术绘制的道路贴图。
+    const junctions = new Map<string, { point: IsoPoint; count: number }>();
+    campusRoads.forEach((road) => {
+      road.points.forEach((point) => {
+        const key = `${point.x.toFixed(2)},${point.y.toFixed(2)}`;
+        const junction = junctions.get(key);
+        junctions.set(key, { point, count: (junction?.count ?? 0) + 1 });
+      });
+    });
+    const nodes = this.add.graphics();
+    junctions.forEach(({ point, count }) => {
+      if (count < 2) return;
+      const p = this.toScreen(point);
+      nodes.fillStyle(0x83978f, 0.86);
+      nodes.fillCircle(p.x, p.y, 18);
+      nodes.fillStyle(0x304540, 0.98);
+      nodes.fillCircle(p.x, p.y, 11);
+      nodes.lineStyle(2, 0xa4b3ac, 0.26);
+      nodes.strokeCircle(p.x, p.y, 15);
+    });
+    nodes.setDepth(17.35);
+  }
+
+  private drawRoadsideFurniture() {
+    const furnitureRoads = campusRoads.filter((road) => {
+      const kind = road.kind ?? "branch";
+      return kind === "main" || kind === "ring" || road.id === "west-medical-road";
+    });
+    let itemIndex = 0;
+
+    const isClear = (point: IsoPoint) => {
+      if (point.x < 2 || point.y < 2 || point.x > MAP_W - 2.2 || point.y > MAP_D - 2.2) return false;
+      if (campusWaters.some((water) => this.pointInPolygon(point, water.points))) return false;
+      return !campusBuildings.some((building) =>
+        point.x > building.x - 0.45 &&
+        point.x < building.x + building.w + 0.45 &&
+        point.y > building.y - 0.45 &&
+        point.y < building.y + building.d + 0.45
+      );
+    };
+
+    furnitureRoads.forEach((road, roadIndex) => {
+      const kind = road.kind ?? "branch";
+      for (let segmentIndex = 1; segmentIndex < road.points.length; segmentIndex += 1) {
+        const start = road.points[segmentIndex - 1];
+        const end = road.points[segmentIndex];
+        const dx = end.x - start.x;
+        const dy = end.y - start.y;
+        const length = Math.hypot(dx, dy);
+        if (length < 1.8) continue;
+        const nx = -dy / length;
+        const ny = dx / length;
+        const spacing = kind === "main" ? 3.2 : 3.8;
+        const steps = Math.floor(length / spacing);
+        for (let step = 1; step <= steps; step += 1) {
+          const t = step / (steps + 1);
+          const side = (step + segmentIndex + roadIndex) % 2 === 0 ? 1 : -1;
+          const offset = kind === "main" ? 0.74 : 0.64;
+          const point = {
+            x: start.x + dx * t + nx * offset * side,
+            y: start.y + dy * t + ny * offset * side,
+          };
+          if (!isClear(point)) continue;
+          const screen = this.toScreen(point);
+          const pit = this.add.ellipse(screen.x, screen.y + 5, 36, 13, 0x182722, 0.9);
+          pit.setDepth(17.5);
+
+          if (itemIndex % 3 !== 1) {
+            const shadow = this.add.ellipse(screen.x + 10, screen.y + 8, 50, 14, 0x010303, 0.3);
+            shadow.setAngle(9);
+            shadow.setDepth(screen.y - 2);
+            const trunk = this.add.rectangle(screen.x, screen.y - 7, 6, 28, 0x33251c, 0.96);
+            trunk.setDepth(screen.y + 1);
+            const crownColor = itemIndex % 4 === 0 ? 0x244536 : 0x1d3b31;
+            const crown = this.add.circle(screen.x, screen.y - 30, 17 + (itemIndex % 3) * 2, crownColor, 0.98);
+            crown.setStrokeStyle(2, 0x53715e, 0.32);
+            crown.setDepth(screen.y + 2);
+          } else {
+            const pole = this.add.rectangle(screen.x, screen.y - 15, 4, 40, 0x26322f, 0.98);
+            pole.setDepth(screen.y + 1);
+            const bulb = this.add.circle(screen.x, screen.y - 38, 5, itemIndex % 2 ? 0xdab77a : 0xa6d2ca, 0.92);
+            bulb.setDepth(screen.y + 2);
+            const pool = this.add.ellipse(screen.x + 4, screen.y + 5, 72, 21, itemIndex % 2 ? 0xd08e52 : 0x70b5af, 0.07);
+            pool.setBlendMode(Phaser.BlendModes.ADD);
+            pool.setDepth(17.4);
           }
+          itemIndex += 1;
         }
       }
     });
@@ -1123,19 +1447,40 @@ export class CampusScene extends Phaser.Scene {
       }
 
       const theme = buildingThemes[building.id];
+      const visualOffset = EXTERIOR_SPRITE_ISO_OFFSETS[building.id] ?? { x: 0, y: 0 };
       const center = this.toScreen({
-        x: building.x + building.w / 2,
-        y: building.y + building.d / 2,
+        x: building.x + building.w / 2 + visualOffset.x,
+        y: building.y + building.d / 2 + visualOffset.y,
       });
-      const depth = center.y + building.h * 26 + 1;
+      // Sort by the south/front edge of the footprint. Including building
+      // height here made tall buildings behind the player cover objects that
+      // were actually closer to the camera.
+      const frontEdge = this.toScreen({
+        x: building.x + building.w / 2 + visualOffset.x,
+        y: building.y + building.d + visualOffset.y,
+      });
+      const depth = frontEdge.y;
       const spriteKey = EXTERIOR_SPRITE_KEYS[building.id];
       if (spriteKey && this.textures.exists(spriteKey)) {
         this.drawBuildingSprite(building, center, depth, spriteKey);
       } else {
+        // Baisha and Lantian overlap slightly in the legacy logical footprint.
+        // Keep Lantian's gameplay rectangle intact, but retract only its visible
+        // south wing so the new Baisha facade is not drawn over old geometry.
+        const visualBuilding = building.id === "dorm-lantian"
+          ? {
+              ...building,
+              d: 1.25,
+              massing: [
+                { dx: 0.1, dy: 0, w: 1.6, d: 1.2, h: 2.2, bodyShade: 2 },
+                { dx: 4.35, dy: 0, w: 1.35, d: 1.2, h: 2.4, bodyShade: 8, roofShade: 6 },
+              ],
+            }
+          : building;
         const g = this.add.graphics();
-        this.drawIsoPrism(g, building);
-        g.setDepth(center.y + building.h * 26);
-        this.drawBuildingGeometryV2(building, center, depth);
+        this.drawIsoPrism(g, visualBuilding);
+        g.setDepth(depth);
+        this.drawBuildingGeometryV2(visualBuilding, center, depth);
         if (building.id === "admin-center") {
           this.drawAdminEyeRoof(building, depth);
         }
@@ -1150,7 +1495,7 @@ export class CampusScene extends Phaser.Scene {
           padding: { x: 7, y: 3 },
         })
         .setOrigin(0.5);
-      label.setDepth(center.y + building.h * 26 + 2);
+      label.setDepth(depth + 3);
       label.setAlpha(0.34);
       label.setData("baseText", theme?.label ?? building.name);
       this.buildingLabels.set(building.id, label);
@@ -1165,7 +1510,7 @@ export class CampusScene extends Phaser.Scene {
         });
       }
 
-      this.drawBuildingAtmosphere(building, center, center.y + building.h * 26 + 1);
+      this.drawBuildingAtmosphere(building, center, depth + 1);
 
       // ── 为目标建筑预创建红色脉冲光晕（初始不可见） ──
       const storyBuildingIds = new Set(Object.values(hotspotBuildingMap).flat());
@@ -1178,7 +1523,7 @@ export class CampusScene extends Phaser.Scene {
           0xd04438,
           0,
         );
-        glow.setDepth(center.y + building.h * 26 + 0.5);
+        glow.setDepth(depth + 0.5);
         glow.setBlendMode(Phaser.BlendModes.ADD);
         const tween = this.tweens.add({
           targets: glow,
@@ -1205,34 +1550,68 @@ export class CampusScene extends Phaser.Scene {
     // The image is anchored on the south/front edge, the same edge used by
     // drawIsoPrism for the building entrance.  `center` is still used for
     // depth sorting and the atmospheric overlays below.
-    const anchor = this.toScreen({ x: building.x + building.w * 0.5, y: building.y + building.d });
-    const origin = EXTERIOR_SPRITE_ORIGINS[building.id] ?? { x: 0.5, y: 1 };
+    const visualOffset = EXTERIOR_SPRITE_ISO_OFFSETS[building.id] ?? { x: 0, y: 0 };
+    const anchor = this.toScreen({
+      x: building.x + building.w * 0.5 + visualOffset.x,
+      y: building.y + building.d + visualOffset.y,
+    });
+    const metrics = EXTERIOR_SPRITE_METRICS[building.id] ?? {
+      x: 0.5,
+      y: 1,
+      visibleW: 1,
+      visibleH: 1,
+    };
 
     // A low isometric contact shadow hides the seam between the rendered
     // facade and the procedural ground. It is visual only: collision and all
     // story/entry coordinates still come from mapData.
-    const nw = this.toScreen({ x: building.x, y: building.y });
-    const ne = this.toScreen({ x: building.x + building.w, y: building.y });
-    const se = this.toScreen({ x: building.x + building.w, y: building.y + building.d });
-    const sw = this.toScreen({ x: building.x, y: building.y + building.d });
+    const nw = this.toScreen({ x: building.x + visualOffset.x, y: building.y + visualOffset.y });
+    const ne = this.toScreen({ x: building.x + building.w + visualOffset.x, y: building.y + visualOffset.y });
+    const se = this.toScreen({ x: building.x + building.w + visualOffset.x, y: building.y + building.d + visualOffset.y });
+    const sw = this.toScreen({ x: building.x + visualOffset.x, y: building.y + building.d + visualOffset.y });
+    const castShadow = this.add.ellipse(
+      anchor.x + 18,
+      anchor.y + 9,
+      Math.max(78, (building.w + building.d) * 43),
+      Math.max(20, building.d * 17),
+      0x010304,
+      0.28,
+    );
+    castShadow.setAngle(8);
+    castShadow.setDepth(anchor.y - 2);
     const contactShadow = this.add.graphics();
-    contactShadow.fillStyle(0x010405, 0.3);
+    contactShadow.fillStyle(0x010405, 0.34);
     contactShadow.beginPath();
-    contactShadow.moveTo(nw.x, nw.y + 3);
-    contactShadow.lineTo(ne.x, ne.y + 3);
-    contactShadow.lineTo(se.x, se.y + 5);
-    contactShadow.lineTo(sw.x, sw.y + 5);
+    contactShadow.moveTo(nw.x + 14, nw.y + 7);
+    contactShadow.lineTo(ne.x + 14, ne.y + 7);
+    contactShadow.lineTo(se.x + 18, se.y + 9);
+    contactShadow.lineTo(sw.x + 18, sw.y + 9);
     contactShadow.closePath();
     contactShadow.fillPath();
     contactShadow.setDepth(anchor.y - 1);
 
-    const sprite = this.add.image(anchor.x, anchor.y + 3, textureKey).setOrigin(origin.x, origin.y);
+    const sprite = this.add.image(anchor.x, anchor.y + 3, textureKey).setOrigin(metrics.x, metrics.y);
     const footprintScreenWidth = (building.w + building.d) * (TILE_W / 2) + 18;
     const expectedScreenHeight = building.h * 28 + (building.w + building.d) * (TILE_H / 2) + 18;
-    const aspect = sprite.width > 0 && sprite.height > 0 ? sprite.width / sprite.height : 1;
-    const width = Math.max(footprintScreenWidth, expectedScreenHeight * aspect);
-    sprite.setDisplaySize(width, expectedScreenHeight);
+    const visualScale = EXTERIOR_SPRITE_SCALES[building.id] ?? 1;
+    const visibleSourceWidth = Math.max(1, sprite.width * metrics.visibleW);
+    const visibleSourceHeight = Math.max(1, sprite.height * metrics.visibleH);
+    const heightFit = (expectedScreenHeight * 0.92) / visibleSourceHeight;
+    const widthFit = (footprintScreenWidth * 0.92) / visibleSourceWidth;
+    const maximumWidthFit = (footprintScreenWidth * 1.35) / visibleSourceWidth;
+    const sourceScale = Math.min(Math.max(heightFit, widthFit), maximumWidthFit) * visualScale;
+    sprite.setDisplaySize(sprite.width * sourceScale, sprite.height * sourceScale);
     sprite.setDepth(depth + 1);
+    const gradeProfile = EXTERIOR_SPRITE_GRADES[building.id];
+    const colorMatrix = gradeProfile ? sprite.postFX?.addColorMatrix() : undefined;
+    if (gradeProfile && colorMatrix) {
+      colorMatrix.saturate(gradeProfile.saturation);
+      colorMatrix.brightness(gradeProfile.brightness, true);
+      colorMatrix.contrast(gradeProfile.contrast ?? 0.04, true);
+      colorMatrix.hue(gradeProfile.hue ?? 0, true);
+    } else {
+      sprite.setTint(0xd1ddd8);
+    }
     sprite.setData("buildingId", building.id);
     this.exteriorBuildingSprites.set(building.id, sprite);
   }
@@ -2370,7 +2749,7 @@ export class CampusScene extends Phaser.Scene {
     this.statusLabel = "路线重复";
     this.cameras.main.fadeOut(220, 3, 8, 7);
     this.time.delayedCall(180, () => {
-      this.playerIso = this.snapToRoad({ x: 4.0, y: 27.0 });
+      this.playerIso = this.snapToRoad({ x: ROAD.xWest, y: 27.0 });
       const p = this.toScreen(this.playerIso);
       this.player.setPosition(p.x, p.y);
       this.cameras.main.fadeIn(260, 3, 8, 7);
@@ -2445,7 +2824,7 @@ export class CampusScene extends Phaser.Scene {
     const screen = { x: screenX / screenLength, y: screenY / screenLength };
     const iso = this.normalize({
       x: screen.x / TILE_W + screen.y / TILE_H,
-      y: screen.y / TILE_H - screen.x / TILE_W,
+      y: (screen.y / TILE_H - screen.x / TILE_W) / MAP_Y_AXIS_STRETCH,
     });
 
     return { screen, iso };
@@ -2501,19 +2880,20 @@ export class CampusScene extends Phaser.Scene {
 
   /**
    * 三岔路先分上下，再分左右。
-   * 例如: 下方1条上方2条 → 按下默认往下，按左往左上，按右往右上。
-   * 返回每个方向应得的加成分数（在原 dot 分数之上）。
+   * 加分必须小于摇杆点积范围（[-1, 1]），否则斜交处会被拧到非意图分支。
    */
   private junctionBonuses(
     input: IsoPoint,
     dirs: { direction: IsoPoint; screenDirection: IsoPoint }[],
   ): number[] {
+    const bonuses = dirs.map(() => 0);
+    if (dirs.length < 3) return bonuses;
+
     const isDown = input.y > 0.35;
     const isUp = input.y < -0.35;
     const isLeft = input.x < -0.35;
     const isRight = input.x > 0.35;
 
-    // 将方向按屏幕 y 分为上下两组
     const upIdx: number[] = [];
     const downIdx: number[] = [];
     const midIdx: number[] = [];
@@ -2524,7 +2904,10 @@ export class CampusScene extends Phaser.Scene {
       else midIdx.push(i);
     });
 
-    const bonuses = dirs.map(() => 0);
+    const uniquePick = 0.42;
+    const groupPick = 0.28;
+    const fallbackPick = 0.16;
+
     const chooseByHorizontal = (indices: number[], verticalSign: -1 | 1 | 0) => {
       const sorted = [...indices].sort((a, b) => dirs[a].screenDirection.x - dirs[b].screenDirection.x);
       if (isLeft) return sorted[0];
@@ -2539,43 +2922,32 @@ export class CampusScene extends Phaser.Scene {
       })[0];
     };
 
-    // 下键: 优先选下方组
     if (isDown && downIdx.length > 0) {
-      if (downIdx.length === 1) {
-        bonuses[downIdx[0]] = 100; // 唯一下方 → 必定选中
-      } else {
-        bonuses[chooseByHorizontal(downIdx, 1)] = 75;
-      }
+      bonuses[downIdx.length === 1 ? downIdx[0] : chooseByHorizontal(downIdx, 1)] =
+        downIdx.length === 1 ? uniquePick : groupPick;
       return bonuses;
     }
 
-    // 上键: 优先选上方组
     if (isUp && upIdx.length > 0) {
-      if (upIdx.length === 1) {
-        bonuses[upIdx[0]] = 100;
-      } else {
-        bonuses[chooseByHorizontal(upIdx, -1)] = 75;
-      }
+      bonuses[upIdx.length === 1 ? upIdx[0] : chooseByHorizontal(upIdx, -1)] =
+        upIdx.length === 1 ? uniquePick : groupPick;
       return bonuses;
     }
 
-    // 没有明确的上下分组时 (如纯水平方向): 按左右匹配
     if ((isLeft || isRight) && midIdx.length > 0) {
-      bonuses[chooseByHorizontal(midIdx, 0)] = 60;
+      bonuses[chooseByHorizontal(midIdx, 0)] = groupPick;
       return bonuses;
     }
 
-    // 下键但无下方分枝: 在所有方向中选最下方的
     if (isDown) {
       const sorted = [...dirs.keys()].sort((a, b) => dirs[b].screenDirection.y - dirs[a].screenDirection.y);
-      bonuses[sorted[0]] = 50;
+      bonuses[sorted[0]] = fallbackPick;
       return bonuses;
     }
 
-    // 上键但无上方分枝: 选最上方的
     if (isUp) {
       const sorted = [...dirs.keys()].sort((a, b) => dirs[a].screenDirection.y - dirs[b].screenDirection.y);
-      bonuses[sorted[0]] = 50;
+      bonuses[sorted[0]] = fallbackPick;
       return bonuses;
     }
 
@@ -2673,9 +3045,10 @@ export class CampusScene extends Phaser.Scene {
   }
 
   private toScreenDelta(point: IsoPoint) {
+    const visualY = point.y * MAP_Y_AXIS_STRETCH;
     return {
-      x: (point.x - point.y) * (TILE_W / 2),
-      y: (point.x + point.y) * (TILE_H / 2),
+      x: (point.x - visualY) * (TILE_W / 2),
+      y: (point.x + visualY) * (TILE_H / 2),
     };
   }
 
@@ -3014,7 +3387,7 @@ export class CampusScene extends Phaser.Scene {
     if (
       !this.ghost.route.length ||
       time - this.ghost.lastRouteAt >= GHOST_ROUTE_REFRESH_INTERVAL ||
-      targetShift >= 0.18 ||
+      targetShift >= GHOST_ROUTE_RETARGET ||
       this.ghost.routeIndex >= this.ghost.route.length
     ) {
       // MapGraph uses Dijkstra over the complete campus-road graph, so this is
@@ -3118,23 +3491,45 @@ export class CampusScene extends Phaser.Scene {
     this.activeHotspot = inRange ? hotspot : undefined;
 
     if (inRange) {
-      this.emitHud(hotspot.place, `已抵达：${hotspot.title}`, hotspot.id);
+      const verb = hotspot.mode === "indoor-3d" ? "进入" : "调查";
+      this.emitHud(hotspot.place, `按 E · ${verb}${hotspot.title}`, hotspot.id);
     } else {
       this.emitHud(this.findNearbyPlace(), "");
     }
     this.updateHotspotMarkerStates();
+    this.updateEnterableProximityFallback();
+    if (!inRange && this.nearBuildingId) {
+      const building = campusBuildings.find((item) => item.id === this.nearBuildingId);
+      if (building) this.emitHud(building.name, `按 E · 进入${building.name}`);
+    }
 
-    if (!inRange) return;
+    if (this.keys && Phaser.Input.Keyboard.JustDown(this.keys.e)) {
+      this.confirmCurrentInteraction(time);
+    }
+  }
 
-    if (time - this.lastInteract > 800) {
-      this.lastInteract = time;
+  private handleConfirmInteract = () => {
+    if (!this.sceneReady) return;
+    this.confirmCurrentInteraction(this.time.now);
+  };
+
+  private confirmCurrentInteraction(time: number) {
+    if (this.frozen || this.storyOpen || this.dead) return;
+    if (time - this.lastInteract < 400) return;
+    this.lastInteract = time;
+
+    const hotspot = this.activeHotspot;
+    if (hotspot) {
       this.visitedHotspots.add(hotspot.id);
       this.updateHotspotMarkerStates();
       this.dispatchStoryInteraction(resolveStoryHotspotInteraction(hotspot.id, [...this.completedHotspots]));
+      return;
     }
 
-    // 同时检测可进入建筑（用于非剧情目标的探索 / E 键兜底）
-    this.updateEnterableProximityFallback();
+    if (this.nearBuildingId) {
+      const building = campusBuildings.find((item) => item.id === this.nearBuildingId);
+      if (building) useGameStore.getState().openInterior({ id: building.id, name: building.name, zone: building.zone });
+    }
   }
 
   /** 进入 3D 内景以推进故事。黑屏转场 → 进入建筑 → 内景红点引导剧情。 */
@@ -3199,10 +3594,6 @@ export class CampusScene extends Phaser.Scene {
       useGameStore.getState().setNearBuilding(near ? { id: near.id, name: near.name, zone: near.zone } : null);
     }
 
-    // E 键进入：仅对当前剧情热点对应的建筑生效（与按钮一致）
-    if (near && this.keys && Phaser.Input.Keyboard.JustDown(this.keys.e)) {
-      useGameStore.getState().openInterior({ id: near.id, name: near.name, zone: near.zone });
-    }
   }
 
   private updateGuideLine(time: number) {

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>浙大夜惊魂 · 地图全貌审核</title>
+    <style>
+      html, body, #preview { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #07100f; }
+      .hint { position: fixed; z-index: 10; left: 18px; top: 16px; padding: 10px 14px; color: #d9e5df;
+        background: rgba(4, 10, 10, .82); border: 1px solid rgba(157, 188, 174, .28);
+        font: 13px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; pointer-events: none; }
+      .hint strong { color: #e2bc78; font-weight: 600; }
+    </style>
+  </head>
+  <body>
+    <div class="hint"><strong>功能分支 · 地图全貌审核</strong><br>滚轮缩放 · 按住拖动画面</div>
+    <div id="preview"></div>
+    <script type="module" src="/src/full-map-preview.ts"></script>
+  </body>
+</html>
