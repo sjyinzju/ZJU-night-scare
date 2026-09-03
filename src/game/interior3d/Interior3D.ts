@@ -359,8 +359,6 @@ export class Interior3D {
   private lightningFlashUntil = 0;
   private lastPursuitZ = 0;
   private pursuitDistance = 7.2;
-  private nextPursuitWhisperAt = 0;
-  private pursuitHitCooldownUntil = 0;
   private readonly baishaTubes: BaishaTubeRuntime[] = [];
   private readonly baishaLightPool: THREE.PointLight[] = [];
   private baishaTubeGeometry?: THREE.BoxGeometry;
@@ -5936,32 +5934,6 @@ export class Interior3D {
     );
     this.libraryPursuitLight.intensity = 1.4 + (7.2 - this.pursuitDistance) * 1.25;
 
-    if (t >= this.nextPursuitWhisperAt) {
-      this.nextPursuitWhisperAt = t + 5.4 + Math.random() * 2.6;
-      JumpscarePipeline.trigger({
-        context: "ghost_close",
-        intensity: 0.42,
-        duration: 780,
-        sanityCost: 0,
-      });
-    }
-
-    if (this.pursuitDistance <= 1.35 && t >= this.pursuitHitCooldownUntil) {
-      this.pursuitHitCooldownUntil = t + 9.5;
-      this.pursuitDistance = 5.8;
-      const pushed = this.findNearestAssetClearPoint(new THREE.Vector3(
-        this.camera.position.x,
-        this.camera.position.y,
-        Math.max(this.bounds.minZ + 0.8, this.camera.position.z - 2.4),
-      ));
-      this.camera.position.set(pushed.x, this.room.floorHeightAt(pushed.x, pushed.z) + this.crouchState.eyeHeight, pushed.z);
-      window.dispatchEvent(new CustomEvent("zju-horror-ghost-hit", {
-        detail: {
-          type: "sanity",
-          amount: -9,
-        },
-      }));
-    }
   }
 
   private scheduleBloodFlash(t: number): void {

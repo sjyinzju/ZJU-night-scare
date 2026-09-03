@@ -22,8 +22,16 @@ import { storyHotspots, storyScenes, getSceneHotspot, type HorrorEffect, type Ho
 import { audioManager } from "./audio/audioManager";
 import { useGameStore, getStore } from "./store";
 import { campusRoadGraph, type RoadProjection } from "./mapGraph";
+import {
+  advanceRoadDirectionAtJunction,
+  guideDirectionAtDecisionPoint,
+  roadDirectionToScreen,
+  screenInputToIsoDirection,
+  selectRoadDirection,
+} from "./roadMovement";
 import { HORROR_POST_FX_KEY, HorrorPostFxPipeline } from "./visualFxPipeline";
 import { assetUrl } from "./assetPath";
+import { shouldAutoTriggerExteriorHotspot } from "./exteriorInteraction";
 import {
   resolveStoryBuildingEntry,
   resolveStoryHotspotInteraction,
@@ -39,6 +47,11 @@ import {
 const TILE_W = 112;
 const TILE_H = 50;
 const MAP_Y_AXIS_STRETCH = 1.18;
+const ROAD_PROJECTION = {
+  tileWidth: TILE_W,
+  tileHeight: TILE_H,
+  yStretch: MAP_Y_AXIS_STRETCH,
+} as const;
 const ORIGIN_X = 980;
 const ORIGIN_Y = 120;
 const MAP_W = 42;
@@ -297,11 +310,11 @@ export class CampusScene extends Phaser.Scene {
   private ghostWallCooldown = 0;
   private lastFacing = { x: 1, y: 0 };
   private lockedMoveDir: IsoPoint | null = null;
-  private lockedScreenDir: IsoPoint | null = null;
   private activeHotspot?: StoryHotspot;
   private completedHotspots = new Set<HotspotId>();
   private visitedHotspots = new Set<HotspotId>();
   private guideHotspotId: HotspotId = "library";
+  private guideRoute: IsoPoint[] = [];
   private lastInteract = 0;
   private lastHudSignature = "";
   private guideLine!: Phaser.GameObjects.Graphics;
@@ -447,13 +460,15 @@ export class CampusScene extends Phaser.Scene {
     this.syncInputLocksWithStore();
     const dt = Math.min(delta / 1000, 0.05);
     this.movePlayer(dt);
+    // Entry must win the frame over ghost collision once the player reaches
+    // the doorway-sized automatic trigger.
+    this.updateSceneProximity(time);
     this.updateGhost(time, dt);
     this.updateDepth();
     this.updatePlayerLight(time);
     this.updateAtmosphere(time);
     this.updateVisualPipelines(time);
     this.updateTilemapLayer(time);
-    this.updateSceneProximity(time);
     this.updateGuideLine(time);
     this.updateFog(time);
     this.emitMiniMap(time);
@@ -2822,10 +2837,7 @@ export class CampusScene extends Phaser.Scene {
 
     const screenLength = Math.hypot(screenX, screenY);
     const screen = { x: screenX / screenLength, y: screenY / screenLength };
-    const iso = this.normalize({
-      x: screen.x / TILE_W + screen.y / TILE_H,
-      y: (screen.y / TILE_H - screen.x / TILE_W) / MAP_Y_AXIS_STRETCH,
-    });
+    const iso = screenInputToIsoDirection(screen, ROAD_PROJECTION);
 
     return { screen, iso };
   }
@@ -2835,138 +2847,49 @@ export class CampusScene extends Phaser.Scene {
     const onRoad = nearest !== null && nearest.distance <= ROAD_SNAP_RADIUS;
 
     if (onRoad && nearest) {
-      const options = this.availableDirections(this.playerIso, nearest);
-
-      let best = options[0];
-      // ── 三岔路智能匹配：先分上下，再分左右 ──
-      const bonuses = this.junctionBonuses(input.screen, options);
-      let bestScore = Number.NEGATIVE_INFINITY;
-      const hysteresisThreshold = bonuses.some((bonus) => bonus > 0) ? 0.08 : 0.35;
-
-      for (let i = 0; i < options.length; i++) {
-        const opt = options[i];
-        let score = this.dot(input.screen, opt.screenDirection) + bonuses[i];
-        if (
-          this.lockedMoveDir &&
-          Math.abs(opt.direction.x - this.lockedMoveDir.x) < 0.005 &&
-          Math.abs(opt.direction.y - this.lockedMoveDir.y) < 0.005
-        ) {
-          score += hysteresisThreshold;
-        }
-        if (score > bestScore) {
-          best = opt;
-          bestScore = score;
-        }
-      }
+      const decisionPoint = campusRoadGraph.nearestDecisionPointOnProjection(
+        this.playerIso,
+        nearest,
+        JUNCTION_RADIUS,
+      );
+      const directions = decisionPoint?.directions ?? campusRoadGraph.directionsAlongProjection(nearest);
+      const options = directions.map((direction) => ({
+        direction,
+        screenDirection: roadDirectionToScreen(direction, ROAD_PROJECTION),
+      }));
+      const guidedDirection = decisionPoint
+        ? guideDirectionAtDecisionPoint(this.guideRoute, decisionPoint.point, directions)
+        : null;
+      const best = selectRoadDirection(
+        input.screen,
+        options,
+        this.lockedMoveDir,
+        guidedDirection,
+      );
+      if (!best) return null;
 
       this.lockedMoveDir = best.direction;
-      this.lockedScreenDir = best.screenDirection;
 
-      const moved = {
-        x: this.playerIso.x + best.direction.x * stepDistance,
-        y: this.playerIso.y + best.direction.y * stepDistance,
-      };
+      const moved = decisionPoint
+        ? advanceRoadDirectionAtJunction(
+          this.playerIso,
+          stepDistance,
+          decisionPoint.point,
+          best.direction,
+        )
+        : {
+          x: this.playerIso.x + best.direction.x * stepDistance,
+          y: this.playerIso.y + best.direction.y * stepDistance,
+        };
       return this.resolveWalkablePoint(this.clampToMap(moved));
     }
 
     this.lockedMoveDir = null;
-    this.lockedScreenDir = null;
     const desired = {
       x: this.playerIso.x + input.iso.x * stepDistance,
       y: this.playerIso.y + input.iso.y * stepDistance,
     };
     return this.resolveWalkablePoint(this.clampToMap(desired));
-  }
-
-  /**
-   * 三岔路先分上下，再分左右。
-   * 加分必须小于摇杆点积范围（[-1, 1]），否则斜交处会被拧到非意图分支。
-   */
-  private junctionBonuses(
-    input: IsoPoint,
-    dirs: { direction: IsoPoint; screenDirection: IsoPoint }[],
-  ): number[] {
-    const bonuses = dirs.map(() => 0);
-    if (dirs.length < 3) return bonuses;
-
-    const isDown = input.y > 0.35;
-    const isUp = input.y < -0.35;
-    const isLeft = input.x < -0.35;
-    const isRight = input.x > 0.35;
-
-    const upIdx: number[] = [];
-    const downIdx: number[] = [];
-    const midIdx: number[] = [];
-
-    dirs.forEach((d, i) => {
-      if (d.screenDirection.y < -0.2) upIdx.push(i);
-      else if (d.screenDirection.y > 0.2) downIdx.push(i);
-      else midIdx.push(i);
-    });
-
-    const uniquePick = 0.42;
-    const groupPick = 0.28;
-    const fallbackPick = 0.16;
-
-    const chooseByHorizontal = (indices: number[], verticalSign: -1 | 1 | 0) => {
-      const sorted = [...indices].sort((a, b) => dirs[a].screenDirection.x - dirs[b].screenDirection.x);
-      if (isLeft) return sorted[0];
-      if (isRight) return sorted[sorted.length - 1];
-      return [...indices].sort((a, b) => {
-        const ax = Math.abs(dirs[a].screenDirection.x);
-        const bx = Math.abs(dirs[b].screenDirection.x);
-        if (Math.abs(ax - bx) > 0.05) return ax - bx;
-        if (verticalSign < 0) return dirs[a].screenDirection.y - dirs[b].screenDirection.y;
-        if (verticalSign > 0) return dirs[b].screenDirection.y - dirs[a].screenDirection.y;
-        return 0;
-      })[0];
-    };
-
-    if (isDown && downIdx.length > 0) {
-      bonuses[downIdx.length === 1 ? downIdx[0] : chooseByHorizontal(downIdx, 1)] =
-        downIdx.length === 1 ? uniquePick : groupPick;
-      return bonuses;
-    }
-
-    if (isUp && upIdx.length > 0) {
-      bonuses[upIdx.length === 1 ? upIdx[0] : chooseByHorizontal(upIdx, -1)] =
-        upIdx.length === 1 ? uniquePick : groupPick;
-      return bonuses;
-    }
-
-    if ((isLeft || isRight) && midIdx.length > 0) {
-      bonuses[chooseByHorizontal(midIdx, 0)] = groupPick;
-      return bonuses;
-    }
-
-    if (isDown) {
-      const sorted = [...dirs.keys()].sort((a, b) => dirs[b].screenDirection.y - dirs[a].screenDirection.y);
-      bonuses[sorted[0]] = fallbackPick;
-      return bonuses;
-    }
-
-    if (isUp) {
-      const sorted = [...dirs.keys()].sort((a, b) => dirs[a].screenDirection.y - dirs[b].screenDirection.y);
-      bonuses[sorted[0]] = fallbackPick;
-      return bonuses;
-    }
-
-    return bonuses;
-  }
-
-  /**
-   * All unique road directions the player can take from `point`.
-   * Always includes forward / reverse on the current road segment,
-   * plus any segment starting from a junction node within range.
-   */
-  private availableDirections(
-    point: IsoPoint,
-    nearest: RoadProjection,
-  ): { direction: IsoPoint; screenDirection: IsoPoint }[] {
-    return campusRoadGraph.availableDirections(point, nearest, JUNCTION_RADIUS).map((direction) => ({
-      direction,
-      screenDirection: this.normalize(this.toScreenDelta(direction)),
-    }));
   }
 
   private resolveWalkablePoint(point: IsoPoint) {
@@ -3042,24 +2965,6 @@ export class CampusScene extends Phaser.Scene {
 
   private distance(a: IsoPoint, b: IsoPoint) {
     return Math.hypot(a.x - b.x, a.y - b.y);
-  }
-
-  private toScreenDelta(point: IsoPoint) {
-    const visualY = point.y * MAP_Y_AXIS_STRETCH;
-    return {
-      x: (point.x - visualY) * (TILE_W / 2),
-      y: (point.x + visualY) * (TILE_H / 2),
-    };
-  }
-
-  private normalize(point: IsoPoint) {
-    const length = Math.hypot(point.x, point.y);
-    if (length === 0) return { x: 0, y: 0 };
-    return { x: point.x / length, y: point.y / length };
-  }
-
-  private dot(a: IsoPoint, b: IsoPoint) {
-    return a.x * b.x + a.y * b.y;
   }
 
   private pointInPolygon(point: IsoPoint, polygon: IsoPoint[]) {
@@ -3503,6 +3408,12 @@ export class CampusScene extends Phaser.Scene {
       if (building) this.emitHud(building.name, `按 E · 进入${building.name}`);
     }
 
+    const autoTrigger = inRange && shouldAutoTriggerExteriorHotspot(distance, hotspot.radius);
+    if (autoTrigger) {
+      this.confirmCurrentInteraction(time);
+      return;
+    }
+
     if (this.keys && Phaser.Input.Keyboard.JustDown(this.keys.e)) {
       this.confirmCurrentInteraction(time);
     }
@@ -3520,15 +3431,23 @@ export class CampusScene extends Phaser.Scene {
 
     const hotspot = this.activeHotspot;
     if (hotspot) {
+      const interaction = resolveStoryHotspotInteraction(hotspot.id, [...this.completedHotspots]);
+      if (interaction.kind === "none") return;
       this.visitedHotspots.add(hotspot.id);
       this.updateHotspotMarkerStates();
-      this.dispatchStoryInteraction(resolveStoryHotspotInteraction(hotspot.id, [...this.completedHotspots]));
+      // Prevent a same-frame ghost collision while React mounts the modal or
+      // authored interior. Unlocking later schedules the normal respawn delay.
+      this.suppressGhostUntilUnlock();
+      this.dispatchStoryInteraction(interaction);
       return;
     }
 
     if (this.nearBuildingId) {
       const building = campusBuildings.find((item) => item.id === this.nearBuildingId);
-      if (building) useGameStore.getState().openInterior({ id: building.id, name: building.name, zone: building.zone });
+      if (building) {
+        this.suppressGhostUntilUnlock();
+        useGameStore.getState().openInterior({ id: building.id, name: building.name, zone: building.zone });
+      }
     }
   }
 
@@ -3600,9 +3519,11 @@ export class CampusScene extends Phaser.Scene {
     if (!this.guideLine) return;
     const target = storyHotspots.find((hotspot) => hotspot.id === this.guideHotspotId);
     this.guideLine.clear();
+    this.guideRoute = [];
     if (!target || this.storyOpen) return;
     const targetOnRoad = this.snapToRoad(target);
     const route = this.findRoadRoute(this.playerIso, targetOnRoad);
+    this.guideRoute = route;
     const dash = 24;
     const gap = 17;
     const phase = (time * 0.075) % (dash + gap);
@@ -3721,6 +3642,7 @@ export class CampusScene extends Phaser.Scene {
     if (!this.sceneReady) return;
     const detail = (event as CustomEvent<MapStateEvent>).detail;
     const wasStoryOpen = this.storyOpen;
+    if (this.guideHotspotId !== detail.guideHotspotId) this.guideRoute = [];
     this.guideHotspotId = detail.guideHotspotId;
     this.completedHotspots = new Set(detail.completedHotspotIds);
     this.visitedHotspots = new Set(detail.visitedHotspotIds);
@@ -3779,7 +3701,6 @@ export class CampusScene extends Phaser.Scene {
     const detail = (event as CustomEvent<{ playerIso: IsoPoint }>).detail;
     this.playerIso = this.snapToRoad(detail.playerIso);
     this.lockedMoveDir = null;
-    this.lockedScreenDir = null;
     this.touchInput = { x: 0, y: 0 };
     const playerScreen = this.toScreen(this.playerIso);
     this.player.setPosition(playerScreen.x, playerScreen.y);
@@ -3796,7 +3717,6 @@ export class CampusScene extends Phaser.Scene {
     this.sanity = detail.sanity;
     this.playerIso = this.snapToRoad(detail.playerIso);
     this.lockedMoveDir = null;
-    this.lockedScreenDir = null;
     this.touchInput = { x: 0, y: 0 };
     const playerScreen = this.toScreen(this.playerIso);
     this.player.setPosition(playerScreen.x, playerScreen.y);

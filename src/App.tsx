@@ -41,6 +41,7 @@ import { useGameAudio } from "./game/audio/useGameAudio";
 import { audioManager } from "./game/audio/audioManager";
 import { playImpactBang } from "./game/audio/proceduralAudio";
 import { assetUrl } from "./game/assetPath";
+import { shouldUseMedicalDevelopmentStart } from "./game/developmentMode";
 import { INITIAL_REVIVES, REVIVE_SANITY, useGameStore, type GameStore } from "./game/store";
 import { pickJumpscareText, contextForHotspot, textVariantClass, type JumpscareContext } from "./game/jumpscareTexts";
 import { JumpscarePipeline } from "./game/JumpscarePipeline";
@@ -91,9 +92,12 @@ const BAISHA_CHASE_ONLY = shouldUseBaishaDirectChaseTest();
 const BAISHA_DEVELOPMENT_PLAYER = new URLSearchParams(window.location.search).get("baishaDoor") === "1"
   ? { x: ROAD.xBaishaDoor, y: 7.45 }
   : { x: 18.6, y: ROAD.ySouth };
-// Temporary basement workflow: development starts inside the final medical
-// segment instead of replaying the library, Baisha, top floor and garage.
-const MEDICAL_DEVELOPMENT_START = import.meta.env.DEV;
+// Focused QA shortcut only. A normal local dev run must replay the complete
+// story; use ?medicalDev=1 when intentionally testing the medical workflow.
+const MEDICAL_DEVELOPMENT_START = shouldUseMedicalDevelopmentStart(
+  import.meta.env.DEV,
+  window.location.search,
+);
 
 function createBaishaDevelopmentStoryState(chaseOnly = false): GameStore["storyState"] {
   return {
@@ -1222,12 +1226,6 @@ function App() {
 
       setStoryState(() => nextState);
       triggerNarrativeEffect(effect, contextForHotspot(nextScene.locationId));
-      if (activeScene.id === "library_shelf") {
-        window.setTimeout(() => {
-          const text = pickJumpscareText("library_shelf", useGameStore.getState().storyState.stats.sanity);
-          JumpscarePipeline.executeStoryEffect("library_shelf", 0.88, text, "library-shelf");
-        }, 920);
-      }
 
       const commands = resolvePostChoiceCommands({ activeScene, nextScene, nextHotspot, changesLocation, inInterior });
       for (const command of commands) {

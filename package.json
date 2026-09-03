@@ -7,6 +7,9 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1",
+    "test:development-mode": "node tools/verify-development-mode.mjs",
+    "test:exterior-interaction": "node tools/verify-exterior-interaction.mjs",
+    "test:road-movement": "node tools/verify-road-movement-contract.mjs",
     "assets:prepare:r2": "node tools/prepare_r2_runtime_assets.mjs"
   },
   "dependencies": {

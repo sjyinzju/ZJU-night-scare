@@ -12,6 +12,12 @@ export type RoadProjection = {
   t: number;
 };
 
+export type RoadDecisionPoint = {
+  point: IsoPoint;
+  distance: number;
+  directions: IsoPoint[];
+};
+
 type RouteEdge = {
   to: number;
   distance: number;
@@ -81,7 +87,8 @@ export class MapGraph {
     return best;
   }
 
-  availableDirections(point: IsoPoint, nearest: RoadProjection, junctionRadius: number) {
+  /** Forward/reverse directions on only the edge currently carrying the player. */
+  directionsAlongProjection(nearest: RoadProjection) {
     const result: IsoPoint[] = [];
     const seen = new Set<string>();
     const add = (dir: IsoPoint) => {
@@ -94,22 +101,52 @@ export class MapGraph {
 
     if (nearest.t < 0.98) add(nearest.direction);
     if (nearest.t > 0.02) add({ x: -nearest.direction.x, y: -nearest.direction.y });
+    return result;
+  }
+
+  /** Outgoing edge directions whose endpoints meet at this exact logical node. */
+  directionsAt(point: IsoPoint, tolerance = 0.05): IsoPoint[] {
+    const result: IsoPoint[] = [];
+    const seen = new Set<string>();
+    const add = (direction: IsoPoint) => {
+      const normalized = normalize(direction);
+      const key = `${normalized.x.toFixed(4)},${normalized.y.toFixed(4)}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      result.push(normalized);
+    };
 
     for (const road of this.roads) {
-      for (const rp of road.points) {
-        if (Math.hypot(point.x - rp.x, point.y - rp.y) > junctionRadius) continue;
-        for (const other of this.roads) {
-          for (let i = 0; i < other.points.length - 1; i += 1) {
-            const a = other.points[i];
-            const b = other.points[i + 1];
-            if (Math.hypot(rp.x - a.x, rp.y - a.y) < 0.05) add({ x: b.x - a.x, y: b.y - a.y });
-            if (Math.hypot(rp.x - b.x, rp.y - b.y) < 0.05) add({ x: a.x - b.x, y: a.y - b.y });
-          }
+      for (let index = 0; index < road.points.length - 1; index += 1) {
+        const start = road.points[index];
+        const end = road.points[index + 1];
+        if (Math.hypot(point.x - start.x, point.y - start.y) <= tolerance) {
+          add({ x: end.x - start.x, y: end.y - start.y });
+        }
+        if (Math.hypot(point.x - end.x, point.y - end.y) <= tolerance) {
+          add({ x: start.x - end.x, y: start.y - end.y });
         }
       }
     }
 
     return result;
+  }
+
+  /** Find the next real turn/branch node on the edge currently carrying the player. */
+  nearestDecisionPointOnProjection(
+    point: IsoPoint,
+    nearest: RoadProjection,
+    radius: number,
+  ): RoadDecisionPoint | null {
+    const candidates = [nearest.segmentStart, nearest.segmentEnd]
+      .map((candidate) => ({
+        point: candidate,
+        distance: Math.hypot(point.x - candidate.x, point.y - candidate.y),
+        directions: this.directionsAt(candidate),
+      }))
+      .filter((candidate) => candidate.distance <= radius && candidate.directions.length >= 2)
+      .sort((a, b) => a.distance - b.distance);
+    return candidates[0] ?? null;
   }
 
   routeLength(route: IsoPoint[]) {
