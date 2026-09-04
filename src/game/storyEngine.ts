@@ -347,11 +347,12 @@ export function resolvePostChoiceCommands(args: {
     commands.push({ kind: "exit-interior" });
   }
 
-  // Enter according to the destination, never the scene that just closed.
-  // Looking at activeScene.locationId here used to send the player to an
-  // unrelated hotspot (or drop the request entirely) after a text choice.
+  // outdoor-to-indoor is an exterior prelude at the same building, so its
+  // choice is the actual act of entering. A plain indoor-3d destination can
+  // be elsewhere on campus (lake -> theater): keep the player on the map and
+  // let the destination hotspot handle proximity/E entry.
   const destinationHotspot = getHotspotById(nextScene.locationId);
-  if (!inInterior && nextScene.setting === "indoor" && (destinationHotspot?.mode === "outdoor-to-indoor" || destinationHotspot?.mode === "indoor-3d")) {
+  if (!inInterior && nextScene.setting === "indoor" && destinationHotspot?.mode === "outdoor-to-indoor") {
     commands.push({ kind: "set-active-scene", sceneId: null });
     commands.push({ kind: "enter-building", hotspotId: destinationHotspot.id });
   } else if (nextScene.ending) {
