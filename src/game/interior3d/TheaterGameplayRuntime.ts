@@ -6,6 +6,7 @@ import {
   THEATER_MAIN_DOOR_VISUAL_NAME,
   THEATER_BACKSTAGE_DOOR_VISUAL_NAME,
   THEATER_BACKSTAGE_REAR_DOOR_VISUAL_NAME,
+  THEATER_IMAGE_CACHE_VERSION,
   theaterFloorHeightAt,
   type TheaterGameplayMeta,
   type TheaterModal,
@@ -160,6 +161,9 @@ export class TheaterGameplayRuntime {
   private projectionFadeElapsed = 0;
   private projectionFadeStartOpacity = 0.96;
   private projectionRequestId = 0;
+  private readonly textureLoader = new THREE.TextureLoader().setCrossOrigin("anonymous");
+  private readonly projectionTextureCache = new Map<string, THREE.Texture>();
+  private readonly projectionTextureLoads = new Map<string, Promise<THREE.Texture>>();
   private stageFlashTexture?: THREE.Texture;
   private nextLightningAt = 2.2;
   private lightningUntil = 0;
@@ -405,30 +409,32 @@ export class TheaterGameplayRuntime {
     this.setStage("projection");
   }
 
-  showProjection(relativePath: string): void {
-    if (this.stage !== "projection") return;
+  preloadProjectionImages(relativePaths: readonly string[]): Promise<void> {
+    return Promise.all(relativePaths.map((relativePath) => this.loadProjectionTexture(relativePath)))
+      .then(() => undefined);
+  }
+
+  async showProjection(relativePath: string): Promise<boolean> {
+    if (this.stage !== "projection" || this.disposed) return false;
     const requestId = ++this.projectionRequestId;
-    void this.loadTexture(relativePath).then((texture) => {
-      if (this.disposed || this.stage !== "projection" || requestId !== this.projectionRequestId) {
-        texture.dispose();
-        return;
-      }
-      const material = this.projectionPlane.material as THREE.MeshBasicMaterial;
-      if (!this.projectionTexture) {
-        this.projectionTexture = texture;
-        material.map = texture;
-        material.opacity = 0;
-        material.needsUpdate = true;
-        this.projectionFade = "in";
-        this.projectionFadeElapsed = 0;
-        return;
-      }
-      this.pendingProjectionTexture?.dispose();
-      this.pendingProjectionTexture = texture;
-      this.projectionFade = "out";
+    const texture = await this.loadProjectionTexture(relativePath);
+    if (this.disposed || this.stage !== "projection" || requestId !== this.projectionRequestId) return false;
+
+    const material = this.projectionPlane.material as THREE.MeshBasicMaterial;
+    if (!this.projectionTexture) {
+      this.projectionTexture = texture;
+      material.map = texture;
+      material.opacity = 0;
+      material.needsUpdate = true;
+      this.projectionFade = "in";
       this.projectionFadeElapsed = 0;
-      this.projectionFadeStartOpacity = material.opacity;
-    }).catch(() => undefined);
+      return true;
+    }
+    this.pendingProjectionTexture = texture;
+    this.projectionFade = "out";
+    this.projectionFadeElapsed = 0;
+    this.projectionFadeStartOpacity = material.opacity;
+    return true;
   }
 
   finishProjection(): void {
@@ -477,8 +483,10 @@ export class TheaterGameplayRuntime {
     this.disposed = true;
     this.options.setLookInputLocked(false);
     stopLibraryStorm();
-    this.projectionTexture?.dispose();
-    this.pendingProjectionTexture?.dispose();
+    this.projectionRequestId++;
+    new Set(this.projectionTextureCache.values()).forEach((texture) => texture.dispose());
+    this.projectionTextureCache.clear();
+    this.projectionTextureLoads.clear();
     this.stageFlashTexture?.dispose();
     for (const target of this.stageTargets) target.removeFromParent();
     for (const object of [
@@ -590,7 +598,6 @@ export class TheaterGameplayRuntime {
       const eased = progress * progress * (3 - 2 * progress);
       material.opacity = this.projectionFadeStartOpacity * (1 - eased);
       if (progress < 1 || !this.pendingProjectionTexture) return;
-      this.projectionTexture?.dispose();
       this.projectionTexture = this.pendingProjectionTexture;
       this.pendingProjectionTexture = undefined;
       material.map = this.projectionTexture;
@@ -901,8 +908,8 @@ export class TheaterGameplayRuntime {
 
   private loadTexture(relativePath: string): Promise<THREE.Texture> {
     return new Promise((resolve, reject) => {
-      new THREE.TextureLoader().load(
-        assetUrl(relativePath),
+      this.textureLoader.load(
+        assetUrl(relativePath, THEATER_IMAGE_CACHE_VERSION),
         (texture) => {
           texture.colorSpace = THREE.SRGBColorSpace;
           texture.minFilter = THREE.LinearMipmapLinearFilter;
@@ -912,5 +919,27 @@ export class TheaterGameplayRuntime {
         reject,
       );
     });
+  }
+
+  private loadProjectionTexture(relativePath: string): Promise<THREE.Texture> {
+    const cached = this.projectionTextureCache.get(relativePath);
+    if (cached) return Promise.resolve(cached);
+    const loading = this.projectionTextureLoads.get(relativePath);
+    if (loading) return loading;
+
+    const request = this.loadTexture(relativePath).then((texture) => {
+      this.projectionTextureLoads.delete(relativePath);
+      if (this.disposed) {
+        texture.dispose();
+        throw new Error(`Theater projection runtime was disposed while loading ${relativePath}`);
+      }
+      this.projectionTextureCache.set(relativePath, texture);
+      return texture;
+    }).catch((error) => {
+      this.projectionTextureLoads.delete(relativePath);
+      throw error;
+    });
+    this.projectionTextureLoads.set(relativePath, request);
+    return request;
   }
 }

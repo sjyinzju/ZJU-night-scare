@@ -54,6 +54,11 @@ export const THEATER_BACKSTAGE_DOOR_VISUAL_NAME = "theater_backstage_authored_do
 export const THEATER_BACKSTAGE_REAR_DOOR_VISUAL_NAME = "theater_backstage_rear_authored_door";
 /** Same Su Wan close-up already established by the agriculture/medicine hall. */
 export const THEATER_SUWAN_JUMPSCARE_SPRITE = "library-shelf" as const;
+/**
+ * Version every theater bitmap request so long-lived browser/CDN caching can
+ * stay immutable without pinning a replaced image forever.
+ */
+export const THEATER_IMAGE_CACHE_VERSION = "theater-images-v2-projection-preload";
 
 export interface TheaterWalkableSurface {
   minX: number; maxX: number; minZ: number; maxZ: number; y: number;

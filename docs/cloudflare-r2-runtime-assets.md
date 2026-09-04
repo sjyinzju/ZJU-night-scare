@@ -26,6 +26,12 @@ npm run assets:prepare:r2
 node tools/prepare_r2_runtime_assets.mjs --scene=baisha
 ```
 
+小剧场模型、元数据和全部放映/镜面图片可单独准备：
+
+```bash
+node tools/prepare_r2_runtime_assets.mjs --scene=theater
+```
+
 脚本不会修改 `public/` 原文件，只在被 Git 忽略的 `.r2-upload/` 中生成 `.br` 产物和 `manifest.json`。上传时必须逐项遵守 manifest：
 
 - 上传 `.br` 文件的字节，但 R2 对象键使用 `objectKey`，不能带 `.br` 后缀。
@@ -33,7 +39,9 @@ node tools/prepare_r2_runtime_assets.mjs --scene=baisha
 - `Content-Encoding: br`
 - `Cache-Control: public, max-age=31536000, immutable`
 
-缺少 `Content-Encoding: br` 会让浏览器把压缩字节当 GLB 解析并失败。元数据 JSON、图片和音频仍按原文件上传；不要给未预压缩文件错误地设置 `Content-Encoding`。
+缺少 `Content-Encoding: br` 会让浏览器把压缩字节当 GLB 解析并失败。小剧场的元数据 JSON 与 PNG 也会原样复制进 `.r2-upload/` 并写入 manifest；这些文件必须使用 manifest 中的 `Content-Type` 与 `Cache-Control`，但不能设置 `Content-Encoding`。
+
+小剧场图片请求带有版本查询参数，因此可以安全使用 manifest 中的一年 immutable 浏览器缓存。每次替换同名图片时，必须同时更新 `THEATER_IMAGE_CACHE_VERSION`，否则已缓存的旧图不会立即失效。
 
 ## Cloudflare 缓存规则
 

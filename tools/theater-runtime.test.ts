@@ -15,7 +15,9 @@ import { buildInteriorCollisionMap, cutObstacleByClearZone } from "../src/game/i
 import { AabbSpatialIndex } from "../src/game/interior3d/InteriorCollisionSpatialIndex";
 
 Object.assign(globalThis, { window: new EventTarget() });
-THREE.TextureLoader.prototype.load = function (_url, onLoad) {
+const textureLoadCounts = new Map<string, number>();
+THREE.TextureLoader.prototype.load = function (url, onLoad) {
+  textureLoadCounts.set(url, (textureLoadCounts.get(url) ?? 0) + 1);
   const texture = new THREE.Texture(); onLoad?.(texture); return texture;
 };
 const metaDocument = JSON.parse(fs.readFileSync("public/models/interiors/theater/theater-gameplay.meta.json", "utf8"));
@@ -27,6 +29,10 @@ let lastModal = "";
 let paused = false;
 function check(name: string, run: () => void) {
   try { run(); console.log(`PASS ${name}`); }
+  catch (error) { failures++; console.error(`FAIL ${name}: ${(error as Error).message}`); }
+}
+async function checkAsync(name: string, run: () => Promise<void>) {
+  try { await run(); console.log(`PASS ${name}`); }
   catch (error) { failures++; console.error(`FAIL ${name}: ${(error as Error).message}`); }
 }
 const camera = new THREE.PerspectiveCamera();
@@ -254,6 +260,23 @@ check("auditorium lights shut down rear-to-front at 1.5 second intervals before 
   assert.equal(hallPools.every(light => light.intensity === 0), true);
   assert.equal(runtime.currentStage, "blackout");
   assert.equal(lastModal, "blackout");
+});
+await checkAsync("projection textures preload once and playback reuses the decoded texture", async () => {
+  runtime.beginProjection();
+  const paths = [
+    "images/theater/theater-reel-r01-suwan-stage.png",
+    "images/theater/theater-reel-r02-warning.png",
+  ];
+  await runtime.preloadProjectionImages(paths);
+  await runtime.preloadProjectionImages(paths);
+  const firstUrl = [...textureLoadCounts.keys()].find(url => url.includes(paths[0]));
+  const secondUrl = [...textureLoadCounts.keys()].find(url => url.includes(paths[1]));
+  assert.ok(firstUrl?.includes("v=theater-images-v2-projection-preload"));
+  assert.ok(secondUrl?.includes("v=theater-images-v2-projection-preload"));
+  assert.equal(textureLoadCounts.get(firstUrl!), 1);
+  assert.equal(textureLoadCounts.get(secondUrl!), 1);
+  assert.equal(await runtime.showProjection(paths[0]), true);
+  assert.equal(textureLoadCounts.get(firstUrl!), 1);
 });
 check("floor support follows all authored backstage stair treads", () => {
   for (const [x, z, y] of [[27.5,-5.2,.03],[27.5,-5.9,.21],[27.5,-6.5,.39],

@@ -867,8 +867,12 @@ export class Interior3D {
     this.theaterGameplay?.beginProjection();
   }
 
-  showTheaterProjection(relativePath: string): void {
-    this.theaterGameplay?.showProjection(relativePath);
+  preloadTheaterProjection(relativePaths: readonly string[]): Promise<void> {
+    return this.theaterGameplay?.preloadProjectionImages(relativePaths) ?? Promise.resolve();
+  }
+
+  showTheaterProjection(relativePath: string): Promise<boolean> {
+    return this.theaterGameplay?.showProjection(relativePath) ?? Promise.resolve(false);
   }
 
   finishTheaterProjection(): void {

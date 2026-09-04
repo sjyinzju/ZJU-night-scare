@@ -7,6 +7,7 @@ import { useGameStore } from "../store";
 import type { Interior3D } from "./Interior3D";
 import {
   THEATER_SUWAN_JUMPSCARE_SPRITE,
+  THEATER_IMAGE_CACHE_VERSION,
   isBaiqiuAwake,
   resolveTheaterEnding,
   type TheaterEnding,
@@ -143,6 +144,8 @@ export default function TheaterExperience({
   const [finaleStage, setFinaleStage] = useState<FinaleStage>("common");
   const [ending, setEnding] = useState<TheaterEnding | null>(null);
   const [advanceLocked, setAdvanceLocked] = useState(false);
+  const [projectionLoadState, setProjectionLoadState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [projectionLoadAttempt, setProjectionLoadAttempt] = useState(0);
   const mirrorStartedAt = useRef(0);
   const endingStartedAt = useRef(0);
   const mirrorScareTriggered = useRef(false);
@@ -167,17 +170,26 @@ export default function TheaterExperience({
 
   useEffect(() => {
     if (!active) return;
-    preloadedImages.current = [...MIRROR_IMAGES, ...projectionImages].map((relativePath) => {
+    preloadedImages.current = MIRROR_IMAGES.map((relativePath) => {
       const image = new Image();
+      image.crossOrigin = "anonymous";
       image.decoding = "async";
-      image.src = assetUrl(relativePath);
-      void image.decode().catch(() => undefined);
+      image.src = assetUrl(relativePath, THEATER_IMAGE_CACHE_VERSION);
+      void image.decode().catch((error) => console.warn(`[Theater] Image preload failed: ${relativePath}`, error));
       return image;
     });
     void prepareJumpscareSprite(THEATER_SUWAN_JUMPSCARE_SPRITE);
     void audioManager.prepareJumpscare();
     return () => { preloadedImages.current = []; };
-  }, [active, projectionImages]);
+  }, [active]);
+
+  const theaterRuntimeReady = snapshot !== null;
+  useEffect(() => {
+    if (!active || !theaterRuntimeReady) return;
+    void engineRef.current?.preloadTheaterProjection(projectionImages).catch((error) => {
+      console.warn("[Theater] Projection preload was incomplete; playback will retry failed images.", error);
+    });
+  }, [active, engineRef, projectionImages, theaterRuntimeReady]);
 
   useEffect(() => {
     if (!active || modal !== "mirror") return;
@@ -236,24 +248,52 @@ export default function TheaterExperience({
     if (!active || snapshot?.stage !== "projection" || projectionIndex < 0) return;
     const image = projectionImages[projectionIndex];
     if (!image) {
+      setProjectionLoadState("idle");
       setProjectionIndex(-1);
       engineRef.current?.finishTheaterProjection();
       return;
     }
-    engineRef.current?.showTheaterProjection(image);
+    let cancelled = false;
+    let unlock: number | undefined;
+    let advance: number | undefined;
     setAdvanceLocked(true);
-    const unlock = window.setTimeout(() => setAdvanceLocked(false), 350);
-    const advance = window.setTimeout(() => setProjectionIndex((index) => index + 1), 4000);
+    setProjectionLoadState("loading");
+    const runtime = engineRef.current;
+    if (!runtime) {
+      setProjectionLoadState("error");
+      console.error(`[Theater] Projection runtime was unavailable for ${image}`);
+    } else {
+      void runtime.showTheaterProjection(image).then((shown) => {
+        if (cancelled) return;
+        if (!shown) throw new Error(`Projection request became inactive before display: ${image}`);
+        setProjectionLoadState("ready");
+        unlock = window.setTimeout(() => setAdvanceLocked(false), 350);
+        // The four-second viewing window starts only after the texture is ready
+        // and has been assigned to the projection material.
+        advance = window.setTimeout(() => setProjectionIndex((index) => index + 1), 4000);
+      }).catch((error) => {
+        if (cancelled) return;
+        setProjectionLoadState("error");
+        setAdvanceLocked(false);
+        console.error(`[Theater] Projection image failed to load: ${image}`, error);
+      });
+    }
     return () => {
-      window.clearTimeout(unlock);
-      window.clearTimeout(advance);
+      cancelled = true;
+      if (unlock !== undefined) window.clearTimeout(unlock);
+      if (advance !== undefined) window.clearTimeout(advance);
     };
-  }, [active, engineRef, projectionImages, projectionIndex, snapshot?.stage]);
+  }, [active, engineRef, projectionImages, projectionIndex, projectionLoadAttempt, snapshot?.stage]);
 
   const advanceProjection = useCallback(() => {
     if (snapshot?.stage !== "projection" || advanceLocked || projectionIndex < 0) return;
+    if (projectionLoadState === "error") {
+      setProjectionLoadAttempt((attempt) => attempt + 1);
+      return;
+    }
+    if (projectionLoadState !== "ready") return;
     setProjectionIndex((index) => index + 1);
-  }, [advanceLocked, projectionIndex, snapshot?.stage]);
+  }, [advanceLocked, projectionIndex, projectionLoadState, snapshot?.stage]);
 
   useEffect(() => {
     if (modal === "finale") {
@@ -374,7 +414,7 @@ export default function TheaterExperience({
 
       {modal === "mirror" && (
         <section className="theaterImageSequence" onClick={advanceMirror} aria-label={`镜中照片 ${mirrorIndex + 1}/3`}>
-          <img src={assetUrl(MIRROR_IMAGES[mirrorIndex])} alt={["镜中只有玩家视角与身后的戏服架", "苏婉出现在镜中视线中央", "视线边缘贴近一张不应存在的脸"][mirrorIndex]} />
+          <img crossOrigin="anonymous" src={assetUrl(MIRROR_IMAGES[mirrorIndex], THEATER_IMAGE_CACHE_VERSION)} alt={["镜中只有玩家视角与身后的戏服架", "苏婉出现在镜中视线中央", "视线边缘贴近一张不应存在的脸"][mirrorIndex]} />
           <span>{mirrorIndex + 1} / 3</span>
           {mirrorIndex < 2 && <p>点击任意位置或按任意键继续</p>}
         </section>
@@ -422,7 +462,11 @@ export default function TheaterExperience({
       {snapshot?.stage === "projection" && projectionIndex >= 0 && (
         <button className="theaterProjectionAdvance" type="button" onClick={advanceProjection} aria-label="继续播放下一格胶片">
           <p className="theaterProjectionCaption" key={projectionIndex}>{projectionCaptions[projectionIndex]}</p>
-          <span>{Math.min(projectionIndex + 1, projectionImages.length)} / {projectionImages.length}</span>
+          <span>{projectionLoadState === "loading"
+            ? "胶片读取中"
+            : projectionLoadState === "error"
+              ? "读取失败 · 点击重试"
+              : `${Math.min(projectionIndex + 1, projectionImages.length)} / ${projectionImages.length}`}</span>
         </button>
       )}
 
