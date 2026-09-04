@@ -2,7 +2,7 @@ import { ROAD } from "./mapData";
 
 export type StatKey = "sanity" | "stamina" | "clues" | "trust" | "affection";
 
-export type ItemId = "talisman" | "flashlight" | "receipt" | "key_card" | "medicine" | "diary" | "photograph" | "owl_feather" | "energy";
+export type ItemId = "talisman" | "flashlight" | "receipt" | "key_card" | "medicine" | "diary" | "photograph" | "owl_feather" | "energy" | "film_reel";
 
 export type HotspotId =
   | "library"
@@ -145,6 +145,7 @@ export const itemCatalog: Record<ItemId, { name: string; icon: string; desc: str
   photograph: { name: "老照片", icon: "照", desc: "苏婉在旧教学楼前的照片。背面写着 1953。" },
   owl_feather: { name: "猫头鹰羽毛", icon: "羽", desc: "来自R-1953封存袋；能让被篡改的档案文字短暂保持不变。" },
   energy: { name: "能量饮料", icon: "饮", desc: "罐装咖啡。恢复 30 点体力。" },
+  film_reel: { name: "苏婉旧胶片", icon: "片", desc: "被重新拼接过的第三折唱段；齿孔间保留着苏婉原本的警告。" },
 };
 
 export const initialStoryState: StoryState = {

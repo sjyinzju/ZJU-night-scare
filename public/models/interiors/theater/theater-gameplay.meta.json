@@ -1,0 +1,206 @@
+{
+  "assetVersion": 8,
+  "buildingId": "little-theater",
+  "roomKind": "hall",
+  "model": "theater.glb",
+  "additionalModels": ["theater-gameplay-props.glb"],
+  "spawn": { "x": 15.0, "y": 3.25, "z": -21.2, "yaw": 3.141592653589793 },
+  "bounds": { "minX": 7.72, "maxX": 32.85, "minZ": -23.46, "maxZ": 5.85 },
+  "navigationClearZones": [
+    { "minX": 8.0, "maxX": 10.05, "minZ": -13.95, "maxZ": -13.45, "kind": "wall" },
+    { "minX": 8.05, "maxX": 22.78, "minZ": -13.35, "maxZ": -10.68 },
+    { "minX": 14.35, "maxX": 15.65, "minZ": -13.6, "maxZ": -7.0 },
+    { "minX": 22.65, "maxX": 23.46, "minZ": -13.61, "maxZ": -12.25, "kind": "wall" },
+    { "minX": 8.46, "maxX": 10.88, "minZ": 0.93, "maxZ": 2.47 },
+    { "minX": 19.96, "maxX": 22.38, "minZ": 0.93, "maxZ": 2.47 },
+    { "minX": 12.45, "maxX": 18.4, "minZ": -4.95, "maxZ": -4.05 }
+  ],
+  "theaterGameplay": {
+    "walkableSurfaces": [
+      { "minX": 26.815, "maxX": 28.349, "minZ": -5.538, "maxZ": -4.88, "y": 0.03 },
+      { "minX": 26.815, "maxX": 28.349, "minZ": -6.196, "maxZ": -5.538, "y": 0.21 },
+      { "minX": 26.815, "maxX": 28.349, "minZ": -6.854, "maxZ": -6.196, "y": 0.39 },
+      { "minX": 26.815, "maxX": 28.349, "minZ": -7.511, "maxZ": -6.854, "y": 0.57 },
+      { "minX": 26.815, "maxX": 30.854, "minZ": -9.141, "maxZ": -7.511, "y": 0.75 },
+      { "minX": 29.32, "maxX": 30.854, "minZ": -9.799, "maxZ": -9.141, "y": 0.93 },
+      { "minX": 29.32, "maxX": 30.854, "minZ": -10.457, "maxZ": -9.799, "y": 1.11 },
+      { "minX": 29.32, "maxX": 30.854, "minZ": -11.114, "maxZ": -10.457, "y": 1.29 },
+      { "minX": 29.32, "maxX": 30.854, "minZ": -11.772, "maxZ": -11.114, "y": 1.47 },
+      { "minX": 29.32, "maxX": 30.854, "minZ": -12.43, "maxZ": -11.772, "y": 1.65 },
+      { "minX": 8.906, "maxX": 10.433, "minZ": 1.39, "maxZ": 1.69, "y": 0.195 },
+      { "minX": 8.906, "maxX": 10.433, "minZ": 1.69, "maxZ": 1.99, "y": 0.39 },
+      { "minX": 20.406, "maxX": 21.933, "minZ": 1.39, "maxZ": 1.69, "y": 0.195 },
+      { "minX": 20.406, "maxX": 21.933, "minZ": 1.69, "maxZ": 1.99, "y": 0.39 }
+    ],
+    "spawn": { "x": 15.0, "y": 3.25, "z": -21.2, "yaw": 3.141592653589793 },
+    "film": {
+      "x": 13.55,
+      "y": 2.88,
+      "z": -15.45,
+      "radius": 1.15,
+      "objectName": "theater_film_reel"
+    },
+    "mainDoor": {
+      "x": 9.019,
+      "y": 2.915,
+      "z": -13.681,
+      "yaw": 0.0,
+      "width": 1.86,
+      "height": 2.23,
+      "depth": 0.278,
+      "authoredVisualBounds": {
+        "minX": 8.089,
+        "maxX": 9.949,
+        "minY": 1.8,
+        "maxY": 4.03,
+        "minZ": -13.82,
+        "maxZ": -13.542
+      }
+    },
+    "removedAudienceRows": {
+      "minX": 8.05,
+      "maxX": 22.78,
+      "minY": 1.25,
+      "maxY": 3.25,
+      "minZ": -12.85,
+      "maxZ": -10.68,
+      "minRowSpanX": 10.0,
+      "maxRowDepth": 2.2
+    },
+    "removedAudienceSections": [
+      {
+        "minX": 12.0,
+        "maxX": 18.5,
+        "minY": 0.45,
+        "maxY": 1.75,
+        "minZ": -4.95,
+        "maxZ": -4.05,
+        "minRowSpanX": 5.0,
+        "maxRowSpanX": 6.0,
+        "maxRowDepth": 1.1
+      }
+    ],
+    "foyerBounds": {
+      "minX": 7.72,
+      "maxX": 22.95,
+      "minZ": -23.46,
+      "dividerZ": -13.75,
+      "doorwayMinX": 8.0,
+      "doorwayMaxX": 10.05
+    },
+    "mainHallThreshold": { "x": 9.02, "y": 0.0, "z": -12.45, "radius": 1.25 },
+    "stageFlash": {
+      "x": 15.4,
+      "y": 2.35,
+      "z": 4.35,
+      "yaw": 0.0,
+      "width": 8.5,
+      "height": 4.78125,
+      "image": "images/theater/theater-stage-suwan-flash.png"
+    },
+    "backstageThreshold": { "x": 23.6, "y": -0.15, "z": 0.47, "radius": 1.15 },
+    "backstageDoor": {
+      "x": 22.92,
+      "y": 1.145,
+      "z": 0.47,
+      "yaw": 1.5707963267948966,
+      "width": 1.86,
+      "height": 2.23,
+      "depth": 0.278,
+      "authoredVisualBounds": { "minX": 22.781, "maxX": 23.059, "minY": 0.03, "maxY": 2.26, "minZ": -0.46, "maxZ": 1.4 }
+    },
+    "backstageRearDoor": {
+      "x": 22.92,
+      "y": 2.925,
+      "z": -12.93,
+      "yaw": 1.5707963267948966,
+      "width": 1.36,
+      "height": 2.23,
+      "depth": 0.278,
+      "authoredVisualBounds": { "minX": 22.781, "maxX": 23.059, "minY": 1.81, "maxY": 4.04, "minZ": -13.61, "maxZ": -12.25 }
+    },
+    "consoleSwitch": { "x": 24.0, "y": 1.05, "z": -3.2, "radius": 1.1 },
+    "mirror": { "x": 24.05, "y": 1.15, "z": 3.15, "radius": 1.2 },
+    "photoFrame": {
+      "x": 24.05,
+      "y": 0.78,
+      "z": 2.72,
+      "yaw": 3.141592653589793,
+      "scale": 0.82,
+      "model": "models/interiors/baisha/baisha-dorm-props.glb",
+      "objectName": "baisha_photo_frame"
+    },
+    "mirrorBulbs": [
+      { "x": 23.55, "y": 0.9, "z": 3.02 },
+      { "x": 24.55, "y": 0.9, "z": 3.02 },
+      { "x": 23.48, "y": 1.25, "z": 3.02 },
+      { "x": 24.62, "y": 1.25, "z": 3.02 },
+      { "x": 23.45, "y": 1.6, "z": 3.02 },
+      { "x": 24.65, "y": 1.6, "z": 3.02 },
+      { "x": 23.52, "y": 1.95, "z": 3.02 },
+      { "x": 24.58, "y": 1.95, "z": 3.02 },
+      { "x": 23.72, "y": 2.18, "z": 3.02 },
+      { "x": 24.38, "y": 2.18, "z": 3.02 }
+    ],
+    "ghost": {
+      "x": 27.9,
+      "y": -0.15,
+      "z": -11.7,
+      "yaw": -1.5707963267948966,
+      "model": "models/interiors/medical-school/medical-garage-props.glb",
+      "objectName": "medical_garage_ghost"
+    },
+    "backstageEscape": {
+      "x": 22.25,
+      "y": 1.65,
+      "z": -12.93,
+      "radius": 1.0,
+      "backstageMinX": 22.55
+    },
+    "audienceCenter": { "x": 15.424, "y": 0.72, "z": -4.501, "radius": 1.15 },
+    "projection": {
+      "x": 15.4,
+      "y": 2.55,
+      "z": 4.48,
+      "yaw": 0.0,
+      "width": 8.0,
+      "height": 4.5
+    },
+    "stageLightTarget": { "x": 15.4, "y": 1.6, "z": 3.7 },
+    "lighting": {
+      "foyerTubes": [
+        { "x": 10.2, "y": 4.25, "z": -20.2 },
+        { "x": 15.4, "y": 4.25, "z": -20.2 },
+        { "x": 20.2, "y": 4.25, "z": -20.2 },
+        { "x": 15.4, "y": 4.25, "z": -15.4 }
+      ],
+      "backstageTubes": [
+        { "x": 25.7, "y": 4.42, "z": -9.0, "yaw": 1.5707963267948966 },
+        { "x": 30.0, "y": 4.42, "z": -9.0, "yaw": 1.5707963267948966 },
+        { "x": 25.7, "y": 4.42, "z": -2.5, "yaw": 1.5707963267948966 },
+        { "x": 30.0, "y": 4.42, "z": -2.5, "yaw": 1.5707963267948966 },
+        { "x": 25.7, "y": 4.42, "z": 3.8, "yaw": 1.5707963267948966 },
+        { "x": 30.0, "y": 4.42, "z": 3.8, "yaw": 1.5707963267948966 }
+      ],
+      "hallSquares": [
+        { "x": 10.6, "y": 4.48, "z": -11.2 },
+        { "x": 15.4, "y": 4.48, "z": -11.2 },
+        { "x": 20.2, "y": 4.48, "z": -11.2 },
+        { "x": 10.6, "y": 4.48, "z": -7.2 },
+        { "x": 15.4, "y": 4.48, "z": -7.2 },
+        { "x": 20.2, "y": 4.48, "z": -7.2 },
+        { "x": 10.6, "y": 4.48, "z": -3.2 },
+        { "x": 15.4, "y": 4.48, "z": -3.2 },
+        { "x": 20.2, "y": 4.48, "z": -3.2 },
+        { "x": 10.6, "y": 4.48, "z": 0.8 },
+        { "x": 15.4, "y": 4.48, "z": 0.8 },
+        { "x": 20.2, "y": 4.48, "z": 0.8 }
+      ]
+    }
+  },
+  "notes": [
+    "Runtime coordinates are Blender X, Z, -Y after glTF axis conversion.",
+    "Interaction anchors are metadata-owned because the SketchUp scene uses generic object names.",
+    "Navigation clear zones must be visually checked after each doorway or audience-row adjustment."
+  ]
+}

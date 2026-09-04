@@ -16,6 +16,369 @@
   --text-dim: #998c7d;
 }
 
+/* ── Final theater authored sequence ───────────────────────────────────── */
+.theaterNarrativeOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1140;
+  overflow: auto;
+  background: rgba(2, 0, 2, 0.68);
+  backdrop-filter: blur(16px) saturate(0.52) brightness(0.42);
+  -webkit-backdrop-filter: blur(16px) saturate(0.52) brightness(0.42);
+  animation: glassVeilIn 360ms ease-out both;
+}
+
+.storyModal.theaterStoryModal {
+  top: 50%;
+  width: min(960px, calc(100vw - 72px));
+  max-height: min(92vh, 900px);
+  padding: 24px 34px 32px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow-y: auto;
+}
+
+.storyModal.theaterStoryModal h1 {
+  color: #f1ded8;
+}
+
+.theaterRedText {
+  color: #ff3447;
+  text-shadow: 0 0 12px rgba(216, 8, 35, 0.42);
+}
+
+.theaterStoryModal .storyText p.theaterShockLine {
+  color: #e92739;
+  font-style: normal;
+  font-weight: 700;
+  opacity: 1;
+  animation: theaterRedBrightPulse 1.8s ease-in-out infinite;
+}
+
+.theaterEpilogueRoll p.theaterShockLine {
+  color: #e92739;
+  font-style: normal;
+  font-weight: 700;
+  animation: theaterRedBrightPulse 1.8s ease-in-out infinite;
+}
+
+.storyModal.theaterStoryModal.ending h1 {
+  color: #ff263c;
+  text-shadow: 0 0 24px rgba(218, 0, 30, 0.45);
+}
+
+.theaterStoryModal .choiceList {
+  margin-top: 24px;
+}
+
+.theaterTranscript .theaterOriginalText,
+.theaterTranscript .theaterCutText {
+  font-family: "Noto Serif SC", "Songti SC", serif;
+  font-size: clamp(16px, 1.8vw, 23px);
+  letter-spacing: 0.15em;
+}
+
+.theaterTranscript .theaterOriginalText {
+  color: rgba(237, 226, 205, 0.9);
+}
+
+.theaterTranscript .theaterCutText {
+  color: #ff2437;
+  text-shadow: 0 0 12px rgba(255, 0, 25, 0.65);
+}
+
+.theaterImageSequence {
+  position: fixed;
+  inset: 0;
+  z-index: 1150;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: #020203;
+  cursor: pointer;
+}
+
+.theaterImageSequence img {
+  display: block;
+  width: min(96vw, calc(96vh * 16 / 9));
+  max-height: 96vh;
+  object-fit: contain;
+  filter: contrast(1.08) brightness(0.84) drop-shadow(0 0 36px rgba(0, 0, 0, 0.95));
+  animation: theaterFilmFrame 240ms steps(2, end) both;
+}
+
+.theaterImageSequence span,
+.theaterImageSequence p {
+  position: fixed;
+  z-index: 2;
+  color: rgba(235, 220, 204, 0.7);
+  font-size: 12px;
+  letter-spacing: 0.22em;
+  text-shadow: 0 2px 8px #000;
+}
+
+.theaterImageSequence span {
+  top: 22px;
+  right: 26px;
+}
+
+.theaterImageSequence p {
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  animation: baishaPromptPulse 1.8s ease-in-out infinite;
+}
+
+.theaterBlackout {
+  position: fixed;
+  inset: 0;
+  z-index: 1160;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  pointer-events: none;
+}
+
+.theaterBlackout span {
+  color: #6b000a;
+  font-size: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  box-shadow: 0 0 34px rgba(170, 0, 20, 0.42);
+  animation: theaterHeartbeat 0.92s ease-in-out infinite;
+}
+
+.theaterProjectionAdvance {
+  position: fixed;
+  inset: 0;
+  z-index: 1110;
+  border: 0;
+  background: transparent;
+  color: transparent;
+  cursor: pointer;
+}
+
+.theaterProjectionAdvance span {
+  position: absolute;
+  right: 26px;
+  bottom: 24px;
+  color: rgba(255, 226, 205, 0.58);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+}
+
+.theaterProjectionCaption {
+  position: absolute;
+  left: 50%;
+  bottom: clamp(88px, 13vh, 154px);
+  width: max-content;
+  max-width: 94vw;
+  margin: 0;
+  transform: translateX(-50%);
+  color: #ff263c;
+  font-family: "Noto Serif SC", "Songti SC", serif;
+  font-size: clamp(15px, 1.65vw, 25px);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  white-space: nowrap;
+  text-align: center;
+  text-shadow: 0 0 9px #000, 0 0 22px rgba(218, 0, 30, 0.72);
+  animation:
+    theaterProjectionCaptionIn 520ms ease-out both,
+    theaterRedBrightPulse 1.8s ease-in-out 520ms infinite;
+}
+
+.theaterContinue {
+  margin-top: 28px;
+  color: rgba(226, 207, 187, 0.66);
+  font-size: 12px;
+  letter-spacing: 0.22em;
+  text-align: center;
+  animation: baishaPromptPulse 1.8s ease-in-out infinite;
+}
+
+.theaterFinalTitle {
+  position: fixed;
+  inset: 0;
+  z-index: 1190;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  background: #030405;
+}
+
+.theaterFinalTitle h1 {
+  margin: 0;
+  color: #ef233c;
+  font-family: "Noto Serif SC", "Songti SC", serif;
+  font-size: clamp(42px, 8vw, 92px);
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  animation: theaterFinalTitleIn 1s ease-out both;
+}
+
+.theaterEpilogue {
+  position: fixed;
+  inset: 0;
+  z-index: 1185;
+  overflow: hidden;
+  color: #eee4d8;
+  background:
+    radial-gradient(ellipse at 50% 18%, rgba(112, 0, 15, 0.2), transparent 42%),
+    #020203;
+}
+
+.theaterEpilogue header {
+  position: absolute;
+  top: clamp(28px, 5vh, 64px);
+  left: 50%;
+  z-index: 2;
+  width: min(900px, 90vw);
+  transform: translateX(-50%);
+  text-align: center;
+}
+
+.theaterEpilogue header span {
+  color: rgba(255, 76, 91, 0.72);
+  font-size: clamp(16px, 1.6vw, 22px);
+  letter-spacing: 0.42em;
+}
+
+.theaterEpilogue header h1 {
+  margin: 10px 0 0;
+  color: #ff263c;
+  font-family: "Noto Serif SC", "Songti SC", serif;
+  font-size: clamp(25px, 3.7vw, 48px);
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-shadow: 0 0 32px rgba(210, 0, 28, 0.4);
+}
+
+.theaterEpilogueViewport {
+  position: absolute;
+  inset: clamp(116px, 17vh, 190px) 0 0;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, transparent 0, #000 10%, #000 82%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 10%, #000 82%, transparent 100%);
+}
+
+.theaterEpilogueRoll {
+  width: min(720px, 76vw);
+  margin: 0 auto;
+  will-change: transform;
+  animation: theaterEpilogueRoll 52s linear forwards;
+}
+
+.theaterEpilogueLeadSpace {
+  height: 4em;
+}
+
+.theaterEpilogueRoll p {
+  margin: 0 0 2em;
+  font-family: "Noto Serif SC", "Songti SC", serif;
+  font-size: clamp(14px, 1.35vw, 20px);
+  line-height: 1.9;
+  letter-spacing: 0.055em;
+  text-align: justify;
+  text-indent: 2em;
+  text-shadow: 0 2px 12px #000;
+  opacity: 1;
+}
+
+.theaterEpilogueRoll strong {
+  display: block;
+  padding: 1.8em 0 0;
+  color: #ff263c;
+  font-family: "Noto Serif SC", "Songti SC", serif;
+  font-size: clamp(18px, 2.1vw, 30px);
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-align: center;
+  text-shadow: 0 0 26px rgba(215, 0, 28, 0.48);
+  opacity: 1;
+}
+
+.theaterEpilogueSkip {
+  position: absolute;
+  right: 24px;
+  bottom: 18px;
+  z-index: 2;
+  margin: 0;
+  color: rgba(224, 205, 188, 0.42);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+}
+
+.theaterFinalTitle p {
+  margin: 24px 0 0;
+  color: rgba(216, 205, 190, 0.58);
+  letter-spacing: 0.32em;
+  animation: theaterFinalTitleIn 1s ease-out 180ms both;
+}
+
+@keyframes theaterFilmFrame {
+  0% { opacity: 0; transform: translateX(-2px); filter: brightness(1.35) contrast(1.4); }
+  45% { opacity: 0.92; transform: translateX(1px); }
+  100% { opacity: 1; transform: none; }
+}
+
+@keyframes theaterProjectionCaptionIn {
+  from { opacity: 0; transform: translate(-50%, 8px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+@keyframes theaterRedBrightPulse {
+  0%, 100% {
+    color: #e92739;
+    filter: brightness(1);
+    text-shadow: 0 0 9px #000, 0 0 18px rgba(218, 0, 30, 0.58);
+  }
+  46%, 58% {
+    color: #ff4052;
+    filter: brightness(1.32);
+    text-shadow: 0 0 9px #000, 0 0 30px rgba(255, 22, 52, 0.92), 0 0 52px rgba(220, 0, 28, 0.46);
+  }
+}
+
+@keyframes theaterHeartbeat {
+  0%, 100% { transform: scale(0.65); opacity: 0.25; }
+  16% { transform: scale(1.4); opacity: 0.88; }
+  30% { transform: scale(0.82); opacity: 0.48; }
+  43% { transform: scale(1.18); opacity: 0.76; }
+  62% { transform: scale(0.7); opacity: 0.28; }
+}
+
+@keyframes theaterEpilogueRoll {
+  0% {
+    transform: translateY(82vh);
+  }
+  100% {
+    transform: translateY(-100%);
+  }
+}
+
+@keyframes theaterFinalTitleIn {
+  from { opacity: 0; transform: translateY(8px); filter: blur(4px); }
+  to { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+
+@media (max-width: 720px) {
+  .storyModal.theaterStoryModal {
+    width: calc(100vw - 24px);
+    max-height: calc(100vh - 22px);
+    padding: 18px 10px 24px;
+  }
+
+  .theaterImageSequence img {
+    width: 100vw;
+    max-height: 88vh;
+  }
+}
+
 * {
   box-sizing: border-box;
 }
@@ -1454,9 +1817,12 @@ button {
   display: grid;
   place-items: center;
   color: #ff0000;
-  font-size: clamp(36px, 7vw, 84px);
+  padding: 0 3vw;
+  font-size: clamp(28px, 5vw, 72px);
   font-weight: 800;
   letter-spacing: 0.22em;
+  white-space: nowrap;
+  text-align: center;
   text-shadow: 0 0 40px #ff0000, 0 0 80px #cc0000, 0 0 120px #660000;
 }
 .jumpscareText.active {

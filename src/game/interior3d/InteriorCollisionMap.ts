@@ -12,9 +12,65 @@ export interface InteriorCollisionMap {
   obstacles: InteriorMapObstacle[];
 }
 
+export interface InteriorNavigationClearZone extends AABB {
+  kind?: InteriorObstacleKind;
+}
+
+/** Cut one exact navigation opening while retaining every adjacent collider. */
+export function cutObstacleByClearZone(
+  obstacle: InteriorMapObstacle,
+  zone: InteriorNavigationClearZone,
+): InteriorMapObstacle[] {
+  if (zone.kind && zone.kind !== obstacle.kind) return [obstacle];
+  const cutMinX = Math.max(obstacle.minX, zone.minX);
+  const cutMaxX = Math.min(obstacle.maxX, zone.maxX);
+  const cutMinZ = Math.max(obstacle.minZ, zone.minZ);
+  const cutMaxZ = Math.min(obstacle.maxZ, zone.maxZ);
+  if (cutMinX >= cutMaxX || cutMinZ >= cutMaxZ) return [obstacle];
+  const pieces: InteriorMapObstacle[] = [];
+  const add = (minX: number, maxX: number, minZ: number, maxZ: number): void => {
+    if (maxX - minX > .001 && maxZ - minZ > .001) pieces.push({ minX, maxX, minZ, maxZ, kind: obstacle.kind });
+  };
+  add(obstacle.minX, cutMinX, obstacle.minZ, obstacle.maxZ);
+  add(cutMaxX, obstacle.maxX, obstacle.minZ, obstacle.maxZ);
+  add(cutMinX, cutMaxX, obstacle.minZ, cutMinZ);
+  add(cutMinX, cutMaxX, cutMaxZ, obstacle.maxZ);
+  return pieces;
+}
+
+export interface InteriorCollisionOptions {
+  /** Authored dynamic doors keep their own runtime colliders, not baked walls. */
+  excludeObjects?: readonly THREE.Object3D[];
+  /**
+   * Local walkable floor height at any XZ position. When provided, the
+   * collision slice is evaluated per cell as [floor + floorCutoff,
+   * floor + WALKER_TOP] instead of one absolute Y band, so scenes with
+   * raised platforms or terraced seating still collide with the walls and
+   * furniture standing on them.
+   */
+  floorHeightAt?: (x: number, z: number) => number;
+  /**
+   * Bottom of the walkable slice above the local floor. Defaults to
+   * FLOOR_CUTOFF. Terraced scenes can raise it so stair risers shorter than
+   * one step height do not rasterize into wall strips.
+   */
+  floorCutoff?: number;
+}
+
 const CELL_SIZE = 0.1;
 const FLOOR_CUTOFF = 0.16;
 const WALKER_TOP = 1.45;
+
+/**
+ * Per-cell slice acceptance for terraced scenes: a triangle only blocks a
+ * cell when it intersects [cellFloor + floorCutoff, cellFloor + WALKER_TOP].
+ */
+interface SliceFilter {
+  cellFloors: Float32Array;
+  floorCutoff: number;
+  triMinY: number;
+  triMaxY: number;
+}
 
 function setCell(
   cells: Uint8Array,
@@ -24,11 +80,16 @@ function setCell(
   x: number,
   z: number,
   weight: number,
+  slice?: SliceFilter,
 ): void {
   const column = Math.floor((x - bounds.minX) / CELL_SIZE);
   const row = Math.floor((z - bounds.minZ) / CELL_SIZE);
   if (column < 0 || column >= columns || row < 0 || row >= rows) return;
   const index = row * columns + column;
+  if (slice) {
+    const floor = slice.cellFloors[index];
+    if (slice.triMaxY <= floor + slice.floorCutoff || slice.triMinY >= floor + WALKER_TOP) return;
+  }
   cells[index] = Math.max(cells[index], weight);
 }
 
@@ -60,12 +121,13 @@ function rasterizeEdge(
   bx: number,
   bz: number,
   weight: number,
+  slice?: SliceFilter,
 ): void {
   const distance = Math.hypot(bx - ax, bz - az);
   const steps = Math.max(1, Math.ceil(distance / (CELL_SIZE * 0.45)));
   for (let step = 0; step <= steps; step++) {
     const t = step / steps;
-    setCell(cells, columns, rows, bounds, THREE.MathUtils.lerp(ax, bx, t), THREE.MathUtils.lerp(az, bz, t), weight);
+    setCell(cells, columns, rows, bounds, THREE.MathUtils.lerp(ax, bx, t), THREE.MathUtils.lerp(az, bz, t), weight, slice);
   }
 }
 
@@ -78,10 +140,11 @@ function rasterizeTriangle(
   b: THREE.Vector3,
   c: THREE.Vector3,
   weight: number,
+  slice?: SliceFilter,
 ): void {
-  rasterizeEdge(cells, columns, rows, bounds, a.x, a.z, b.x, b.z, weight);
-  rasterizeEdge(cells, columns, rows, bounds, b.x, b.z, c.x, c.z, weight);
-  rasterizeEdge(cells, columns, rows, bounds, c.x, c.z, a.x, a.z, weight);
+  rasterizeEdge(cells, columns, rows, bounds, a.x, a.z, b.x, b.z, weight, slice);
+  rasterizeEdge(cells, columns, rows, bounds, b.x, b.z, c.x, c.z, weight, slice);
+  rasterizeEdge(cells, columns, rows, bounds, c.x, c.z, a.x, a.z, weight, slice);
 
   const area = Math.abs((b.x - a.x) * (c.z - a.z) - (c.x - a.x) * (b.z - a.z));
   if (area < 0.002) return;
@@ -95,6 +158,10 @@ function rasterizeTriangle(
       const x = bounds.minX + (column + 0.5) * CELL_SIZE;
       if (pointInTriangle(x, z, a.x, a.z, b.x, b.z, c.x, c.z)) {
         const index = row * columns + column;
+        if (slice) {
+          const floor = slice.cellFloors[index];
+          if (slice.triMaxY <= floor + slice.floorCutoff || slice.triMinY >= floor + WALKER_TOP) continue;
+        }
         cells[index] = Math.max(cells[index], weight);
       }
     }
@@ -131,11 +198,41 @@ function obstacleKind(weight: number): InteriorObstacleKind {
 }
 
 /**
+ * Conservative floor range over an XZ rectangle: samples the corners, edge
+ * midpoints, and center. The authored floor functions are piecewise constant
+ * and monotone per axis, so the extrema land on these samples.
+ */
+function floorRangeOverRect(
+  floorAt: (x: number, z: number) => number,
+  minX: number,
+  maxX: number,
+  minZ: number,
+  maxZ: number,
+): { lo: number; hi: number } {
+  let lo = Infinity;
+  let hi = -Infinity;
+  const midX = (minX + maxX) * 0.5;
+  const midZ = (minZ + maxZ) * 0.5;
+  for (const x of [minX, midX, maxX]) {
+    for (const z of [minZ, midZ, maxZ]) {
+      const value = floorAt(x, z);
+      if (value < lo) lo = value;
+      if (value > hi) hi = value;
+    }
+  }
+  return { lo, hi };
+}
+
+/**
  * Projects first-floor GLB meshes into a compact XZ occupancy map. The same
  * rectangles drive movement collision and the in-game floor plan, preventing
  * the two representations from drifting apart.
  */
-export function buildInteriorCollisionMap(root: THREE.Object3D, modelBounds: THREE.Box3): InteriorCollisionMap {
+export function buildInteriorCollisionMap(
+  root: THREE.Object3D,
+  modelBounds: THREE.Box3,
+  options: InteriorCollisionOptions = {},
+): InteriorCollisionMap {
   const bounds: AABB = {
     minX: modelBounds.min.x,
     maxX: modelBounds.max.x,
@@ -147,16 +244,32 @@ export function buildInteriorCollisionMap(root: THREE.Object3D, modelBounds: THR
   const columns = Math.ceil(spanX / CELL_SIZE);
   const rows = Math.ceil(spanZ / CELL_SIZE);
   const cells = new Uint8Array(columns * rows);
+  const floorAt = options.floorHeightAt;
+  const floorCutoff = options.floorCutoff ?? FLOOR_CUTOFF;
+  // Terraced venues (raised foyer, auditorium steps) slice collision against
+  // the local walking surface instead of one absolute Y band.
+  let cellFloors: Float32Array | undefined;
+  if (floorAt) {
+    cellFloors = new Float32Array(columns * rows);
+    for (let row = 0; row < rows; row++) {
+      const z = bounds.minZ + (row + 0.5) * CELL_SIZE;
+      for (let column = 0; column < columns; column++) {
+        cellFloors[row * columns + column] = floorAt(bounds.minX + (column + 0.5) * CELL_SIZE, z);
+      }
+    }
+  }
   const box = new THREE.Box3();
   const size = new THREE.Vector3();
   const a = new THREE.Vector3();
   const b = new THREE.Vector3();
   const c = new THREE.Vector3();
+  const excluded = new Set<THREE.Object3D>();
+  for (const object of options.excludeObjects ?? []) object.traverse(child => excluded.add(child));
 
   root.updateMatrixWorld(true);
   root.traverse((object) => {
     const mesh = object as THREE.Mesh;
-    if (!mesh.isMesh || !mesh.visible) return;
+    if (!mesh.isMesh || !mesh.visible || excluded.has(mesh)) return;
     const position = mesh.geometry.getAttribute("position");
     if (!position) return;
     box.setFromObject(mesh);
@@ -164,7 +277,10 @@ export function buildInteriorCollisionMap(root: THREE.Object3D, modelBounds: THR
     // above the player's head cannot contribute any accepted triangle. Large
     // authored ceilings and upper structures are skipped without changing the
     // 10 cm occupancy result.
-    if (box.max.y <= FLOOR_CUTOFF || box.min.y >= WALKER_TOP) return;
+    if (floorAt) {
+      const range = floorRangeOverRect(floorAt, box.min.x, box.max.x, box.min.z, box.max.z);
+      if (box.max.y <= range.lo + floorCutoff || box.min.y >= range.hi + WALKER_TOP) return;
+    } else if (box.max.y <= FLOOR_CUTOFF || box.min.y >= WALKER_TOP) return;
     box.getSize(size);
     const kind = classifyObstacle(size);
     const weight = obstacleWeight(kind);
@@ -179,8 +295,19 @@ export function buildInteriorCollisionMap(root: THREE.Object3D, modelBounds: THR
       c.fromBufferAttribute(position as THREE.BufferAttribute, ic).applyMatrix4(mesh.matrixWorld);
       const maxY = Math.max(a.y, b.y, c.y);
       const minY = Math.min(a.y, b.y, c.y);
-      if (maxY <= FLOOR_CUTOFF || minY >= WALKER_TOP) continue;
-      rasterizeTriangle(cells, columns, rows, bounds, a, b, c, weight);
+      let slice: SliceFilter | undefined;
+      if (floorAt && cellFloors) {
+        const range = floorRangeOverRect(
+          floorAt,
+          Math.min(a.x, b.x, c.x),
+          Math.max(a.x, b.x, c.x),
+          Math.min(a.z, b.z, c.z),
+          Math.max(a.z, b.z, c.z),
+        );
+        if (maxY <= range.lo + floorCutoff || minY >= range.hi + WALKER_TOP) continue;
+        slice = { cellFloors, floorCutoff, triMinY: minY, triMaxY: maxY };
+      } else if (maxY <= FLOOR_CUTOFF || minY >= WALKER_TOP) continue;
+      rasterizeTriangle(cells, columns, rows, bounds, a, b, c, weight, slice);
     }
   });
 

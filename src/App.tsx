@@ -98,7 +98,6 @@ const MEDICAL_DEVELOPMENT_START = shouldUseMedicalDevelopmentStart(
   import.meta.env.DEV,
   window.location.search,
 );
-
 function createBaishaDevelopmentStoryState(chaseOnly = false): GameStore["storyState"] {
   return {
     currentSceneId: chaseOnly ? "dorm_forum" : "dorm_baiqiu",

@@ -426,6 +426,41 @@ export function playLibraryThunder(delaySeconds = 0.22): void {
   rumble.stop(now + 2.6);
 }
 
+/** Dry relay snap followed by a dying fluorescent ballast hum. */
+export function playTheaterLightOff(row = 0): void {
+  const audioCtx = getCtx();
+  const now = audioCtx.currentTime;
+  const output = audioCtx.createGain();
+  output.gain.setValueAtTime(0.16, now);
+  output.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
+  output.connect(audioCtx.destination);
+
+  const relay = audioCtx.createOscillator();
+  relay.type = "square";
+  relay.frequency.setValueAtTime(190 - Math.min(row, 3) * 12, now);
+  relay.frequency.exponentialRampToValueAtTime(54, now + 0.075);
+  const relayGain = audioCtx.createGain();
+  relayGain.gain.setValueAtTime(0.001, now);
+  relayGain.gain.linearRampToValueAtTime(0.5, now + 0.006);
+  relayGain.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
+  relay.connect(relayGain).connect(output);
+
+  const ballast = audioCtx.createOscillator();
+  ballast.type = "sawtooth";
+  ballast.frequency.setValueAtTime(940 + row * 35, now + 0.018);
+  ballast.frequency.exponentialRampToValueAtTime(210, now + 0.2);
+  const ballastGain = audioCtx.createGain();
+  ballastGain.gain.setValueAtTime(0.001, now);
+  ballastGain.gain.linearRampToValueAtTime(0.11, now + 0.025);
+  ballastGain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+  ballast.connect(ballastGain).connect(output);
+
+  relay.start(now);
+  ballast.start(now + 0.018);
+  relay.stop(now + 0.1);
+  ballast.stop(now + 0.23);
+}
+
 /** White-flash thunder used by Baisha's authored photo and balcony beats. */
 export function playBaishaThunder(intensity = 1): void {
   const audioCtx = getCtx();

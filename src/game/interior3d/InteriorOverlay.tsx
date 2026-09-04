@@ -20,6 +20,14 @@ import {
   type MedicalBasementModal,
   type MedicalBasementSnapshot,
 } from "./medicalBasementData";
+import TheaterExperience from "./TheaterExperience";
+import {
+  THEATER_STEPS,
+  THEATER_SUWAN_JUMPSCARE_SPRITE,
+  theaterProgressIndex,
+  type TheaterModal,
+  type TheaterSnapshot,
+} from "./theaterData";
 
 export interface InteriorOverlayProps {
   building: { id: string; name: string; zone?: string };
@@ -150,6 +158,8 @@ export default function InteriorOverlay({
   const [medicalGarageModal, setMedicalGarageModal] = useState<MedicalGarageModal | null>(null);
   const [medicalBasementSnapshot, setMedicalBasementSnapshot] = useState<MedicalBasementSnapshot | null>(null);
   const [medicalBasementModal, setMedicalBasementModal] = useState<MedicalBasementModal | null>(null);
+  const [theaterSnapshot, setTheaterSnapshot] = useState<TheaterSnapshot | null>(null);
+  const [theaterModal, setTheaterModal] = useState<TheaterModal | null>(null);
   const baishaEnergyBoost = useGameStore((state) => Boolean(state.storyState.flags.baishaEnergyBoost));
   const scene01Debug = building.id === "medical-library"
     && new URLSearchParams(window.location.search).get("debugScene01") === "1";
@@ -160,7 +170,7 @@ export default function InteriorOverlay({
   const medicalGameplayDebug = building.id === "medical-college"
     && new URLSearchParams(window.location.search).get("medicalGameplayDebug") === "1";
   const concealUntilAuthoredAssetReady = (
-    building.id === "dorm-baisha" || building.id === "medical-college"
+    building.id === "dorm-baisha" || building.id === "medical-college" || building.id === "little-theater"
   ) && assetState !== "ready";
 
   useEffect(() => {
@@ -301,6 +311,20 @@ export default function InteriorOverlay({
           engineRef.current?.exitPointerLock();
           onMedicalBasementCompleteRef.current?.(detail);
         },
+        onTheaterStateChange: setTheaterSnapshot,
+        onTheaterModal: (modal) => {
+          engineRef.current?.exitPointerLock();
+          setTheaterModal(modal);
+        },
+        onTheaterChaseHit: () => {
+          JumpscarePipeline.executeStoryEffect(
+            "ghost_caught",
+            0.9,
+            "它碰到了你——别停",
+            THEATER_SUWAN_JUMPSCARE_SPRITE,
+            4,
+          );
+        },
       });
       engineRef.current = engine;
       engine.start();
@@ -332,7 +356,7 @@ export default function InteriorOverlay({
   }, []);
 
   useEffect(() => {
-    if (building.id !== "medical-library" && building.id !== "medical-college") return;
+    if (building.id !== "medical-library" && building.id !== "medical-college" && building.id !== "little-theater") return;
     const handleLightning = (event: Event): void => {
       const detail = (event as CustomEvent<{ active?: boolean; duration?: number }>).detail;
       const active = detail?.active;
@@ -349,9 +373,11 @@ export default function InteriorOverlay({
     };
     window.addEventListener("zju-horror-library-lightning", handleLightning);
     window.addEventListener("zju-horror-medical-garage-lightning", handleLightning);
+    window.addEventListener("zju-horror-theater-lightning", handleLightning);
     return () => {
       window.removeEventListener("zju-horror-library-lightning", handleLightning);
       window.removeEventListener("zju-horror-medical-garage-lightning", handleLightning);
+      window.removeEventListener("zju-horror-theater-lightning", handleLightning);
     };
   }, [building.id]);
 
@@ -409,6 +435,7 @@ export default function InteriorOverlay({
       building.id !== "medical-library"
       && building.id !== "dorm-baisha"
       && building.id !== "medical-college"
+      && building.id !== "little-theater"
     ) return;
     let frame = 0;
     let lastDraw = 0;
@@ -419,8 +446,8 @@ export default function InteriorOverlay({
       const canvas = floorPlanRef.current;
       const snapshot = engineRef.current?.getInteriorMapSnapshot();
       if (!canvas) return;
-      const width = building.id === "medical-college" ? 280 : 154;
-      const height = building.id === "medical-college" ? 150 : 250;
+      const width = building.id === "medical-college" || building.id === "little-theater" ? 280 : 154;
+      const height = building.id === "medical-college" ? 150 : building.id === "little-theater" ? 190 : 250;
       const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
       if (canvas.width !== width * pixelRatio || canvas.height !== height * pixelRatio) {
         canvas.width = width * pixelRatio;
@@ -440,7 +467,12 @@ export default function InteriorOverlay({
       const mapHeight = spanZ * scale;
       const offsetX = (width - mapWidth) / 2;
       const offsetY = (height - mapHeight) / 2;
-      const mapX = (x: number) => offsetX + (x - snapshot.bounds.minX) * scale;
+      // The authored theater was exported with its plan's horizontal axis
+      // opposite to the player's first-person reading. Mirror only theater X;
+      // gameplay coordinates, objectives and collision remain unchanged.
+      const mapX = building.id === "little-theater"
+        ? (x: number) => offsetX + (snapshot.bounds.maxX - x) * scale
+        : (x: number) => offsetX + (x - snapshot.bounds.minX) * scale;
       // The authored Baisha model reads more naturally with the dormitory at
       // the lower-right of the plan. Mirror only its vertical map axis so the
       // room moves from upper-right to lower-right without swapping left/right.
@@ -480,10 +512,12 @@ export default function InteriorOverlay({
             : obstacle.kind === "shelf"
               ? "rgba(166, 139, 90, 0.9)"
               : "rgba(111, 125, 128, 0.48)";
+          const obstacleMinX = mapX(obstacle.minX);
+          const obstacleMaxX = mapX(obstacle.maxX);
           context.fillRect(
-            mapX(obstacle.minX),
+            Math.min(obstacleMinX, obstacleMaxX),
             mapY(obstacle.maxZ),
-            Math.max(1, (obstacle.maxX - obstacle.minX) * scale),
+            Math.max(1, Math.abs(obstacleMaxX - obstacleMinX)),
             Math.max(1, (obstacle.maxZ - obstacle.minZ) * scale),
           );
         }
@@ -583,7 +617,7 @@ export default function InteriorOverlay({
         context.restore();
       }
 
-      if (snapshot.ghost?.state === "chase" || snapshot.ghost?.state === "garage") {
+      if (snapshot.ghost?.state === "chase" || snapshot.ghost?.state === "garage" || snapshot.ghost?.state === "theater") {
         const ghostX = mapX(snapshot.ghost.x);
         const ghostY = mapY(snapshot.ghost.z);
         const pulse = 4.1 + Math.sin(time * 0.012) * 0.8;
@@ -773,6 +807,10 @@ export default function InteriorOverlay({
               ? assetState === "failed"
                 ? "医学院 / 场景读取失败，请刷新后重试"
                 : "医学院 / 黑暗中有什么正在显现"
+              : building.id === "little-theater"
+                ? assetState === "failed"
+                  ? "小剧场 / 场景读取失败，请刷新后重试"
+                  : "小剧场 / 最后一场演出正在装片"
               : assetState === "failed"
                 ? "白沙宿舍 / 场景读取失败，请刷新后重试"
                 : "白沙宿舍 / 正在适应黑暗"}
@@ -822,6 +860,14 @@ export default function InteriorOverlay({
         snapshot={medicalBasementSnapshot}
         modal={medicalBasementModal}
         onModalClosed={() => setMedicalBasementModal(null)}
+      />
+
+      <TheaterExperience
+        active={building.id === "little-theater"}
+        engineRef={engineRef}
+        snapshot={theaterSnapshot}
+        modal={theaterModal}
+        onModalClosed={() => setTheaterModal(null)}
       />
 
       {building.id === "medical-college" && medicalTopSnapshot && (
@@ -937,11 +983,11 @@ export default function InteriorOverlay({
       )}
 
       {/* Top-right authored floor plan. Hidden story/scare points are never previewed. */}
-      {(building.id === "medical-library" || building.id === "dorm-baisha" || building.id === "medical-college") && (
+      {(building.id === "medical-library" || building.id === "dorm-baisha" || building.id === "medical-college" || building.id === "little-theater") && (
         <div
           style={{
             ...styles.floorPlan,
-            ...(building.id === "medical-college" ? styles.medicalFloorPlan : undefined),
+            ...(building.id === "medical-college" || building.id === "little-theater" ? styles.medicalFloorPlan : undefined),
           }}
           aria-label={`${building.name}平面图`}
         >
@@ -951,7 +997,9 @@ export default function InteriorOverlay({
                 ? "农医馆"
                 : building.id === "dorm-baisha"
                   ? "白沙宿舍"
-                  : "医学院"}
+                  : building.id === "little-theater"
+                    ? "小剧场"
+                    : "医学院"}
             </strong>
             <span>{building.id === "medical-college" ? "当前层平面图" : "平面图"}</span>
           </div>
@@ -959,7 +1007,7 @@ export default function InteriorOverlay({
             ref={floorPlanRef}
             style={{
               ...styles.floorPlanCanvas,
-              ...(building.id === "medical-college" ? styles.medicalFloorPlanCanvas : undefined),
+              ...(building.id === "medical-college" || building.id === "little-theater" ? styles.medicalFloorPlanCanvas : undefined),
             }}
           />
           <div style={styles.floorPlanLegend}>
@@ -1059,7 +1107,37 @@ export default function InteriorOverlay({
           </aside>
         </>
       )}
-      {building.id !== "medical-library" && building.id !== "dorm-baisha" && building.id !== "medical-college" && (
+      {building.id === "little-theater" && theaterSnapshot && (
+        <>
+          <aside style={styles.inventoryRail} aria-label="小剧场道具栏">
+            <strong style={styles.sideRailTitle}>终章道具</strong>
+            <div style={{ ...styles.inventorySlot, ...(theaterSnapshot.hasFilm ? styles.inventorySlotOwned : undefined) }}>
+              <i style={styles.inventoryIcon}>{theaterSnapshot.hasFilm ? "片" : "·"}</i>
+              <span>
+                苏婉旧胶片
+                {theaterSnapshot.hasFilm && <small style={styles.inventorySlotStatus}>最终放映所需</small>}
+              </span>
+            </div>
+          </aside>
+          <aside style={{ ...styles.storyChain, ...styles.medicalStoryChain }} aria-label="小剧场剧情链">
+            <strong style={styles.sideRailTitle}>最后一场演出</strong>
+            {THEATER_STEPS.map((label, index) => {
+              const progress = theaterProgressIndex(theaterSnapshot.stage);
+              return (
+                <div key={label} style={{
+                  ...styles.storyStep,
+                  ...(index < progress ? styles.storyStepComplete : undefined),
+                  ...(index === progress ? styles.storyStepActive : undefined),
+                }}>
+                  <i style={styles.storyStepDot} />
+                  <span>{label}</span>
+                </div>
+              );
+            })}
+          </aside>
+        </>
+      )}
+      {building.id !== "medical-library" && building.id !== "dorm-baisha" && building.id !== "medical-college" && building.id !== "little-theater" && (
         <button
           style={{
             ...styles.exitBtn,

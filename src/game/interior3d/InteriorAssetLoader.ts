@@ -3,6 +3,14 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 import type { RoomKind } from "./buildRoom";
 import { assetUrl } from "../assetPath";
 import { buildInteriorCollisionMap, type InteriorCollisionMap } from "./InteriorCollisionMap";
+import {
+  THEATER_MAIN_DOOR_VISUAL_NAME,
+  THEATER_BACKSTAGE_DOOR_VISUAL_NAME,
+  THEATER_BACKSTAGE_REAR_DOOR_VISUAL_NAME,
+  theaterFloorHeightAt,
+  type TheaterGameplayMeta,
+} from "./theaterData";
+import { prepareTheaterDoorVisual, removeTheaterAudienceRows } from "./theaterGeometry";
 
 export interface InteriorAssetMeta {
   assetVersion: number;
@@ -175,6 +183,7 @@ export interface InteriorAssetMeta {
   medicalTopGameplay?: MedicalTopGameplayMeta;
   medicalGarageGameplay?: MedicalGarageGameplayMeta;
   medicalBasementGameplay?: MedicalBasementGameplayMeta;
+  theaterGameplay?: TheaterGameplayMeta;
   notes?: string[];
 }
 
@@ -371,6 +380,13 @@ const ASSET_SOURCES: Record<string, InteriorAssetSource> = {
     additionalModels: ["baisha-dorm-props.glb", "baisha-corridor-props.glb", "baisha-chase-props.glb"],
     metaFile: "scene01.meta.json",
   },
+  "little-theater:hall": {
+    rootPath: "models/interiors/theater",
+    model: "theater.glb",
+    cacheVersion: "theater-final-v9-seat-mesh-fade",
+    additionalModels: ["theater-gameplay-props.glb"],
+    metaFile: "theater-gameplay.meta.json",
+  },
 };
 
 let loader: import("three/examples/jsm/loaders/GLTFLoader.js").GLTFLoader | undefined;
@@ -512,6 +528,31 @@ export async function loadMedicalTopAuxiliary(file: string): Promise<MedicalTopA
   let parsed: Awaited<ReturnType<typeof gltfLoader.parseAsync>>;
   try {
     parsed = await gltfLoader.parseAsync(buffer, assetUrl(`${MEDICAL_TOP_ROOT}/`));
+  } finally {
+    binaryAssetPromises.delete(url);
+  }
+  const root = parsed.scene as THREE.Group;
+  tuneLoadedScene(root);
+  const bounds = new THREE.Box3().setFromObject(root);
+  const collisionMap = buildInteriorCollisionMap(root, bounds);
+  return {
+    root,
+    bounds,
+    collisionMap,
+    dispose: () => disposeLoadedScene(root),
+  };
+}
+
+/** Load a reusable authored object without coupling it to the current interior's root path. */
+export async function loadInteriorRuntimeAsset(relativePath: string): Promise<MedicalTopAuxiliaryHandle> {
+  const gltfLoader = await getLoader();
+  const url = assetUrl(relativePath);
+  const buffer = await fetchBinaryAsset(url);
+  const slash = relativePath.lastIndexOf("/");
+  const basePath = slash >= 0 ? relativePath.slice(0, slash + 1) : "";
+  let parsed: Awaited<ReturnType<typeof gltfLoader.parseAsync>>;
+  try {
+    parsed = await gltfLoader.parseAsync(buffer, assetUrl(basePath));
   } finally {
     binaryAssetPromises.delete(url);
   }
@@ -894,9 +935,31 @@ export async function loadInteriorAsset(req: InteriorAssetRequest): Promise<Inte
   tuneLoadedScene(authoredBaseRoot);
   applySourceOffset(authoredBaseRoot, source, req.medicalSegment);
   const bounds = new THREE.Box3().setFromObject(authoredBaseRoot);
+  const theaterMeta = meta?.theaterGameplay;
+  const theaterDoors: THREE.Object3D[] = [];
+  if (req.buildingId === "little-theater" && theaterMeta) {
+    theaterDoors.push(
+      prepareTheaterDoorVisual(authoredBaseRoot, theaterMeta.mainDoor, THEATER_MAIN_DOOR_VISUAL_NAME),
+      prepareTheaterDoorVisual(authoredBaseRoot, theaterMeta.backstageDoor, THEATER_BACKSTAGE_DOOR_VISUAL_NAME),
+      prepareTheaterDoorVisual(authoredBaseRoot, theaterMeta.backstageRearDoor, THEATER_BACKSTAGE_REAR_DOOR_VISUAL_NAME),
+    );
+    removeTheaterAudienceRows(authoredBaseRoot, theaterMeta.removedAudienceRows);
+    for (const section of theaterMeta.removedAudienceSections ?? []) {
+      removeTheaterAudienceRows(authoredBaseRoot, section);
+    }
+  }
   // Collision is projected from the original object granularity. Rendering
   // batches must never change obstacle classification or navigation gaps.
-  const collisionMap = buildInteriorCollisionMap(authoredBaseRoot, bounds);
+  // The theater venue stands on a raised foyer platform with terraced
+  // auditorium seating, so its slice follows the local floor height and lifts
+  // the cutoff past the 18 cm step risers.
+  const collisionMap = req.buildingId === "little-theater"
+    ? buildInteriorCollisionMap(authoredBaseRoot, bounds, {
+      floorHeightAt: (x, z) => theaterFloorHeightAt(x, z, theaterMeta?.walkableSurfaces),
+      floorCutoff: 0.2,
+      excludeObjects: theaterDoors,
+    })
+    : buildInteriorCollisionMap(authoredBaseRoot, bounds);
   if (req.buildingId === "dorm-baisha" && req.roomKind === "dorm") {
     prepareBaishaTrueExitVisuals(authoredBaseRoot, meta?.baishaGameplay?.chase?.trueExit);
     applyBaishaWindowCutout(authoredBaseRoot, meta?.baishaCorridorWindow);
@@ -923,6 +986,15 @@ export async function loadInteriorAsset(req: InteriorAssetRequest): Promise<Inte
           name: "library-static-batches",
           spatialCellSize: 10,
         })
+      : req.buildingId === "little-theater" && req.roomKind === "hall"
+        ? batchStaticScene(authoredBaseRoot, [
+            THEATER_MAIN_DOOR_VISUAL_NAME,
+            THEATER_BACKSTAGE_DOOR_VISUAL_NAME,
+            THEATER_BACKSTAGE_REAR_DOOR_VISUAL_NAME,
+          ], {
+            name: "theater-static-batches",
+            spatialCellSize: 8,
+          })
       : authoredBaseRoot;
   const root = new THREE.Group();
   root.name = "medical-library-asset";

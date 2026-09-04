@@ -10,6 +10,7 @@
     "test:development-mode": "node tools/verify-development-mode.mjs",
     "test:exterior-interaction": "node tools/verify-exterior-interaction.mjs",
     "test:road-movement": "node tools/verify-road-movement-contract.mjs",
+    "test:theater-runtime": "node tools/verify-theater-runtime.mjs",
     "assets:prepare:r2": "node tools/prepare_r2_runtime_assets.mjs"
   },
   "dependencies": {

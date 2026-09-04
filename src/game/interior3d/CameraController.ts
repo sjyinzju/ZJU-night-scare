@@ -37,6 +37,11 @@ export class CameraController {
     return this.yaw;
   }
 
+  /** Current vertical look angle (radians), used by authored camera transitions. */
+  get currentPitch(): number {
+    return this.pitch;
+  }
+
   // ── Look input ──
 
   /** Desktop mouse look — called while pointer is locked. */

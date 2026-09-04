@@ -22,6 +22,7 @@ import {
   getInteriorAssetObject,
   loadInteriorAsset,
   loadMedicalTopAuxiliary,
+  loadInteriorRuntimeAsset,
   preloadMedicalTopAuxiliary,
   preloadNextMedicalInteriorSegment,
   type InteriorAssetHandle,
@@ -33,7 +34,8 @@ import {
   type MedicalTopRoomId,
   type MedicalInteriorSegment,
 } from "./InteriorAssetLoader";
-import type { InteriorCollisionMap, InteriorMapObstacle } from "./InteriorCollisionMap";
+import { cutObstacleByClearZone, type InteriorCollisionMap, type InteriorMapObstacle } from "./InteriorCollisionMap";
+import { AabbSpatialIndex } from "./InteriorCollisionSpatialIndex";
 import {
   playBaishaThunder,
   playLibraryThunder,
@@ -66,6 +68,8 @@ import {
   type MedicalBasementSnapshot,
   type MedicalBasementStage,
 } from "./medicalBasementData";
+import { TheaterGameplayRuntime } from "./TheaterGameplayRuntime";
+import { theaterFloorHeightAt, type TheaterModal, type TheaterSnapshot } from "./theaterData";
 
 export type InteriorAssetState = "loading" | "ready" | "failed";
 export type BaishaGameplayPhase = "photo" | "balcony" | "computer" | "paused" | "complete";
@@ -74,28 +78,6 @@ export type BaishaGhostState = "dormant" | "chase";
 type BaishaChaseBranch = "shortcut" | "pursuit";
 
 type NavigationClearZone = NonNullable<InteriorAssetMeta["navigationClearZones"]>[number];
-
-/** Remove only the authored clear rectangle, preserving the surrounding wall/furniture collision. */
-function cutObstacleByClearZone(obstacle: InteriorMapObstacle, zone: NavigationClearZone): InteriorMapObstacle[] {
-  if (zone.kind && zone.kind !== obstacle.kind) return [obstacle];
-  const cutMinX = Math.max(obstacle.minX, zone.minX);
-  const cutMaxX = Math.min(obstacle.maxX, zone.maxX);
-  const cutMinZ = Math.max(obstacle.minZ, zone.minZ);
-  const cutMaxZ = Math.min(obstacle.maxZ, zone.maxZ);
-  if (cutMinX >= cutMaxX || cutMinZ >= cutMaxZ) return [obstacle];
-
-  const pieces: InteriorMapObstacle[] = [];
-  const add = (minX: number, maxX: number, minZ: number, maxZ: number): void => {
-    if (maxX - minX > 0.001 && maxZ - minZ > 0.001) {
-      pieces.push({ minX, maxX, minZ, maxZ, kind: obstacle.kind });
-    }
-  };
-  add(obstacle.minX, cutMinX, obstacle.minZ, obstacle.maxZ);
-  add(cutMaxX, obstacle.maxX, obstacle.minZ, obstacle.maxZ);
-  add(cutMinX, cutMaxX, obstacle.minZ, cutMinZ);
-  add(cutMinX, cutMaxX, cutMaxZ, obstacle.maxZ);
-  return pieces;
-}
 
 function cutAabbByClearZone(obstacle: AABB, zone: NavigationClearZone): AABB[] {
   const pieces = cutObstacleByClearZone({
@@ -140,7 +122,7 @@ export interface InteriorMapSnapshot {
   obstacles: InteriorMapObstacle[];
   player: { x: number; z: number };
   objective?: { x: number; z: number };
-  ghost?: { x: number; z: number; state: BaishaGhostState | "garage" };
+  ghost?: { x: number; z: number; state: BaishaGhostState | "garage" | "theater" };
   fallenPerson?: { x: number; z: number };
   exitSegment?: { minX: number; maxX: number; z: number; color?: "red" | "green" };
   layoutPaths?: Array<Array<{ x: number; z: number }>>;
@@ -218,6 +200,12 @@ export interface Interior3DOptions {
     evidenceIds: MedicalBasementEvidenceId[];
     conclusion: MedicalBasementConclusionId;
   }) => void;
+  /** Reports final-theater state for the minimap and authored HUD. */
+  onTheaterStateChange?: (snapshot: TheaterSnapshot) => void;
+  /** Opens a foyer, mirror, archive, blackout, or finale presentation. */
+  onTheaterModal?: (modal: TheaterModal) => void;
+  /** Contact during the theater chase is scary but never blocks movement. */
+  onTheaterChaseHit?: () => void;
 }
 
 const DEFAULT_PLAYER_RADIUS = 0.32;
@@ -282,6 +270,7 @@ export class Interior3D {
   private room: RoomBuildResult;
   private readonly roomKind: RoomKind;
   private colliders: AABB[];
+  private theaterColliderIndex?: AabbSpatialIndex;
   private staticColliderSet = false;
   private bounds: AABB;
   private playerRadius = DEFAULT_PLAYER_RADIUS;
@@ -333,6 +322,12 @@ export class Interior3D {
     evidenceIds: MedicalBasementEvidenceId[];
     conclusion: MedicalBasementConclusionId;
   }) => void;
+  private readonly onTheaterStateChange?: (snapshot: TheaterSnapshot) => void;
+  private readonly onTheaterModal?: (modal: TheaterModal) => void;
+  private readonly onTheaterChaseHit?: () => void;
+  private theaterGameplay?: TheaterGameplayRuntime;
+  private theaterGhostAsset?: MedicalTopAuxiliaryHandle;
+  private theaterPhotoFrameAsset?: MedicalTopAuxiliaryHandle;
   private runtimeStamina = 100;
   private persistedStamina = 100;
   private staminaStoreSyncElapsed = 0;
@@ -417,6 +412,8 @@ export class Interior3D {
   private readonly baishaShadowCameraPosition = new THREE.Vector3(Number.NaN, Number.NaN, Number.NaN);
   private readonly baishaShadowCameraQuaternion = new THREE.Quaternion(Number.NaN, Number.NaN, Number.NaN, Number.NaN);
   private gameplayPaused = false;
+  /** The final theater camera move temporarily owns look input independently of other pause flows. */
+  private theaterLookInputLocked = false;
 
   private medicalTopMeta?: MedicalTopGameplayMeta;
   private medicalTopStage: MedicalTopStage = "notice";
@@ -573,6 +570,15 @@ export class Interior3D {
   private readonly onResize = () => this.resize();
   private readonly onKeyDown = (e: KeyboardEvent) => {
     if (e.code === "F3") { e.preventDefault(); this.toggleColliderDebug(); return; }
+    if (
+      e.code === "F8"
+      && import.meta.env.DEV
+      && new URLSearchParams(window.location.search).get("theaterDebug") === "1"
+    ) {
+      e.preventDefault();
+      this.theaterGameplay?.debugMoveToObjective();
+      return;
+    }
     if (e.code === "KeyE") { e.preventDefault(); this.ePressed = true; return; }
     this.inputManager.handleKeyDown(e);
   };
@@ -585,7 +591,10 @@ export class Interior3D {
   private readonly onVisibilityChange = () => {
     if (document.hidden) this.resetInput();
   };
-  private readonly onMouseMove = (e: MouseEvent) => this.handleMouseMove(e);
+  private readonly onMouseMove = (e: MouseEvent) => {
+    if (this.theaterLookInputLocked) return;
+    this.handleMouseMove(e);
+  };
   private readonly onPointerLockChange = () => {
     this.pointerLocked = document.pointerLockElement === this.renderer.domElement;
     if (!this.pointerLocked) this.resetInput();
@@ -622,6 +631,9 @@ export class Interior3D {
     this.onMedicalBasementStateChange = options.onMedicalBasementStateChange;
     this.onMedicalBasementModal = options.onMedicalBasementModal;
     this.onMedicalBasementComplete = options.onMedicalBasementComplete;
+    this.onTheaterStateChange = options.onTheaterStateChange;
+    this.onTheaterModal = options.onTheaterModal;
+    this.onTheaterChaseHit = options.onTheaterChaseHit;
     // Review-only noclip remains available for inspecting the Baisha asset.
     // The medical school used to need it because the teaching floor plate sat
     // inside the collision slice; the loader now shifts the asset down 0.5 m
@@ -761,7 +773,7 @@ export class Interior3D {
       collidesAt: (x, _y, z) => this.collides(x, z),
       bounds: this.bounds,
       playerRadius: this.playerRadius,
-      floorHeightAt: (x, z) => this.room.floorHeightAt(x, z),
+      floorHeightAt: (x, z) => this.floorHeightAt(x, z),
     });
 
     this.stateMachine = new MovementStateMachine();
@@ -812,6 +824,7 @@ export class Interior3D {
 
   /** Apply a look delta (pixels). Used by touch drag. */
   addLook(dx: number, dy: number): void {
+    if (this.theaterLookInputLocked) return;
     this.cameraController.addTouchLook(dx, dy);
   }
 
@@ -836,6 +849,34 @@ export class Interior3D {
     this.moveCtx.velocity.x = 0;
     this.moveCtx.velocity.y = 0;
     this.ePressed = false;
+  }
+
+  completeTheaterFoyer(): void {
+    this.theaterGameplay?.completeFoyer();
+  }
+
+  completeTheaterMirror(): void {
+    this.theaterGameplay?.completeMirror();
+  }
+
+  completeTheaterCutSong(): void {
+    this.theaterGameplay?.completeCutSong();
+  }
+
+  beginTheaterProjection(): void {
+    this.theaterGameplay?.beginProjection();
+  }
+
+  showTheaterProjection(relativePath: string): void {
+    this.theaterGameplay?.showProjection(relativePath);
+  }
+
+  finishTheaterProjection(): void {
+    this.theaterGameplay?.finishProjection();
+  }
+
+  completeTheater(): void {
+    this.theaterGameplay?.complete();
   }
 
   /** Called by the rules overlay after bottom + hidden three-second hold. */
@@ -1115,7 +1156,7 @@ export class Interior3D {
     const collisionMap = this.assetHandle?.collisionMap;
     if (
       !collisionMap
-      || (this.roomKind !== "library" && this.roomKind !== "dorm" && this.roomKind !== "medical")
+      || (this.roomKind !== "library" && this.roomKind !== "dorm" && this.roomKind !== "medical" && !this.theaterGameplay)
     ) return null;
     const sceneId = this.getStorySceneId?.();
     let objective: InteriorMapSnapshot["objective"];
@@ -1172,6 +1213,8 @@ export class Interior3D {
       } else if (target === "exit") {
         objective = { x: this.medicalBasementMeta.anatomyDoor.x, z: this.medicalBasementMeta.anatomyDoor.z };
       }
+    } else if (this.theaterGameplay) {
+      objective = this.theaterGameplay.getSnapshot().objective;
     }
     const fallReveal = this.assetHandle?.meta?.fallReveal;
     const baishaMinimap = this.roomKind === "dorm"
@@ -1196,7 +1239,13 @@ export class Interior3D {
       obstacles: mapObstacles,
       player: { x: this.camera.position.x, z: this.camera.position.z },
       objective,
-      ghost: this.medicalGarageGhost?.visible && this.medicalGarageMeta
+      ghost: this.theaterGameplay?.getSnapshot().ghost
+        ? {
+            x: this.theaterGameplay.getSnapshot().ghost!.x,
+            z: this.theaterGameplay.getSnapshot().ghost!.z,
+            state: "theater" as const,
+          }
+        : this.medicalGarageGhost?.visible && this.medicalGarageMeta
         ? {
             x: this.medicalGarageGhost.position.x,
             z: this.medicalGarageGhost.position.z,
@@ -1599,6 +1648,7 @@ export class Interior3D {
 
   /** Nearest door interaction hint text, or "" when nothing is in range. */
   get doorHint(): string {
+    if (this.theaterGameplay) return this.theaterGameplay.interactionHint;
     if (this.medicalTopMeta && this.medicalSegment === "top") return this.medicalTopInteractionHint();
     // The authored garage/basement GLBs own their navigation. Do not expose
     // the obsolete procedural medical-room door that still exists behind the
@@ -1750,6 +1800,12 @@ export class Interior3D {
     this.medicalBasementApparitionTexture?.dispose();
     this.medicalBasementApparitionTexture = undefined;
     this.medicalBasementAnatomyDoorVisuals = [];
+    this.theaterGameplay?.dispose();
+    this.theaterGameplay = undefined;
+    this.theaterGhostAsset?.dispose();
+    this.theaterGhostAsset = undefined;
+    this.theaterPhotoFrameAsset?.dispose();
+    this.theaterPhotoFrameAsset = undefined;
     this.assetHandle?.dispose();
     this.assetHandle = undefined;
     this.assetPickupVisuals.clear();
@@ -1763,6 +1819,7 @@ export class Interior3D {
     stopLibraryStorm();
     window.dispatchEvent(new CustomEvent("zju-horror-library-lightning", { detail: { active: false } }));
     window.dispatchEvent(new CustomEvent("zju-horror-medical-garage-lightning", { detail: { active: false } }));
+    window.dispatchEvent(new CustomEvent("zju-horror-theater-lightning", { detail: { active: false } }));
     this.clearAssetFlickerLights();
     this.clearAssetCeilingLights();
     this.clearBaishaLighting();
@@ -1793,8 +1850,8 @@ export class Interior3D {
   }
 
   private async loadStaticInteriorAsset(buildingId: string): Promise<void> {
-    const requiresAuthoredAsset = buildingId === "medical-college";
-    const medicalSegment = requiresAuthoredAsset
+    const requiresAuthoredAsset = buildingId === "medical-college" || buildingId === "little-theater";
+    const medicalSegment = buildingId === "medical-college"
       ? getMedicalInteriorSegment(this.getStorySceneId?.())
       : undefined;
     this.medicalSegment = medicalSegment;
@@ -1831,9 +1888,10 @@ export class Interior3D {
       this.setupMedicalTopGameplay(handle);
       await this.setupMedicalGarageGameplay(handle);
       await this.setupMedicalBasementGameplay(handle);
+      await this.setupTheaterGameplay(handle);
       this.addBaishaLighting(handle);
       this.setupBaishaGameplay(handle);
-      this.suppressLegacyGuidance = this.roomKind === "library" || !handle.meta;
+      this.suppressLegacyGuidance = this.roomKind === "library" || buildingId === "little-theater" || !handle.meta;
       if (this.suppressLegacyGuidance) {
         this.bloodLightEnabled = false;
         this.bloodLight.intensity = 0;
@@ -1935,7 +1993,7 @@ export class Interior3D {
       !collider.isActive && !collider.activeSceneIds?.length
     ));
     const hiddenBodyBounds = handle.meta?.fallReveal?.mapBounds;
-    this.interiorMapObstacles = hiddenBodyBounds
+    const visibleMapObstacles = hiddenBodyBounds
       ? handle.collisionMap.obstacles.filter((obstacle) => (
         obstacle.maxX < hiddenBodyBounds.minX
         || obstacle.minX > hiddenBodyBounds.maxX
@@ -1943,6 +2001,12 @@ export class Interior3D {
         || obstacle.minZ > hiddenBodyBounds.maxZ
       ))
       : handle.collisionMap.obstacles;
+    this.interiorMapObstacles = visibleMapObstacles.flatMap((obstacle) => (
+      clearZones.reduce<InteriorMapObstacle[]>(
+        (pieces, zone) => pieces.flatMap((piece) => cutObstacleByClearZone(piece, zone)),
+        [obstacle],
+      )
+    ));
     this.interiorMapObstacles = [...this.interiorMapObstacles, ...boundaryWallObstacles];
     this.playerRadius = AUTHORED_LIBRARY_PLAYER_RADIUS;
     this.moveCtx.playerRadius = this.playerRadius;
@@ -1954,6 +2018,78 @@ export class Interior3D {
     // heading while keeping the playable first-person view near eye level.
     const playablePitch = THREE.MathUtils.clamp(handle.viewpoint.pitch, -0.4, 0.4);
     this.cameraController.setLook(handle.viewpoint.yaw, playablePitch);
+  }
+
+  private async setupTheaterGameplay(handle: InteriorAssetHandle): Promise<void> {
+    const meta = handle.meta?.theaterGameplay;
+    if (this.buildingId !== "little-theater" || !meta) return;
+
+    this.renderer.toneMappingExposure = 0.72;
+    this.ambientLight.color.setHex(0x202633);
+    this.ambientLight.intensity = 0.38;
+    this.fillLight.color.setHex(0x293a52);
+    this.fillLight.groundColor.setHex(0x07080d);
+    this.fillLight.intensity = 0.28;
+    this.nearFillLight.color.setHex(0xaebed8);
+    this.nearFillLight.intensity = 0.42;
+    if (this.scene.fog instanceof THREE.Fog) {
+      this.scene.fog.color.setHex(0x06080d);
+      this.scene.fog.near = 6;
+      this.scene.fog.far = 38;
+    }
+    this.scene.background = new THREE.Color(0x06080d);
+
+    const [ghostAsset, photoFrameAsset] = await Promise.all([
+      loadInteriorRuntimeAsset(meta.ghost.model),
+      loadInteriorRuntimeAsset(meta.photoFrame.model),
+    ]);
+    if (this.disposed) {
+      ghostAsset.dispose();
+      photoFrameAsset.dispose();
+      return;
+    }
+    const sourceGhost = getInteriorAssetObject(ghostAsset.root, meta.ghost.objectName);
+    const sourcePhotoFrame = getInteriorAssetObject(photoFrameAsset.root, meta.photoFrame.objectName);
+    if (!sourceGhost) {
+      ghostAsset.dispose();
+      photoFrameAsset.dispose();
+      throw new Error(`Theater ghost object was not found: ${meta.ghost.objectName}`);
+    }
+    if (!sourcePhotoFrame) {
+      ghostAsset.dispose();
+      photoFrameAsset.dispose();
+      throw new Error(`Theater photo frame object was not found: ${meta.photoFrame.objectName}`);
+    }
+    this.theaterGhostAsset = ghostAsset;
+    this.theaterPhotoFrameAsset = photoFrameAsset;
+    const ghost = sourceGhost.clone(true);
+    const photoFrame = sourcePhotoFrame.clone(true);
+    this.theaterGameplay = new TheaterGameplayRuntime({
+      scene: this.scene,
+      camera: this.camera,
+      root: handle.root,
+      meta,
+      ghost,
+      photoFrame,
+      ambientLight: this.ambientLight,
+      fillLight: this.fillLight,
+      nearFillLight: this.nearFillLight,
+      setPaused: (paused) => this.setGameplayPaused(paused),
+      getCameraLook: () => ({
+        yaw: this.cameraController.currentYaw,
+        pitch: this.cameraController.currentPitch,
+      }),
+      setCameraLook: (yaw, pitch) => this.cameraController.setLook(yaw, pitch),
+      setLookInputLocked: (locked) => { this.theaterLookInputLocked = locked; },
+      onPickup: (itemId, name) => this.onPickup?.(itemId, name),
+      onModal: (modal) => this.onTheaterModal?.(modal),
+      onStateChange: (snapshot) => this.onTheaterStateChange?.(snapshot),
+      onChaseHit: () => this.onTheaterChaseHit?.(),
+    });
+    this.colliders.push(...this.theaterGameplay.colliders);
+    this.theaterColliderIndex = new AabbSpatialIndex(this.colliders, 2.5, this.playerRadius);
+    this.staticColliderSet = false;
+    this.cameraController.setLook(meta.spawn.yaw ?? Math.PI, -0.04);
   }
 
   private medicalTopInteractionHint(): string {
@@ -5562,7 +5698,8 @@ export class Interior3D {
         return true;
       }
     }
-    for (const c of this.colliders) {
+    const candidates = this.theaterColliderIndex?.query(x, z) ?? this.colliders;
+    for (const c of candidates) {
       if (!this.isColliderActive(c)) continue;
       if (
         x > c.minX - this.playerRadius &&
@@ -5601,6 +5738,17 @@ export class Interior3D {
     return new THREE.Vector3(baseX, origin.y, baseZ);
   }
 
+  private floorHeightAt(x: number, z: number): number {
+    if (this.buildingId !== "little-theater" || !this.assetHandle?.meta?.theaterGameplay) {
+      return this.room.floorHeightAt(x, z);
+    }
+    // The authored auditorium rises in 18 cm terraces toward the glass foyer.
+    // Treating it as the procedural room's flat Y=0 floor put the camera below
+    // the 1.65 m foyer platform and made the player appear outside underground.
+    // The same function drives collision rasterization in InteriorAssetLoader.
+    return theaterFloorHeightAt(x, z, this.assetHandle.meta.theaterGameplay.walkableSurfaces);
+  }
+
   private findNearestClearPoint(origin: THREE.Vector3): THREE.Vector3 | null {
     const candidates: THREE.Vector3[] = [origin.clone()];
     const sortedNodes = [...this.room.guideNodes].sort(
@@ -5631,7 +5779,8 @@ export class Interior3D {
     for (let pass = 0; pass < 8; pass++) {
       if (this.perfEnabled) this.perfPenetrationScans++;
       let moved = false;
-      for (const collider of this.colliders) {
+      const candidates = this.theaterColliderIndex?.query(pos.x, pos.z) ?? this.colliders;
+      for (const collider of candidates) {
         if (!this.isColliderActive(collider)) continue;
         const push = this.getPenetrationPush(pos.x, pos.z, collider);
         if (!push) continue;
@@ -5728,6 +5877,15 @@ export class Interior3D {
     const libraryProfile = this.roomKind === "library";
     const baishaProfile = this.roomKind === "dorm" && this.baishaTubes.length > 0;
     const medicalProfile = this.roomKind === "medical" && Boolean(this.assetHandle);
+    const theaterProfile = this.buildingId === "little-theater" && Boolean(this.theaterGameplay);
+    const theaterStage = this.theaterGameplay?.currentStage;
+    const theaterBackstageDark = theaterStage === "backstage-dark"
+      || theaterStage === "mirror-target"
+      || theaterStage === "mirror-sequence"
+      || theaterStage === "cut-song-target"
+      || theaterStage === "cut-song-story";
+    const theaterBlackout = theaterStage === "blackout";
+    const theaterProjection = theaterStage === "projection" || theaterStage === "finale" || theaterStage === "complete";
     const medicalGarageProfile = medicalProfile && this.medicalSegment === "garage" && Boolean(this.medicalGarageMeta);
     const medicalBasementProfile = medicalProfile && this.medicalSegment === "basement";
     const medicalGarageLightWindow = medicalGarageProfile && (
@@ -5753,7 +5911,9 @@ export class Interior3D {
     // been mapped yet. It must not inherit the diagnostic 8x flashlight used
     // for genuinely unmapped model previews.
     const previewingUnmappedAsset = Boolean(this.assetHandle && !this.assetHandle.meta && !medicalProfile);
-    const targetAmbient = medicalProfile
+    const targetAmbient = theaterProfile
+      ? theaterBlackout ? 0.002 : theaterBackstageDark ? 0.035 : theaterProjection ? 0.1 : 0.16
+      : medicalProfile
       ? medicalGarageLightning ? 1.08
         : medicalBlackout ? medicalGarageProfile ? 0.18 : 0.005
           : medicalGarageProfile ? 0.23 : medicalBasementProfile ? 0.34 : medicalBedPulse ? 0.48 : hasFlashlight ? 0.28 : 0.18
@@ -5761,7 +5921,9 @@ export class Interior3D {
       ? 0.32
       : baishaProfile ? 0.18
       : hasFlashlight ? (libraryProfile ? 0.34 : 0.85) : libraryProfile ? 0.18 : 0.22;
-    const targetFill = medicalProfile
+    const targetFill = theaterProfile
+      ? theaterBlackout ? 0 : theaterBackstageDark ? 0.025 : theaterProjection ? 0.06 : 0.1
+      : medicalProfile
       ? medicalGarageLightning ? 0.9
         : medicalBlackout ? medicalGarageProfile ? 0.13 : 0
           : medicalGarageProfile ? 0.18 : medicalBasementProfile ? 0.24 : medicalBedPulse ? 0.34 : hasFlashlight ? 0.18 : 0.1
@@ -5769,7 +5931,9 @@ export class Interior3D {
       ? 0.18
       : baishaProfile ? 0.1
       : hasFlashlight ? (libraryProfile ? 0.22 : 0.55) : libraryProfile ? 0.11 : 0.14;
-    const targetNear = medicalProfile
+    const targetNear = theaterProfile
+      ? theaterBlackout ? 0 : theaterBackstageDark ? 0.08 : theaterProjection ? 0.08 : 0.18
+      : medicalProfile
       ? medicalGarageLightning ? 0.82
         : medicalBlackout ? medicalGarageProfile ? 0.11 : 0
           : medicalGarageProfile ? 0.19 : medicalBasementProfile ? 0.27 : medicalBedPulse ? 0.38 : hasFlashlight ? 0.16 : 0.08
@@ -5788,6 +5952,7 @@ export class Interior3D {
       this.flashlightSys.update(dt, t);
       if (previewingUnmappedAsset) this.flashlight.intensity *= 8;
       if (medicalProfile) this.flashlight.intensity *= medicalGarageProfile ? 1.05 : 0.48;
+      if (theaterProfile) this.flashlight.intensity *= theaterBlackout ? 0 : 0.72;
       if (this.fallRevealed) {
         // Outside, retain a readable beam while letting the red streetlamp own
         // the body reveal. Back in the shelf room it returns to full strength.
@@ -6144,6 +6309,11 @@ export class Interior3D {
     if (!this.staticColliderSet || hasHorizontalMotion) this.resolvePenetration();
 
     // 6. Resolve vertical movement (gravity + floor snap).
+    if (ctx.isOnGround && this.theaterGameplay) {
+      // The theater's authored tread heights are the walking surface. Apply
+      // the new tread in the same frame as XZ movement, without a jump input.
+      this.camera.position.y = ctx.floorHeightAt(this.camera.position.x, this.camera.position.z) + this.crouchState.eyeHeight;
+    }
     if (!ctx.isOnGround) {
       const posY = this.camera.position.y + ctx.velocityY * dt;
       const floorAtNewPos = ctx.floorHeightAt(this.camera.position.x, this.camera.position.z);
@@ -6188,6 +6358,12 @@ export class Interior3D {
       || this.medicalSegment === "garage"
       || this.medicalSegment === "basement"
     )) return;
+
+    if (this.theaterGameplay) {
+      if (this.theaterGameplay.update(dt, this.camera.position, this.ePressed)) this.ePressed = false;
+      this.updateGuideLine();
+      return;
+    }
 
     // 8. Collect pickups (automatic proximity or E within the wider manual range).
     this.collectPickups();

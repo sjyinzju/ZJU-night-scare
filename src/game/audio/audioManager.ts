@@ -211,6 +211,32 @@ export const audioManager = {
     ]);
   },
 
+  /** Let the auditorium fall quiet over the full rear-to-front light shutdown. */
+  fadeForTheaterBlackout(durationMs = 4800) {
+    if (!unlocked) return;
+    fadeMainBgm(0, durationMs);
+  },
+
+  /** Restart the score rather than resuming mid-track when the final reel begins. */
+  restartForTheaterProjection(volume = 0.11, durationMs = 1100) {
+    if (!unlocked) return;
+    if (mainBgmStopTimer) {
+      window.clearTimeout(mainBgmStopTimer);
+      mainBgmStopTimer = undefined;
+    }
+    mainBgmTracks.forEach((track) => {
+      track.howl.stop();
+      track.howl.volume(0);
+    });
+    ambientWind.stop();
+    ambientWind.volume(0);
+    mainBgmIndex = 0;
+    mainBgmTargetVolume = volume;
+    const first = mainBgmTracks[0].howl;
+    first.play();
+    first.fade(0, volume, durationMs);
+  },
+
   unlock() {
     if (unlocked) return;
     unlocked = true;
