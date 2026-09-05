@@ -1,0 +1,1009 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="《浙大夜惊魂》软件团队黑客松最终项目验收讲解" />
+  <title>浙大夜惊魂｜内部项目验收讲解</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=Noto+Sans+SC:wght@400;500;600;700&amp;family=Noto+Serif+SC:wght@600;700;800;900&amp;display=swap" rel="stylesheet" />
+  <style>
+    /* ===========================================
+       FIXED 16:9 STAGE: MANDATORY BASE STYLES
+       Include this ENTIRE file in every presentation.
+       Slides are authored at 1920×1080 and scaled as a whole.
+       =========================================== */
+
+    /* 1. Lock the browser viewport */
+    html,
+    body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: var(--stage-bg, #000);
+    }
+
+    /* 2. Full-window deck viewport */
+    .deck-viewport {
+        position: fixed;
+        inset: 0;
+        overflow: hidden;
+        background: var(--stage-bg, #000);
+    }
+
+    /* 3. Fixed 16:9 design canvas.
+       JavaScript sets transform: translate(...) scale(...). */
+    .deck-stage {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        transform-origin: 0 0;
+        background: var(--slide-bg, #fff);
+    }
+
+    /* 4. Slides stack inside the fixed stage.
+       Content must be laid out at 1920×1080, not reflowed per device. */
+    .slide {
+        position: absolute;
+        inset: 0;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        display: block;
+        visibility: hidden;
+        opacity: 0;
+        pointer-events: none;
+        background: var(--slide-bg, #fff);
+    }
+
+    .slide.active,
+    .slide.visible {
+        visibility: visible;
+        opacity: 1;
+        pointer-events: auto;
+        z-index: 1;
+    }
+
+    /* 5. Keep media inside authored slide bounds */
+    img,
+    video,
+    canvas,
+    svg {
+        max-width: 100%;
+        max-height: 100%;
+    }
+
+    /* 6. Presentation chrome stays outside the slide design system */
+    .deck-controls {
+        position: fixed;
+        left: 50%;
+        bottom: 22px;
+        transform: translateX(-50%);
+        z-index: 1000;
+    }
+
+    /* 7. Print one fixed-size slide per page */
+    @media print {
+        html,
+        body {
+            width: 1920px;
+            height: auto;
+            overflow: visible;
+            background: #fff;
+        }
+
+        .deck-viewport {
+            position: static;
+            overflow: visible;
+            background: #fff;
+        }
+
+        .deck-stage {
+            position: static;
+            width: auto;
+            height: auto;
+            transform: none !important;
+            background: none;
+        }
+
+        .slide {
+            position: relative;
+            display: block !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+            pointer-events: auto !important;
+            width: 1920px;
+            height: 1080px;
+            break-after: page;
+            page-break-after: always;
+        }
+
+        .slide:last-child {
+            break-after: auto;
+            page-break-after: auto;
+        }
+
+        .deck-controls {
+            display: none !important;
+        }
+    }
+
+    /* 8. Reduced motion */
+    @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+            animation-duration: 0.01ms !important;
+            transition-duration: 0.2s !important;
+        }
+    }
+
+    /* === BLACK / WHITE / CRIMSON DESIGN TOKENS ===
+       Three colors carry the whole deck. Gray values are neutral tints of white,
+       and crimson is reserved for hierarchy, direction and acceptance status. */
+    :root {
+      --stage-bg: #000000;
+      --slide-bg: #070707;
+      --black: #070707;
+      --black-2: #101010;
+      --white: #f2eee8;
+      --gray-1: #c8c3bd;
+      --gray-2: #8d8985;
+      --gray-3: #343231;
+      --crimson: #c7192d;
+      --crimson-dark: #710b17;
+      --line: rgba(242, 238, 232, 0.18);
+      --line-strong: rgba(242, 238, 232, 0.42);
+      --display: "Noto Serif SC", serif;
+      --body: "Noto Sans SC", sans-serif;
+      --mono: "IBM Plex Mono", monospace;
+      --ease: cubic-bezier(.18,.75,.18,1);
+    }
+
+    /* === GLOBAL STAGE AND TYPOGRAPHY ===
+       Content follows an editorial rhythm: one heading, one structural rule and
+       one primary information block. Decorative chrome is intentionally absent. */
+    * { box-sizing: border-box; }
+    body { color: var(--white); font-family: var(--body); }
+    button { font: inherit; }
+    a { color: inherit; }
+    h1, h2, h3, p { margin: 0; }
+    h1, h2 { font-family: var(--display); }
+    .slide {
+      padding: 74px 112px 86px;
+      isolation: isolate;
+    }
+    .slide::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: -3;
+      background:
+        linear-gradient(90deg, rgba(199,25,45,0.025), transparent 26%),
+        radial-gradient(circle at 86% 12%, rgba(255,255,255,0.04), transparent 28%),
+        #070707;
+    }
+    .slide::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 54px;
+      width: 2px;
+      z-index: -1;
+      background: linear-gradient(to bottom, transparent 4%, var(--crimson) 18%, var(--crimson-dark) 78%, transparent 96%);
+      opacity: 0.72;
+    }
+    .slide-header {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: end;
+      gap: 40px;
+      margin-bottom: 42px;
+      padding-bottom: 28px;
+      border-bottom: 1px solid var(--line-strong);
+    }
+    .eyebrow {
+      margin-bottom: 14px;
+      color: var(--crimson);
+      font-family: var(--mono);
+      font-size: 23px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    h1 {
+      font-size: 146px;
+      line-height: 1.02;
+      letter-spacing: 0.045em;
+      font-weight: 900;
+    }
+    h2 {
+      font-size: 65px;
+      line-height: 1.18;
+      letter-spacing: 0.018em;
+      font-weight: 800;
+    }
+    h3 { font-size: 31px; line-height: 1.35; font-weight: 700; }
+    p { font-size: 25px; line-height: 1.62; color: var(--gray-1); }
+    .header-summary {
+      max-width: 510px;
+      padding-left: 30px;
+      border-left: 5px solid var(--crimson);
+      color: var(--gray-1);
+      font-size: 24px;
+      line-height: 1.55;
+    }
+    .red { color: var(--crimson); }
+    .white { color: var(--white); }
+    .dim { color: var(--gray-2); }
+    .mono { font-family: var(--mono); }
+    .big-quote { font-family: var(--display); font-size: 52px; line-height: 1.46; font-weight: 700; }
+    .rule { width: 100%; height: 1px; background: var(--line); }
+    .red-rule { width: 92px; height: 7px; background: var(--crimson); }
+    .status-mark {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--white);
+      font-family: var(--mono);
+      font-size: 21px;
+      font-weight: 600;
+    }
+    .status-mark::before { content: ""; width: 11px; height: 11px; background: var(--crimson); }
+
+    /* === RESTRAINED SLIDE REVEALS ===
+       Slides enter through a short vertical lift. There are no looping glitches,
+       color cycling effects or competing animations. */
+    .reveal {
+      opacity: 0;
+      transform: translateY(20px);
+      transition: opacity 560ms ease, transform 620ms var(--ease);
+      transition-delay: calc(var(--i, 0) * 82ms + 90ms);
+    }
+    .slide.active .reveal,
+    .slide.visible .reveal { opacity: 1; transform: translateY(0); }
+    .slide.is-leaving .reveal { opacity: 0; transform: translateY(-8px); transition-delay: 0ms; }
+
+    /* === SLIDE 1: TITLE === */
+    .title-slide {
+      display: grid;
+      grid-template-columns: 1.35fr 0.65fr;
+      align-items: center;
+      padding-left: 142px;
+    }
+    .title-copy { position: relative; z-index: 2; }
+    .title-copy .eyebrow { margin-bottom: 28px; }
+    .title-copy h1 span { display: block; margin-top: 18px; font-family: var(--mono); font-size: 38px; font-weight: 500; letter-spacing: 0.18em; color: var(--gray-2); }
+    .title-thesis { max-width: 1040px; margin-top: 38px; color: var(--gray-1); font-size: 34px; line-height: 1.55; }
+    .title-meta {
+      display: flex;
+      align-items: center;
+      gap: 22px;
+      margin-top: 42px;
+      color: var(--white);
+      font-size: 24px;
+    }
+    .title-meta .slash { color: var(--crimson); font-size: 34px; font-weight: 700; }
+    .time-block {
+      position: relative;
+      height: 630px;
+      display: grid;
+      align-content: center;
+      justify-items: end;
+      border-left: 1px solid var(--line-strong);
+      padding-left: 62px;
+    }
+    .time-block .time { position: relative; color: var(--crimson); font-family: var(--mono); font-size: 104px; font-weight: 600; letter-spacing: -0.06em; }
+    .time-block .caption { position: relative; margin-top: 18px; color: var(--gray-2); font-size: 25px; letter-spacing: 0.10em; }
+
+    /* === SLIDE 2: PROJECT BRIEF === */
+    .brief-grid { display: grid; grid-template-columns: 1.18fr 0.82fr; gap: 86px; align-items: stretch; }
+    .brief-story { padding-right: 58px; }
+    .brief-story .big-quote { max-width: 990px; margin-bottom: 34px; }
+    .brief-story p { max-width: 980px; font-size: 27px; }
+    .brief-story .problem-line {
+      margin-top: 40px;
+      padding: 25px 0 25px 30px;
+      border-left: 5px solid var(--crimson);
+      color: var(--white);
+      font-size: 27px;
+      line-height: 1.55;
+    }
+    .fact-list { border-top: 5px solid var(--crimson); }
+    .fact-row {
+      display: grid;
+      grid-template-columns: 145px 1fr;
+      gap: 26px;
+      min-height: 112px;
+      align-content: center;
+      border-bottom: 1px solid var(--line);
+    }
+    .fact-row dt { color: var(--gray-2); font-size: 23px; }
+    .fact-row dd { margin: 0; color: var(--white); font-size: 25px; line-height: 1.48; }
+
+    /* === SLIDE 3: COMPLETE PLAYER FLOW === */
+    .metrics-line {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      margin-bottom: 38px;
+      border-top: 1px solid var(--line-strong);
+      border-bottom: 1px solid var(--line-strong);
+    }
+    .metric-item { padding: 24px 28px 26px; border-right: 1px solid var(--line); }
+    .metric-item:last-child { border-right: 0; }
+    .metric-item strong { display: block; color: var(--white); font-family: var(--display); font-size: 57px; line-height: 1; }
+    .metric-item span { display: block; margin-top: 10px; color: var(--gray-2); font-size: 22px; }
+    .flow-layout { display: grid; grid-template-columns: 1.32fr 0.68fr; gap: 56px; }
+    .route-column { position: relative; padding-top: 14px; }
+    .route-column::before { content: ""; position: absolute; left: 18px; top: 30px; bottom: 20px; width: 2px; background: linear-gradient(var(--crimson), var(--gray-3)); }
+    .route-row { display: grid; grid-template-columns: 68px 230px 1fr; gap: 20px; align-items: start; min-height: 78px; }
+    .route-row .no { color: var(--crimson); font-family: var(--mono); font-size: 22px; font-weight: 600; }
+    .route-row strong { color: var(--white); font-size: 25px; }
+    .route-row span { color: var(--gray-2); font-size: 22px; line-height: 1.45; }
+    .play-column { padding-left: 48px; border-left: 1px solid var(--line-strong); }
+    .play-column h3 { margin-bottom: 22px; font-family: var(--display); font-size: 36px; }
+    .loop-steps { margin: 0; padding: 0; list-style: none; counter-reset: loop; }
+    .loop-steps li {
+      counter-increment: loop;
+      padding: 17px 0 17px 52px;
+      position: relative;
+      border-bottom: 1px solid var(--line);
+      color: var(--gray-1);
+      font-size: 24px;
+      line-height: 1.45;
+    }
+    .loop-steps li::before { content: counter(loop); position: absolute; left: 4px; color: var(--crimson); font-family: var(--mono); font-weight: 600; }
+    .control-note { margin-top: 28px; color: var(--gray-2); font-family: var(--mono); font-size: 20px; line-height: 1.7; }
+
+    /* === SLIDE 4: SCENE AND ATMOSPHERE DESIGN === */
+    .scene-table { border-top: 5px solid var(--crimson); }
+    .scene-row {
+      display: grid;
+      grid-template-columns: 250px 300px 1fr;
+      gap: 36px;
+      align-items: center;
+      min-height: 122px;
+      border-bottom: 1px solid var(--line);
+    }
+    .scene-row h3 { font-family: var(--display); font-size: 32px; }
+    .scene-row .role { color: var(--crimson); font-size: 23px; font-weight: 600; }
+    .scene-row p { font-size: 23px; line-height: 1.52; }
+    .scene-principle {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 28px;
+      align-items: center;
+      margin-top: 30px;
+      padding-top: 25px;
+      border-top: 1px solid var(--line-strong);
+    }
+    .scene-principle strong { color: var(--white); font-family: var(--display); font-size: 36px; }
+    .scene-principle span { color: var(--gray-1); font-size: 25px; }
+
+    /* === SLIDE 5: GAME SYSTEMS === */
+    .system-head,
+    .system-row {
+      display: grid;
+      grid-template-columns: 290px 610px 1fr;
+      gap: 38px;
+      align-items: center;
+    }
+    .system-head { min-height: 55px; border-bottom: 3px solid var(--crimson); color: var(--gray-2); font-size: 21px; }
+    .system-row { min-height: 128px; border-bottom: 1px solid var(--line); }
+    .system-row h3 { font-family: var(--display); font-size: 31px; }
+    .system-row .implementation { color: var(--gray-1); font-size: 23px; line-height: 1.48; }
+    .system-row .experience { color: var(--white); font-size: 23px; line-height: 1.48; }
+    .system-row .experience::before { content: "— "; color: var(--crimson); }
+
+    /* === SLIDE 6: PROJECT ARCHITECTURE ===
+       The architecture page separates runtime layers from the three main data
+       flows, so the audience can trace an interaction without reading code. */
+    .architecture-layout { display: grid; grid-template-columns: 1.08fr 0.92fr; gap: 72px; }
+    .architecture-flow { border-top: 5px solid var(--crimson); padding-top: 24px; }
+    .arch-tier { display: grid; grid-template-columns: 170px 1fr; gap: 26px; padding: 18px 0; border-bottom: 1px solid var(--line); }
+    .arch-tier .level { color: var(--crimson); font-family: var(--mono); font-size: 20px; font-weight: 600; }
+    .arch-tier .modules { display: flex; flex-wrap: wrap; gap: 10px 26px; color: var(--white); font-size: 24px; line-height: 1.5; }
+    .arch-tier .modules span + span::before { content: "/"; margin-right: 26px; color: var(--gray-3); }
+    .architecture-note { margin-top: 28px; color: var(--gray-1); font-size: 24px; line-height: 1.62; }
+    .data-flow-list { border-top: 1px solid var(--line-strong); }
+    .data-flow-item { padding: 23px 0; border-bottom: 1px solid var(--line); }
+    .data-flow-item .flow-name { color: var(--crimson); font-family: var(--mono); font-size: 20px; font-weight: 600; }
+    .data-flow-item h3 { margin-top: 8px; font-family: var(--display); font-size: 29px; }
+    .data-flow-item p { margin-top: 9px; font-size: 21px; line-height: 1.52; }
+
+    /* === SLIDE 7: IMPLEMENTATION MECHANISMS ===
+       Six mechanisms expose the technical work behind scene switching, state,
+       navigation, model integration, deployment and frame-loop performance. */
+    .mechanism-head,
+    .mechanism-row {
+      display: grid;
+      grid-template-columns: 290px 570px 1fr;
+      gap: 36px;
+      align-items: center;
+    }
+    .mechanism-head { min-height: 50px; color: var(--gray-2); font-size: 20px; border-bottom: 3px solid var(--crimson); }
+    .mechanism-row { min-height: 110px; border-bottom: 1px solid var(--line); }
+    .mechanism-row h3 { font-family: var(--display); font-size: 28px; }
+    .mechanism-row .path { color: var(--white); font-family: var(--mono); font-size: 20px; line-height: 1.52; }
+    .mechanism-row p { font-size: 21px; line-height: 1.5; }
+
+    /* === SLIDE 8: TECHNOLOGY STACK ===
+       Technologies are shown with their exact responsibility in this project,
+       keeping the slide grounded in implementation rather than logo listing. */
+    .stack-head,
+    .stack-row {
+      display: grid;
+      grid-template-columns: 240px 300px 1fr 370px;
+      gap: 30px;
+      align-items: center;
+    }
+    .stack-head { min-height: 50px; color: var(--gray-2); font-size: 20px; border-bottom: 3px solid var(--crimson); }
+    .stack-row { min-height: 94px; border-bottom: 1px solid var(--line); }
+    .stack-row .category { color: var(--gray-2); font-size: 21px; }
+    .stack-row .technology { color: var(--white); font-family: var(--mono); font-size: 21px; font-weight: 600; }
+    .stack-row .usage { color: var(--gray-1); font-size: 21px; line-height: 1.45; }
+    .stack-row .files { color: var(--crimson); font-family: var(--mono); font-size: 18px; line-height: 1.42; }
+
+    /* === SLIDE 9: FIVE ITERATIONS === */
+    .iteration-head,
+    .iteration-row {
+      display: grid;
+      grid-template-columns: 110px 190px 330px 1fr;
+      gap: 24px;
+      align-items: center;
+    }
+    .iteration-head { min-height: 50px; color: var(--gray-2); font-size: 20px; border-bottom: 3px solid var(--crimson); }
+    .iteration-row { min-height: 132px; border-bottom: 1px solid var(--line); }
+    .iteration-row .version { color: var(--white); font-family: var(--display); font-size: 39px; font-weight: 800; }
+    .iteration-row .date { color: var(--gray-2); font-family: var(--mono); font-size: 19px; }
+    .iteration-row h3 { font-size: 27px; }
+    .iteration-row p { font-size: 22px; line-height: 1.48; }
+    .iteration-row.final { background: linear-gradient(90deg, rgba(199,25,45,0.10), transparent 76%); }
+
+    /* === SLIDE 10: TEAM RESPONSIBILITIES === */
+    .team-head,
+    .team-row {
+      display: grid;
+      grid-template-columns: 270px 610px 1fr;
+      gap: 30px;
+      align-items: center;
+    }
+    .team-head { min-height: 54px; color: var(--gray-2); font-size: 20px; border-bottom: 3px solid var(--crimson); }
+    .team-row { min-height: 137px; border-bottom: 1px solid var(--line); }
+    .team-row h3 { font-family: var(--display); font-size: 29px; }
+    .team-row .identity { color: var(--crimson); font-family: var(--display); font-size: 28px; line-height: 1.45; font-weight: 700; }
+    .team-row p { font-size: 22px; line-height: 1.48; }
+    .team-row.external { background: linear-gradient(90deg, rgba(199,25,45,0.10), transparent 72%); }
+
+    /* === SLIDE 11: PROJECT RESULTS AND DELIVERY === */
+    .result-strip { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); }
+    .result-stat { min-height: 120px; padding: 23px 30px; border-right: 1px solid var(--line); }
+    .result-stat:last-child { border-right: 0; }
+    .result-stat strong { color: var(--white); font-family: var(--display); font-size: 52px; }
+    .result-stat span { display: block; margin-top: 6px; color: var(--gray-2); font-size: 20px; }
+    .acceptance-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 72px; margin-top: 35px; }
+    .acceptance-column h3 { margin-bottom: 18px; font-family: var(--display); font-size: 34px; }
+    .show-list, .deliverable-list { margin: 0; padding: 0; list-style: none; border-top: 3px solid var(--crimson); }
+    .show-list li, .deliverable-list li { min-height: 68px; padding: 15px 0 15px 30px; position: relative; border-bottom: 1px solid var(--line); color: var(--gray-1); font-size: 22px; line-height: 1.45; }
+    .show-list li::before, .deliverable-list li::before { content: ""; position: absolute; left: 2px; top: 30px; width: 9px; height: 9px; background: var(--crimson); }
+    .delivery-note { margin-top: 26px; padding: 21px 26px; border-left: 5px solid var(--crimson); background: rgba(199,25,45,0.08); color: var(--white); font-size: 23px; line-height: 1.5; }
+
+    /* === SLIDE 12: CLOSING AND THANKS === */
+    .closing-slide { display: grid; grid-template-columns: 1.25fr 0.75fr; align-items: center; padding-left: 142px; }
+    .closing-slide h2 { max-width: 1120px; font-size: 86px; line-height: 1.26; }
+    .closing-copy { max-width: 1040px; margin-top: 32px; font-size: 28px; }
+    .closing-points { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; max-width: 1120px; margin-top: 42px; padding-top: 26px; border-top: 1px solid var(--line-strong); }
+    .closing-point strong { display: block; color: var(--crimson); font-family: var(--display); font-size: 29px; }
+    .closing-point span { display: block; margin-top: 9px; color: var(--gray-2); font-size: 21px; line-height: 1.45; }
+    .closing-links { display: flex; gap: 18px; margin-top: 36px; }
+    .closing-links a { padding: 12px 20px; border: 1px solid var(--line-strong); color: var(--white); text-decoration: none; font-size: 21px; }
+    .closing-links a:hover { border-color: var(--crimson); color: #fff; }
+    .closing-mark { justify-self: end; width: 390px; height: 540px; border-left: 1px solid var(--line-strong); display: grid; align-content: center; justify-items: end; }
+    .closing-mark .zh { color: var(--crimson); font-family: var(--display); font-size: 128px; font-weight: 900; writing-mode: vertical-rl; letter-spacing: 0.12em; }
+    .closing-mark .en { margin-top: 30px; color: var(--gray-2); font-family: var(--mono); font-size: 22px; letter-spacing: 0.15em; }
+
+    /* === PRESENTATION CONTROLS AND EDIT MODE ===
+       Navigation remains outside the slide canvas. It stays faint during video
+       recording and becomes fully visible when hovered or focused. */
+    .deck-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 10px;
+      border: 1px solid rgba(255,255,255,0.16);
+      border-radius: 999px;
+      background: rgba(0,0,0,0.88);
+      opacity: 0.18;
+      transition: opacity 180ms ease;
+    }
+    .deck-controls:hover, .deck-controls:focus-within { opacity: 1; }
+    .deck-controls button { width: 38px; height: 38px; border: 0; border-radius: 50%; background: #1c1c1c; color: var(--white); cursor: pointer; }
+    .deck-controls button:hover { background: var(--crimson-dark); }
+    .deck-counter { min-width: 74px; text-align: center; color: var(--white); font-family: var(--mono); font-size: 15px; }
+    .edit-hotzone { position: fixed; left: 0; top: 0; width: 80px; height: 80px; z-index: 10000; cursor: pointer; }
+    .edit-toggle {
+      position: fixed;
+      left: 22px;
+      top: 22px;
+      z-index: 10001;
+      width: 44px;
+      height: 44px;
+      border: 1px solid rgba(255,255,255,0.24);
+      border-radius: 50%;
+      background: rgba(0,0,0,0.92);
+      color: var(--white);
+      cursor: pointer;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 200ms ease;
+    }
+    .edit-toggle.show, .edit-toggle.active { opacity: 1; pointer-events: auto; }
+    .edit-toast { position: fixed; top: 22px; left: 50%; z-index: 10002; transform: translate(-50%,-12px); padding: 11px 18px; border: 1px solid rgba(199,25,45,0.65); border-radius: 999px; background: rgba(0,0,0,0.94); color: var(--white); font-size: 15px; opacity: 0; pointer-events: none; transition: opacity 180ms ease, transform 180ms ease; }
+    .edit-toast.show { opacity: 1; transform: translate(-50%,0); }
+    body.editing [data-editable="true"] { outline: 2px dashed rgba(199,25,45,0.72); outline-offset: 5px; cursor: text; }
+    body.controls-hidden .deck-controls { display: none; }
+  </style>
+</head>
+<body>
+  <div class="deck-viewport">
+    <main class="deck-stage" id="deckStage" aria-live="polite">
+
+      <!-- Speaker notes: 0:00–0:20。介绍项目名、黑客松背景和一句话体验定位。 -->
+      <section class="slide title-slide active visible" data-title="开场">
+        <div class="title-copy">
+          <div class="eyebrow reveal" style="--i:0" data-editable="true">软件团队黑客松 · 最终项目验收</div>
+          <h1 class="reveal" style="--i:1" data-editable="true">浙大夜惊魂<span>ZJU NIGHT SCARE</span></h1>
+          <p class="title-thesis reveal" style="--i:2" data-editable="true">以紫金港校园为舞台，融合 2.5D 道路探索、第一人称 3D 内景与多分支剧情的 Web 悬疑游戏。</p>
+          <div class="title-meta reveal" style="--i:3"><span data-editable="true">React × Phaser × Three.js</span><span class="slash">/</span><span data-editable="true">完整可玩 · 在线部署</span></div>
+        </div>
+        <div class="time-block reveal" style="--i:2"><div class="time">23:47</div><div class="caption" data-editable="true">异常借阅记录出现</div></div>
+      </section>
+
+      <!-- Speaker notes: 0:20–0:45。说明选题、解决的问题、核心流程和最终完成状态。 -->
+      <section class="slide" data-title="项目简介">
+        <header class="slide-header reveal" style="--i:0">
+          <div><div class="eyebrow" data-editable="true">01 · PROJECT BRIEF</div><h2 data-editable="true">项目简介</h2></div>
+          <div class="header-summary" data-editable="true">把校园怪谈转化为可行走、可调查、可选择的互动体验。</div>
+        </header>
+        <div class="brief-grid">
+          <div class="brief-story reveal" style="--i:1">
+            <div class="big-quote" data-editable="true">真实校园逐渐变成心理迷宫，熟悉的道路、宿舍、湖面与教学楼开始出现偏差。</div>
+            <p data-editable="true">《浙大夜惊魂》从农医馆的异常借阅记录展开。玩家离开图书馆后进入紫金港外景，沿道路前往白沙宿舍、临湖餐厅、医学院、启真湖与小剧场。调查获得的证据、人物关系、角色属性和关键道具，会共同影响终章判断。</p>
+            <div class="problem-line" data-editable="true">项目重点：完成一条从开场调查、校园移动、建筑探索到多结局收束的核心游玩流程，并让团队成员能够解释功能与实现方式。</div>
+          </div>
+          <dl class="fact-list reveal" style="--i:2">
+            <div class="fact-row"><dt>项目类型</dt><dd data-editable="true">校园悬疑探索 Web 游戏</dd></div>
+            <div class="fact-row"><dt>目标平台</dt><dd data-editable="true">桌面与移动浏览器</dd></div>
+            <div class="fact-row"><dt>空间结构</dt><dd data-editable="true">2.5D 校园外景 + 第一人称 3D 建筑内景</dd></div>
+            <div class="fact-row"><dt>核心体验</dt><dd data-editable="true">调查、导航、追逐、选择、属性与多结局</dd></div>
+            <div class="fact-row"><dt>交付状态</dt><dd><span class="status-mark" data-editable="true">代码、文档、在线版本与演示流程齐备</span></dd></div>
+          </dl>
+        </div>
+      </section>
+
+      <!-- Speaker notes: 0:45–1:15。顺着主线路线讲玩家如何操作，每个地点只点出阶段作用。 -->
+      <section class="slide" data-title="核心流程">
+        <header class="slide-header reveal" style="--i:0">
+          <div><div class="eyebrow" data-editable="true">02 · CORE FLOW</div><h2 data-editable="true">核心内容与操作过程</h2></div>
+          <div class="header-summary" data-editable="true">场景切换、线索积累和选择结果始终沿同一条剧情状态推进。</div>
+        </header>
+        <div class="metrics-line reveal" style="--i:1">
+          <div class="metric-item"><strong data-editable="true">8</strong><span data-editable="true">主线调查地点</span></div>
+          <div class="metric-item"><strong data-editable="true">34</strong><span data-editable="true">剧情状态节点</span></div>
+          <div class="metric-item"><strong data-editable="true">10</strong><span data-editable="true">剧情道具</span></div>
+          <div class="metric-item"><strong data-editable="true">7</strong><span data-editable="true">终章结果方向</span></div>
+        </div>
+        <div class="flow-layout">
+          <div class="route-column reveal" style="--i:2">
+            <div class="route-row"><div class="no">01</div><strong data-editable="true">农医馆</strong><span data-editable="true">取得手电与借阅线索，完成第一段 3D 调查</span></div>
+            <div class="route-row"><div class="no">02</div><strong data-editable="true">校园外景</strong><span data-editable="true">沿红色引导路线移动，识别热点并躲避红鬼</span></div>
+            <div class="route-row"><div class="no">03</div><strong data-editable="true">白沙宿舍</strong><span data-editable="true">调查房间、论坛和阳台事件，完成走廊追逐</span></div>
+            <div class="route-row"><div class="no">04</div><strong data-editable="true">餐厅与办公室</strong><span data-editable="true">补充人物关系、日记、门禁与关键背景</span></div>
+            <div class="route-row"><div class="no">05</div><strong data-editable="true">医学院</strong><span data-editable="true">依次探索六层、车库和地下仓库</span></div>
+            <div class="route-row"><div class="no">06</div><strong data-editable="true">东区与启真湖</strong><span data-editable="true">拼合记忆污染与人物证据</span></div>
+            <div class="route-row"><div class="no">07</div><strong data-editable="true">小剧场</strong><span data-editable="true">调查胶片、后台与放映流程，进入最终选择</span></div>
+          </div>
+          <aside class="play-column reveal" style="--i:3">
+            <h3 data-editable="true">玩家循环</h3>
+            <ol class="loop-steps">
+              <li data-editable="true">跟随任务目标前往地点</li>
+              <li data-editable="true">调查实体、文本与环境线索</li>
+              <li data-editable="true">通过选择改变属性与关系</li>
+              <li data-editable="true">带着状态进入下一场景</li>
+              <li data-editable="true">根据证据与行动解析结局</li>
+            </ol>
+            <div class="control-note" data-editable="true">桌面：WASD / 方向键移动<br>Shift 奔跑 · Space 跳跃 · Ctrl 蹲下<br>E 互动 · 鼠标控制 3D 视角<br>移动端：虚拟摇杆 + 触控视角</div>
+          </aside>
+        </div>
+      </section>
+
+      <!-- Speaker notes: 1:15–1:40。引用地图交接中的空间定位，解释氛围如何服务剧情。 -->
+      <section class="slide" data-title="场景设计">
+        <header class="slide-header reveal" style="--i:0">
+          <div><div class="eyebrow" data-editable="true">03 · SCENE DIRECTION</div><h2 data-editable="true">校园空间与氛围设计</h2></div>
+          <div class="header-summary" data-editable="true">惊悚感来自熟悉空间中的轻微偏差，环境会随着剧情阶段逐渐失真。</div>
+        </header>
+        <div class="scene-table">
+          <div class="scene-row reveal" style="--i:1"><h3 data-editable="true">农医馆</h3><div class="role" data-editable="true">故事开端 / 秩序裂缝</div><p data-editable="true">冷静、安静、档案感明确。手电、笔记本、小票、符咒、异常书架和灯下人物组成第一条调查链。</p></div>
+          <div class="scene-row reveal" style="--i:2"><h3 data-editable="true">医学院</h3><div class="role" data-editable="true">全图视觉核心</div><p data-editable="true">六楼冷窗、病床、巡查守则、车库封印与地下仓库逐层加深压力，承担主线证据的集中揭示。</p></div>
+          <div class="scene-row reveal" style="--i:3"><h3 data-editable="true">白沙学园</h3><div class="role" data-editable="true">日常生活崩坏</div><p data-editable="true">围绕 2 幢 123 室与 3 幢 216 室展开，房间调查、论坛信息和真假出口把生活空间转化为追逐场。</p></div>
+          <div class="scene-row reveal" style="--i:4"><h3 data-editable="true">启真湖</h3><div class="role" data-editable="true">记忆污染地点</div><p data-editable="true">保持可辨识的蓝色水面，通过低雾、错位倒影、延迟倒影与水草黑线表达记忆和现实的偏移。</p></div>
+          <div class="scene-row reveal" style="--i:5"><h3 data-editable="true">西区沼泽与小剧场</h3><div class="role" data-editable="true">异空间 / 终章入口</div><p data-editable="true">沼泽提供校园秩序外的迷失感；小剧场以旧海报、唱段、后台镜面和胶片放映完成故事收束。</p></div>
+        </div>
+        <div class="scene-principle reveal" style="--i:6"><strong data-editable="true">现实偏移系统</strong><span data-editable="true">玩家接近关键区域时，雾、灯光、标签、时间和局部异常会同步变化；五个剧情阶段拥有不同的基础失真强度。</span></div>
+      </section>
+
+      <!-- Speaker notes: 1:40–2:05。用实现方式和玩家感受对应讲解五类系统。 -->
+      <section class="slide" data-title="游戏系统">
+        <header class="slide-header reveal" style="--i:0">
+          <div><div class="eyebrow" data-editable="true">04 · GAME SYSTEMS</div><h2 data-editable="true">核心游戏系统</h2></div>
+          <div class="header-summary" data-editable="true">18 项验收功能覆盖开场、外景、内景、剧情、音频、移动端和部署。</div>
+        </header>
+        <div class="system-head reveal" style="--i:1"><span>系统</span><span>实现内容</span><span>玩家体验</span></div>
+        <div class="system-row reveal" style="--i:2"><h3 data-editable="true">2.5D 道路与导航</h3><div class="implementation" data-editable="true">26 栋建筑、8 个广场、15 条道路和 3 片水域；道路吸附、路口预转向、Dijkstra 路线。</div><div class="experience" data-editable="true">玩家能辨认校园方位，也必须在有限道路中作出选择。</div></div>
+        <div class="system-row reveal" style="--i:3"><h3 data-editable="true">外景追逐</h3><div class="implementation" data-editable="true">红鬼与玩家共享路网，包含 5 秒离场安全期、最短路追击、理智伤害与贴身死亡。</div><div class="experience" data-editable="true">追逐遵守地图结构，建筑、湖面和道路都参与策略。</div></div>
+        <div class="system-row reveal" style="--i:4"><h3 data-editable="true">第一人称内景</h3><div class="implementation" data-editable="true">鼠标锁定、移动状态机、奔跑、跳跃、蹲伏、碰撞、手电、开门、拾取和小地图。</div><div class="experience" data-editable="true">关键线索存在于真实空间位置，调查需要观察和移动。</div></div>
+        <div class="system-row reveal" style="--i:5"><h3 data-editable="true">剧情、属性与结局</h3><div class="implementation" data-editable="true">5 项属性、10 类道具、剧情标记、前置条件、默认两次额外复活和 7 类终章结果。</div><div class="experience" data-editable="true">早期选择会在后续关系、权限、证据与结局中产生反馈。</div></div>
+        <div class="system-row reveal" style="--i:6"><h3 data-editable="true">视听与移动端</h3><div class="implementation" data-editable="true">环境音、程序化音效、跳脸时序、雾与暗角；虚拟摇杆、拖动视角和触控互动。</div><div class="experience" data-editable="true">桌面端保持沉浸感，移动端也能完成主流程。</div></div>
+      </section>
+
+      <!-- Speaker notes: 2:05–2:35。先讲六层架构，再沿三条数据流解释模块如何连接。 -->
+      <section class="slide" data-title="项目架构">
+        <header class="slide-header reveal" style="--i:0">
+          <div><div class="eyebrow" data-editable="true">05 · ARCHITECTURE</div><h2 data-editable="true">项目总体架构</h2></div>
+          <div class="header-summary" data-editable="true">React 持有流程编排权，两个游戏引擎负责不同空间，状态与资源层向两侧提供统一合同。</div>
+        </header>
+        <div class="architecture-layout">
+          <div class="reveal" style="--i:1">
+            <div class="architecture-flow">
+              <div class="arch-tier"><div class="level">编排层</div><div class="modules"><span data-editable="true">React 19</span><span data-editable="true">开场</span><span data-editable="true">HUD</span><span data-editable="true">剧情弹层</span><span data-editable="true">场景切换</span></div></div>
+              <div class="arch-tier"><div class="level">空间层</div><div class="modules"><span data-editable="true">Phaser 3 校园外景</span><span data-editable="true">Three.js 建筑内景</span></div></div>
+              <div class="arch-tier"><div class="level">玩法层</div><div class="modules"><span data-editable="true">道路与寻路</span><span data-editable="true">碰撞与交互</span><span data-editable="true">专属场景流程</span></div></div>
+              <div class="arch-tier"><div class="level">状态层</div><div class="modules"><span data-editable="true">Zustand</span><span data-editable="true">storyData</span><span data-editable="true">storyEngine</span></div></div>
+              <div class="arch-tier"><div class="level">资源层</div><div class="modules"><span data-editable="true">GLB</span><span data-editable="true">meta.json</span><span data-editable="true">图片与音频</span><span data-editable="true">assetUrl</span></div></div>
+              <div class="arch-tier"><div class="level">发布层</div><div class="modules"><span data-editable="true">Vite 6</span><span data-editable="true">GitHub Pages</span><span data-editable="true">Cloudflare R2</span></div></div>
+            </div>
+            <p class="architecture-note" data-editable="true">App.tsx 连接开场、外景、内景、剧情弹层、跳脸管线和死亡/复活流程。CampusScene 与 Interior3D 各自维护渲染生命周期，通过 Store 和剧情引擎交换业务状态。</p>
+          </div>
+          <aside class="reveal" style="--i:2">
+            <div class="data-flow-list">
+              <div class="data-flow-item"><div class="flow-name">FLOW 01</div><h3 data-editable="true">输入与场景切换</h3><p data-editable="true">键鼠或触控输入进入当前活动引擎；进入建筑时暂停 Phaser、启动 Interior3D，退出后恢复外景并把玩家放回对应道路出口。</p></div>
+              <div class="data-flow-item"><div class="flow-name">FLOW 02</div><h3 data-editable="true">剧情与共享状态</h3><p data-editable="true">storyEngine 处理选择、属性、道具、标记和下一地点，Zustand 将结果同步给 React、Phaser 与 Three.js。</p></div>
+              <div class="data-flow-item"><div class="flow-name">FLOW 03</div><h3 data-editable="true">模型与运行时资源</h3><p data-editable="true">InteriorAssetLoader 读取 GLB 和场景元数据；assetUrl 根据开发或生产环境切换到本地 public 或 R2。</p></div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <!-- Speaker notes: 2:35–3:05。用六个机制说明地图、内景、剧情、资源和性能如何落地。 -->
+      <section class="slide" data-title="实现机制">
+        <header class="slide-header reveal" style="--i:0">
+          <div><div class="eyebrow" data-editable="true">06 · IMPLEMENTATION</div><h2 data-editable="true">关键实现机制</h2></div>
+          <div class="header-summary" data-editable="true">技术重点集中在跨引擎协作、可维护的剧情状态、真实模型玩法化和浏览器运行效率。</div>
+        </header>
+        <div class="mechanism-head reveal" style="--i:1"><span>机制</span><span>运行路径</span><span>解决的问题</span></div>
+        <div class="mechanism-row reveal" style="--i:2"><h3 data-editable="true">双引擎生命周期</h3><div class="path" data-editable="true">App → Phaser.pause<br>→ Interior3D.mount → restore</div><p data-editable="true">避免两个引擎同时占用输入和帧循环，室内出口还能准确映射回校园道路。</p></div>
+        <div class="mechanism-row reveal" style="--i:3"><h3 data-editable="true">统一剧情状态</h3><div class="path" data-editable="true">storyData → storyEngine<br>→ StoryState → Zustand</div><p data-editable="true">实体拾取、文本选择、属性变化和下一场景使用同一份状态，防止剧情与 3D 进度脱节。</p></div>
+        <div class="mechanism-row reveal" style="--i:4"><h3 data-editable="true">路网移动与追逐</h3><div class="path" data-editable="true">input projection → rail snap<br>→ mapGraph → Dijkstra</div><p data-editable="true">把屏幕方向投影到等距道路；玩家和红鬼共同遵守路网，路口选择和追击路径都可解释。</p></div>
+        <div class="mechanism-row reveal" style="--i:5"><h3 data-editable="true">元数据驱动内景</h3><div class="path" data-editable="true">main.glb + props.glb<br>+ scene.meta.json</div><p data-editable="true">模型负责视觉，元数据保存出生点、道具点、剧情点、出口、碰撞清理区和灯光锚点。</p></div>
+        <div class="mechanism-row reveal" style="--i:6"><h3 data-editable="true">双线资源加载</h3><div class="path" data-editable="true">assetUrl(relativePath)<br>→ local public / R2 CDN</div><p data-editable="true">开发环境支持离线资源，生产环境从 R2 读取大型资产，并通过版本参数、预加载和 Brotli 控制缓存与体积。</p></div>
+        <div class="mechanism-row reveal" style="--i:7"><h3 data-editable="true">运行时性能控制</h3><div class="path" data-editable="true">snapshot reuse → 10 Hz sync<br>→ collider skip → batching</div><p data-editable="true">减少帧循环中的 Zustand 写入和重复分配；静止时跳过无效碰撞扫描，静态模型批处理时保留画质。</p></div>
+      </section>
+
+      <!-- Speaker notes: 3:05–3:30。逐行说明每项技术在项目中的具体职责和对应代码区域。 -->
+      <section class="slide" data-title="技术栈">
+        <header class="slide-header reveal" style="--i:0">
+          <div><div class="eyebrow" data-editable="true">07 · TECHNOLOGY STACK</div><h2 data-editable="true">技术栈与实际落点</h2></div>
+          <div class="header-summary" data-editable="true">技术选择围绕浏览器游戏、多空间渲染、跨模块状态和大型 3D 资产发布展开。</div>
+        </header>
+        <div class="stack-head reveal" style="--i:1"><span>类别</span><span>技术</span><span>项目中的职责</span><span>主要代码区域</span></div>
+        <div class="stack-row reveal" style="--i:2"><div class="category">语言与编排</div><div class="technology">TypeScript 5.7<br>React 19</div><div class="usage" data-editable="true">类型约束、游戏壳层、开场、HUD、剧情弹层、模式切换和结局展示。</div><div class="files">src/App.tsx<br>src/LaunchSequence.tsx</div></div>
+        <div class="stack-row reveal" style="--i:3"><div class="category">校园外景</div><div class="technology">Phaser 3.87</div><div class="usage" data-editable="true">等距投影、地图绘制、道路移动、热点、鬼魂 FSM、氛围事件和外景小地图。</div><div class="files">CampusScene.ts<br>mapData.ts · mapGraph.ts</div></div>
+        <div class="stack-row reveal" style="--i:4"><div class="category">建筑内景</div><div class="technology">Three.js 0.185</div><div class="usage" data-editable="true">第一人称相机、GLB 场景、碰撞、灯光、手电、交互射线和场景状态变化。</div><div class="files">interior3d/Interior3D.ts<br>InteriorAssetLoader.ts</div></div>
+        <div class="stack-row reveal" style="--i:5"><div class="category">状态与剧情</div><div class="technology">Zustand 5</div><div class="usage" data-editable="true">共享玩家属性、背包、位置和鬼魂快照；剧情数据与引擎负责条件、结果和路由。</div><div class="files">store.ts<br>storyData.ts · storyEngine.ts</div></div>
+        <div class="stack-row reveal" style="--i:6"><div class="category">声音与效果</div><div class="technology">Howler.js<br>Web Audio API</div><div class="usage" data-editable="true">BGM、环境音、文件音效与雷声、心跳、脚步等程序化声音，统一跳脸效果时序。</div><div class="files">audio/*<br>JumpscarePipeline.ts</div></div>
+        <div class="stack-row reveal" style="--i:7"><div class="category">资产生产</div><div class="technology">Blender<br>Python tools</div><div class="usage" data-editable="true">定制模型制作、场景构建、坐标探测、俯视检查、GLB 检查和元数据生成。</div><div class="files">tools/build_*<br>tools/inspect_*</div></div>
+        <div class="stack-row reveal" style="--i:8"><div class="category">构建与发布</div><div class="technology">Vite 6<br>Pages + R2</div><div class="usage" data-editable="true">本地开发与生产打包；网页代码走 GitHub Pages，大型运行时资源走 Cloudflare R2。</div><div class="files">vite.config.ts<br>.github/workflows</div></div>
+      </section>
+
+      <!-- Speaker notes: 3:30–4:00。按五个版本讲清每次新增的能力、阶段问题和最终结果。 -->
+      <section class="slide" data-title="迭代过程">
+        <header class="slide-header reveal" style="--i:0">
+          <div><div class="eyebrow" data-editable="true">08 · ITERATION</div><h2 data-editable="true">五个版本的迭代过程</h2></div>
+          <div class="header-summary" data-editable="true">每个版本验证一个核心问题，已有剧情和功能持续保留并进入下一阶段。</div>
+        </header>
+        <div class="iteration-head reveal" style="--i:1"><span>版本</span><span>时间</span><span>阶段目标</span><span>主要成果与问题处理</span></div>
+        <div class="iteration-row reveal" style="--i:2"><div class="version">V1</div><div class="date">07.08</div><h3 data-editable="true">粗版文字 HTML</h3><p data-editable="true">用单文件快速完成故事原型，确定开场、人物关系、选择反馈和多结局骨架，先验证题材与叙事节奏。</p></div>
+        <div class="iteration-row reveal" style="--i:3"><div class="version">V2</div><div class="date">07.08–07.09</div><h3 data-editable="true">2.5D 校园地图</h3><p data-editable="true">加入等距校园、道路吸附、路口转向、任务热点和鬼魂追逐；针对视觉方向与键盘方向错位重写输入投影。</p></div>
+        <div class="iteration-row reveal" style="--i:4"><div class="version">V3</div><div class="date">07.10 起</div><h3 data-editable="true">AI / 程序化内景</h3><p data-editable="true">建立第一人称相机、门、碰撞、手电、楼梯和移动状态机，接通 React 剧情与移动端交互，验证浏览器 3D 玩法。</p></div>
+        <div class="iteration-row reveal" style="--i:5"><div class="version">V4</div><div class="date">07.11–08.22</div><h3 data-editable="true">外部 3D 模型接入</h3><p data-editable="true">建立 GLB 加载、模型偏移、碰撞图、元数据锚点和 R2 分发，逐步处理坐标系、模型体积、缓存与加载失败。</p></div>
+        <div class="iteration-row final reveal" style="--i:6"><div class="version">V5</div><div class="date">08.23–09.05</div><h3 data-editable="true">定制 3D 与完整玩法</h3><p data-editable="true">完成农医馆、白沙、医学院和小剧场，集中修复道路、热点、剧情、音画同步、运行性能与线上资源流程。</p></div>
+      </section>
+
+      <!-- Speaker notes: 4:00–4:25。按照验收文档的成员顺序介绍职责和可追溯成果。 -->
+      <section class="slide" data-title="项目分工">
+        <header class="slide-header reveal" style="--i:0">
+          <div><div class="eyebrow" data-editable="true">09 · TEAM</div><h2 data-editable="true">小组分工与协作</h2></div>
+          <div class="header-summary" data-editable="true">前四位为正式软件小组成员，鲁沁旑学姐作为外部美术协作者提供定制 3D 建模支持。</div>
+        </header>
+        <div class="team-head reveal" style="--i:1"><span>成员</span><span>主要职责</span><span>可追溯成果</span></div>
+        <div class="team-row reveal" style="--i:2"><div class="identity" data-editable="true">施俊宇</div><p data-editable="true">IDEA、项目统筹、主架构、剧情与状态编排、3D 内景集成、重点场景玩法、资产加载、缓存与 Cloudflare CDN、测试和文档。</p><p data-editable="true">主线整合、剧情引擎、内景运行时、预加载与缓存、三大后期场景、最终 README。</p></div>
+        <div class="team-row reveal" style="--i:3"><div class="identity" data-editable="true">周奕桐</div><p data-editable="true">IDEA、2.5D 地图原型、道路移动与地图氛围、热点和颜色修复、音频与 GitHub Pages 初期配置。</p><p data-editable="true">Phaser 地图原型、直观 WASD、湖区道路修复、热点对齐、声音系统和 Pages 配置。</p></div>
+        <div class="team-row reveal" style="--i:4"><div class="identity" data-editable="true">朱兴宇</div><p data-editable="true">校园外景与 Blender 资产接入、建筑图与道路布局、移动和交互体验、移动端与部分 3D 体验协作。</p><p data-editable="true">外景地图扩展、建筑落位、Blender 建筑图、路网修正、准星交互、移动端与内景体验。</p></div>
+        <div class="team-row reveal" style="--i:5"><div class="identity" data-editable="true">张一荃</div><p data-editable="true">场景策划与玩法设计、农医馆与医学院区分、医学院 B/C/F 剧情集成。</p><p data-editable="true">农医馆玩法强化、医学院玩法文档、车库、六层窗和地下仓库剧情接入。</p></div>
+        <div class="team-row external reveal" style="--i:6"><div class="identity" data-editable="true">鲁沁旑<br><span class="dim">外部协作者</span></div><p data-editable="true">精细定制 3D 建模、美术品质支持、场景模型交付与修改建议。</p><p data-editable="true">提供精美 3D 建筑与内景模型，提升最终版本的空间真实感和视觉完成度。</p></div>
+      </section>
+
+      <!-- Speaker notes: 4:25–4:45。向验收学长汇总可展示成果和已经准备的提交材料。 -->
+      <section class="slide" data-title="项目成果与交付">
+        <header class="slide-header reveal" style="--i:0">
+          <div><div class="eyebrow" data-editable="true">10 · DELIVERY</div><h2 data-editable="true">项目成果与提交材料</h2></div>
+          <div class="header-summary" data-editable="true">本页汇总展示内容和提交材料，最终验收结论由软件团队学长给出。</div>
+        </header>
+        <div class="result-strip reveal" style="--i:1">
+          <div class="result-stat"><strong data-editable="true">114</strong><span data-editable="true">main 分支提交</span></div>
+          <div class="result-stat"><strong data-editable="true">62</strong><span data-editable="true">TypeScript / TSX 文件</span></div>
+          <div class="result-stat"><strong data-editable="true">18</strong><span data-editable="true">核心功能展示项</span></div>
+          <div class="result-stat"><strong data-editable="true">5</strong><span data-editable="true">主要版本阶段</span></div>
+        </div>
+        <div class="acceptance-columns">
+          <div class="acceptance-column reveal" style="--i:2">
+            <h3 data-editable="true">验收视频重点展示</h3>
+            <ul class="show-list">
+              <li data-editable="true">项目解决的问题、背景设定与完整主线流程。</li>
+              <li data-editable="true">2.5D 校园道路移动、任务引导、热点和红鬼追逐。</li>
+              <li data-editable="true">第一人称 3D 场景中的移动、手电、碰撞、拾取和剧情触发。</li>
+              <li data-editable="true">角色属性、剧情道具、分支选择、死亡复活与结局解析。</li>
+              <li data-editable="true">团队分工、五次迭代、项目架构和关键实现机制。</li>
+            </ul>
+          </div>
+          <div class="acceptance-column reveal" style="--i:3">
+            <h3 data-editable="true">提交与配套材料</h3>
+            <ul class="deliverable-list">
+              <li data-editable="true">GitHub 项目代码与可直接访问的在线游戏。</li>
+              <li data-editable="true">仓库根目录完整 README 与内部项目验收文档。</li>
+              <li data-editable="true">剧情机制总方案、分场景玩法设计和地图交接说明。</li>
+              <li data-editable="true">3D 资产合同、场景元数据、模型构建与检查工具。</li>
+              <li data-editable="true">Cloudflare R2 资源部署说明与演示视频。</li>
+            </ul>
+            <div class="delivery-note" data-editable="true">演示建议：先用本 HTML 讲清项目，再切入在线游戏完成农医馆调查、校园移动和重点场景片段。</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Speaker notes: 4:45–5:00。总结团队完成的跨学科协作并致谢，随后结束录屏。 -->
+      <section class="slide closing-slide" data-title="总结与致谢">
+        <div>
+          <div class="eyebrow reveal" style="--i:0" data-editable="true">11 · SUMMARY &amp; THANKS</div>
+          <h2 class="reveal" style="--i:1" data-editable="true">从一段校园传说，<br>走进一座深夜校园。</h2>
+          <p class="closing-copy reveal" style="--i:2" data-editable="true">项目经历文字原型、校园地图、程序化内景、外部模型接入和定制 3D 五个阶段，最终形成一条可运行、可展示、分工清楚的完整游戏流程。</p>
+          <div class="closing-points reveal" style="--i:3">
+            <div class="closing-point"><strong data-editable="true">完整体验</strong><span data-editable="true">外景、内景、剧情、追逐与多结局闭环</span></div>
+            <div class="closing-point"><strong data-editable="true">跨域协作</strong><span data-editable="true">前端、游戏引擎、3D、美术、音频与叙事</span></div>
+            <div class="closing-point"><strong data-editable="true">持续工程化</strong><span data-editable="true">文档、测试、资产合同、CDN 与自动部署</span></div>
+          </div>
+          <p class="closing-copy reveal" style="--i:4" data-editable="true">感谢软件团队和黑客松活动提供实践机会，感谢所有组员的持续投入，特别感谢鲁沁旑学姐提供高质量的定制 3D 建模支持。</p>
+          <div class="closing-links reveal" style="--i:5">
+            <a href="https://github.com/sjyinzju/ZJU-night-scare" target="_blank" rel="noreferrer">项目仓库</a>
+            <a href="https://sjyinzju.github.io/ZJU-night-scare/game/" target="_blank" rel="noreferrer">在线游戏</a>
+          </div>
+        </div>
+        <div class="closing-mark reveal" style="--i:2"><div class="zh">谢谢</div><div class="en">THANK YOU</div></div>
+      </section>
+    </main>
+  </div>
+
+  <!-- === OUT-OF-STAGE CONTROLS ===
+       These controls never occupy slide content and can be hidden with H. -->
+  <nav class="deck-controls" aria-label="幻灯片控制">
+    <button type="button" id="prevButton" aria-label="上一页">‹</button>
+    <span class="deck-counter" id="deckCounter">1 / 12</span>
+    <button type="button" id="nextButton" aria-label="下一页">›</button>
+  </nav>
+  <div class="edit-hotzone" id="editHotzone" aria-hidden="true"></div>
+  <button type="button" class="edit-toggle" id="editToggle" title="编辑模式（E）" aria-label="切换文字编辑">✎</button>
+  <div class="edit-toast" id="editToast" role="status"></div>
+
+  <script>
+    /* === FIXED-STAGE PRESENTATION CONTROLLER ===
+       Handles uniform scaling, keyboard navigation, mouse wheel, touch swipes,
+       URL slide hashes and the page counter. */
+    class SlidePresentation {
+      constructor() {
+        this.stage = document.getElementById('deckStage');
+        this.slides = Array.from(document.querySelectorAll('.slide'));
+        this.counter = document.getElementById('deckCounter');
+        this.index = this.readInitialIndex();
+        this.wheelLocked = false;
+        this.touchStartX = 0;
+        this.touchStartY = 0;
+        this.editing = false;
+        this.toastTimer = null;
+        this.hideEditTimer = null;
+        this.boundSave = () => this.saveEdits();
+        this.restoreEdits();
+        this.bindEvents();
+        this.scaleStage();
+        this.show(this.index, false);
+      }
+
+      readInitialIndex() {
+        const match = window.location.hash.match(/slide-(\d+)/);
+        return match ? Math.max(0, Math.min(this.slides.length - 1, Number(match[1]) - 1)) : 0;
+      }
+
+      scaleStage() {
+        const scale = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+        const x = Math.round((window.innerWidth - 1920 * scale) / 2);
+        const y = Math.round((window.innerHeight - 1080 * scale) / 2);
+        this.stage.style.transform = 'translate(' + x + 'px,' + y + 'px) scale(' + scale + ')';
+      }
+
+      show(nextIndex, animate) {
+        const safeIndex = Math.max(0, Math.min(this.slides.length - 1, nextIndex));
+        const current = this.slides[this.index];
+        if (animate && current && safeIndex !== this.index) {
+          current.classList.add('is-leaving');
+          window.setTimeout(() => current.classList.remove('is-leaving'), 320);
+        }
+        this.slides.forEach((slide, slideIndex) => {
+          const selected = slideIndex === safeIndex;
+          slide.classList.toggle('active', selected);
+          slide.classList.toggle('visible', selected);
+          slide.setAttribute('aria-hidden', selected ? 'false' : 'true');
+        });
+        this.index = safeIndex;
+        this.counter.textContent = String(this.index + 1) + ' / ' + String(this.slides.length);
+        window.history.replaceState(null, '', '#slide-' + String(this.index + 1));
+        document.title = this.slides[this.index].dataset.title + '｜浙大夜惊魂验收讲解';
+      }
+
+      next() { this.show(this.index + 1, true); }
+      previous() { this.show(this.index - 1, true); }
+
+      bindEvents() {
+        window.addEventListener('resize', () => this.scaleStage());
+        document.getElementById('nextButton').addEventListener('click', () => this.next());
+        document.getElementById('prevButton').addEventListener('click', () => this.previous());
+
+        window.addEventListener('keydown', (event) => {
+          const editingText = event.target && event.target.getAttribute && event.target.getAttribute('contenteditable') === 'true';
+          if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+            event.preventDefault(); this.exportHtml(); return;
+          }
+          if (editingText && event.key !== 'Escape') return;
+          if (event.key === 'ArrowRight' || event.key === 'PageDown' || event.key === ' ') {
+            event.preventDefault(); this.next();
+          } else if (event.key === 'ArrowLeft' || event.key === 'PageUp') {
+            event.preventDefault(); this.previous();
+          } else if (event.key === 'Home') {
+            event.preventDefault(); this.show(0, true);
+          } else if (event.key === 'End') {
+            event.preventDefault(); this.show(this.slides.length - 1, true);
+          } else if (event.key.toLowerCase() === 'e') {
+            event.preventDefault(); this.toggleEditing();
+          } else if (event.key.toLowerCase() === 'h') {
+            document.body.classList.toggle('controls-hidden');
+          } else if (event.key === 'Escape' && this.editing) {
+            this.toggleEditing(false);
+          }
+        });
+
+        window.addEventListener('wheel', (event) => {
+          if (this.editing || this.wheelLocked || Math.abs(event.deltaY) < 18) return;
+          this.wheelLocked = true;
+          event.deltaY > 0 ? this.next() : this.previous();
+          window.setTimeout(() => { this.wheelLocked = false; }, 620);
+        }, { passive: true });
+
+        window.addEventListener('touchstart', (event) => {
+          this.touchStartX = event.changedTouches[0].clientX;
+          this.touchStartY = event.changedTouches[0].clientY;
+        }, { passive: true });
+        window.addEventListener('touchend', (event) => {
+          if (this.editing) return;
+          const dx = event.changedTouches[0].clientX - this.touchStartX;
+          const dy = event.changedTouches[0].clientY - this.touchStartY;
+          if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy)) dx < 0 ? this.next() : this.previous();
+        }, { passive: true });
+
+        this.bindEditorHotzone();
+      }
+
+      /* === INLINE EDITOR HOTZONE ===
+         Hovering the top-left corner reveals the edit button. The delay keeps
+         the button reachable when the pointer leaves the hotzone. */
+      bindEditorHotzone() {
+        const hotzone = document.getElementById('editHotzone');
+        const toggle = document.getElementById('editToggle');
+        const show = () => { window.clearTimeout(this.hideEditTimer); toggle.classList.add('show'); };
+        const hide = () => {
+          this.hideEditTimer = window.setTimeout(() => {
+            if (!this.editing) toggle.classList.remove('show');
+          }, 400);
+        };
+        hotzone.addEventListener('mouseenter', show);
+        hotzone.addEventListener('mouseleave', hide);
+        hotzone.addEventListener('click', () => this.toggleEditing());
+        toggle.addEventListener('mouseenter', show);
+        toggle.addEventListener('mouseleave', hide);
+        toggle.addEventListener('click', () => this.toggleEditing());
+      }
+
+      /* === INLINE COPY EDITING AND EXPORT ===
+         Editable text persists in localStorage. Ctrl/Cmd+S downloads a new
+         standalone HTML file containing the current edited copy. */
+      toggleEditing(force) {
+        this.editing = typeof force === 'boolean' ? force : !this.editing;
+        document.body.classList.toggle('editing', this.editing);
+        const toggle = document.getElementById('editToggle');
+        toggle.classList.toggle('active', this.editing);
+        toggle.classList.toggle('show', this.editing);
+        document.querySelectorAll('[data-editable="true"]').forEach((node) => {
+          node.contentEditable = this.editing ? 'true' : 'false';
+          node.spellcheck = false;
+          if (this.editing) node.addEventListener('input', this.boundSave);
+          else node.removeEventListener('input', this.boundSave);
+        });
+        if (!this.editing) this.saveEdits();
+        this.toast(this.editing ? '编辑模式开启 · E 或 Esc 退出 · Ctrl+S 导出' : '文字修改已保存到本机');
+      }
+
+      saveEdits() {
+        const values = Array.from(document.querySelectorAll('[data-editable="true"]')).map((node) => node.innerHTML);
+        localStorage.setItem('zju-night-scare-acceptance-v3', JSON.stringify(values));
+      }
+
+      restoreEdits() {
+        const raw = localStorage.getItem('zju-night-scare-acceptance-v3');
+        if (!raw) return;
+        try {
+          const values = JSON.parse(raw);
+          document.querySelectorAll('[data-editable="true"]').forEach((node, index) => {
+            if (typeof values[index] === 'string') node.innerHTML = values[index];
+          });
+        } catch (error) {
+          console.warn('Presentation edits could not be restored.', error);
+        }
+      }
+
+      exportHtml() {
+        this.saveEdits();
+        const clone = document.documentElement.cloneNode(true);
+        clone.querySelectorAll('[contenteditable]').forEach((node) => node.removeAttribute('contenteditable'));
+        clone.querySelector('body').classList.remove('editing');
+        const html = '<!doctype html>\n' + clone.outerHTML;
+        const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = '浙大夜惊魂-内部项目验收讲解.html';
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(url);
+        this.toast('已导出包含当前修改的 HTML 文件');
+      }
+
+      toast(message) {
+        const toast = document.getElementById('editToast');
+        toast.textContent = message;
+        toast.classList.add('show');
+        window.clearTimeout(this.toastTimer);
+        this.toastTimer = window.setTimeout(() => toast.classList.remove('show'), 2300);
+      }
+    }
+
+    /* === BOOTSTRAP === */
+    window.addEventListener('DOMContentLoaded', () => {
+      window.presentation = new SlidePresentation();
+    });
+  </script>
+</body>
+</html>
