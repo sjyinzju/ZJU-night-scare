@@ -404,7 +404,48 @@
     /* === SLIDE 6: PROJECT ARCHITECTURE ===
        The architecture page separates runtime layers from the three main data
        flows, so the audience can trace an interaction without reading code. */
-    .architecture-layout { display: grid; grid-template-columns: 1.08fr 0.92fr; gap: 72px; }
+    .architecture-layout { display: grid; grid-template-columns: 1.34fr 0.66fr; gap: 56px; }
+    .architecture-map {
+      position: relative;
+      height: 678px;
+      border-top: 5px solid var(--crimson);
+      background: linear-gradient(180deg, rgba(255,255,255,0.018), transparent 76%);
+    }
+    .architecture-map svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+    .architecture-map .solid-link { fill: none; stroke: rgba(242,238,232,0.42); stroke-width: 2.2; }
+    .architecture-map .data-link { fill: none; stroke: rgba(199,25,45,0.76); stroke-width: 2.2; stroke-dasharray: 8 7; }
+    .architecture-map .shared-link { fill: none; stroke: var(--crimson); stroke-width: 2.8; }
+    .arch-node {
+      position: absolute;
+      min-height: 68px;
+      padding: 11px 14px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--line-strong);
+      background: #0b0b0b;
+      text-align: center;
+    }
+    .arch-node strong { color: var(--white); font-size: 20px; line-height: 1.25; }
+    .arch-node span { margin-top: 4px; color: var(--gray-2); font-size: 16px; line-height: 1.25; }
+    .arch-node.core { border-color: var(--crimson); background: var(--crimson-dark); }
+    .arch-node.engine { border-top: 4px solid var(--crimson); }
+    .arch-node.shared { border: 2px solid var(--crimson); }
+    .arch-node.source { border-style: dashed; }
+    .arch-user { left: 35%; top: 12px; width: 30%; }
+    .arch-react-node { left: 32%; top: 104px; width: 36%; }
+    .arch-ui { left: 0; top: 222px; width: 29%; }
+    .arch-phaser { left: 35.5%; top: 222px; width: 29%; }
+    .arch-overlay { left: 71%; top: 222px; width: 29%; }
+    .arch-story { left: 0; top: 350px; width: 29%; }
+    .arch-store-node { left: 35.5%; top: 350px; width: 29%; }
+    .arch-three { left: 71%; top: 350px; width: 29%; }
+    .arch-mapdata { left: 0; top: 478px; width: 29%; }
+    .arch-asseturl { left: 35.5%; top: 478px; width: 29%; }
+    .arch-loader { left: 71%; top: 478px; width: 29%; }
+    .arch-pages { left: 0; top: 592px; width: 29%; }
+    .arch-resources { left: 71%; top: 592px; width: 29%; }
     .architecture-flow { border-top: 5px solid var(--crimson); padding-top: 24px; }
     .arch-tier { display: grid; grid-template-columns: 170px 1fr; gap: 26px; padding: 18px 0; border-bottom: 1px solid var(--line); }
     .arch-tier .level { color: var(--crimson); font-family: var(--mono); font-size: 20px; font-weight: 600; }
@@ -489,9 +530,9 @@
     .result-stat span { display: block; margin-top: 6px; color: var(--gray-2); font-size: 20px; }
     .acceptance-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 72px; margin-top: 35px; }
     .acceptance-column h3 { margin-bottom: 18px; font-family: var(--display); font-size: 34px; }
-    .show-list, .deliverable-list { margin: 0; padding: 0; list-style: none; border-top: 3px solid var(--crimson); }
-    .show-list li, .deliverable-list li { min-height: 68px; padding: 15px 0 15px 30px; position: relative; border-bottom: 1px solid var(--line); color: var(--gray-1); font-size: 22px; line-height: 1.45; }
-    .show-list li::before, .deliverable-list li::before { content: ""; position: absolute; left: 2px; top: 30px; width: 9px; height: 9px; background: var(--crimson); }
+    .achievement-list, .deliverable-list { margin: 0; padding: 0; list-style: none; border-top: 3px solid var(--crimson); }
+    .achievement-list li, .deliverable-list li { min-height: 68px; padding: 15px 0 15px 30px; position: relative; border-bottom: 1px solid var(--line); color: var(--gray-1); font-size: 22px; line-height: 1.45; }
+    .achievement-list li::before, .deliverable-list li::before { content: ""; position: absolute; left: 2px; top: 30px; width: 9px; height: 9px; background: var(--crimson); }
     .delivery-note { margin-top: 26px; padding: 21px 26px; border-left: 5px solid var(--crimson); background: rgba(199,25,45,0.08); color: var(--white); font-size: 23px; line-height: 1.5; }
 
     /* === SLIDE 12: CLOSING AND THANKS === */
@@ -661,15 +702,42 @@
         </header>
         <div class="architecture-layout">
           <div class="reveal" style="--i:1">
-            <div class="architecture-flow">
-              <div class="arch-tier"><div class="level">编排层</div><div class="modules"><span data-editable="true">React 19</span><span data-editable="true">开场</span><span data-editable="true">HUD</span><span data-editable="true">剧情弹层</span><span data-editable="true">场景切换</span></div></div>
-              <div class="arch-tier"><div class="level">空间层</div><div class="modules"><span data-editable="true">Phaser 3 校园外景</span><span data-editable="true">Three.js 建筑内景</span></div></div>
-              <div class="arch-tier"><div class="level">玩法层</div><div class="modules"><span data-editable="true">道路与寻路</span><span data-editable="true">碰撞与交互</span><span data-editable="true">专属场景流程</span></div></div>
-              <div class="arch-tier"><div class="level">状态层</div><div class="modules"><span data-editable="true">Zustand</span><span data-editable="true">storyData</span><span data-editable="true">storyEngine</span></div></div>
-              <div class="arch-tier"><div class="level">资源层</div><div class="modules"><span data-editable="true">GLB</span><span data-editable="true">meta.json</span><span data-editable="true">图片与音频</span><span data-editable="true">assetUrl</span></div></div>
-              <div class="arch-tier"><div class="level">发布层</div><div class="modules"><span data-editable="true">Vite 6</span><span data-editable="true">GitHub Pages</span><span data-editable="true">Cloudflare R2</span></div></div>
+            <div class="architecture-map" aria-label="浙大夜惊魂总体运行时架构图">
+              <svg viewBox="0 0 1100 678" aria-hidden="true">
+                <defs>
+                  <marker id="archArrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="rgba(242,238,232,0.62)"></path></marker>
+                  <marker id="dataArrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#c7192d"></path></marker>
+                  <marker id="dataArrowStart" markerWidth="9" markerHeight="9" refX="1" refY="4.5" orient="auto"><path d="M9,0 L0,4.5 L9,9 Z" fill="#c7192d"></path></marker>
+                </defs>
+                <path class="solid-link" d="M550 80 L550 104" marker-end="url(#archArrow)"></path>
+                <path class="solid-link" d="M550 172 L550 195 L160 195 L160 222" marker-end="url(#archArrow)"></path>
+                <path class="solid-link" d="M550 172 L550 222" marker-end="url(#archArrow)"></path>
+                <path class="solid-link" d="M550 195 L940 195 L940 222" marker-end="url(#archArrow)"></path>
+                <path class="solid-link" d="M940 290 L940 350" marker-end="url(#archArrow)"></path>
+                <path class="shared-link" d="M550 350 L550 290" marker-start="url(#dataArrowStart)" marker-end="url(#dataArrow)"></path>
+                <path class="shared-link" d="M710 384 L781 384" marker-start="url(#dataArrowStart)" marker-end="url(#dataArrow)"></path>
+                <path class="data-link" d="M319 384 L337 384 L337 138 L352 138" marker-end="url(#dataArrow)"></path>
+                <path class="data-link" d="M710 384 L735 384 L735 138 L748 138" marker-start="url(#dataArrowStart)" marker-end="url(#dataArrow)"></path>
+                <path class="data-link" d="M319 512 L366 512 L366 256 L390 256" marker-end="url(#dataArrow)"></path>
+                <path class="data-link" d="M940 478 L940 418" marker-end="url(#dataArrow)"></path>
+                <path class="data-link" d="M710 512 L748 512 L748 626 L781 626" marker-end="url(#dataArrow)"></path>
+                <path class="data-link" d="M940 592 L940 546" marker-end="url(#dataArrow)"></path>
+                <path class="data-link" d="M160 592 L20 592 L20 138 L352 138" marker-end="url(#dataArrow)"></path>
+              </svg>
+              <div class="arch-node arch-user"><strong data-editable="true">桌面端 / 移动端玩家</strong><span data-editable="true">键鼠 · 触控 · 虚拟摇杆</span></div>
+              <div class="arch-node core arch-react-node"><strong data-editable="true">React 游戏壳层 · App.tsx</strong><span data-editable="true">总编排、模式切换、跨引擎事件</span></div>
+              <div class="arch-node arch-ui"><strong data-editable="true">开场 / HUD / 剧情 UI</strong><span data-editable="true">LaunchSequence · Overlay · Modal</span></div>
+              <div class="arch-node engine arch-phaser"><strong data-editable="true">Phaser · CampusScene</strong><span data-editable="true">2.5D 地图、道路、热点、红鬼</span></div>
+              <div class="arch-node arch-overlay"><strong data-editable="true">InteriorOverlay</strong><span data-editable="true">内景 HUD、背包、剧情链、小地图</span></div>
+              <div class="arch-node source arch-story"><strong data-editable="true">storyData + storyEngine</strong><span data-editable="true">剧情节点、条件、结果、场景路由</span></div>
+              <div class="arch-node shared arch-store-node"><strong data-editable="true">Zustand 全局 Store</strong><span data-editable="true">玩家、剧情、背包、世界、鬼魂状态</span></div>
+              <div class="arch-node engine arch-three"><strong data-editable="true">Three.js · Interior3D</strong><span data-editable="true">第一人称、碰撞、灯光、交互</span></div>
+              <div class="arch-node source arch-mapdata"><strong data-editable="true">mapData + mapGraph</strong><span data-editable="true">建筑、道路、水体、Dijkstra 寻路</span></div>
+              <div class="arch-node source arch-asseturl"><strong data-editable="true">assetUrl(relativePath)</strong><span data-editable="true">环境感知的统一资源入口</span></div>
+              <div class="arch-node source arch-loader"><strong data-editable="true">InteriorAssetLoader</strong><span data-editable="true">GLB、附加道具、meta、碰撞映射</span></div>
+              <div class="arch-node arch-pages"><strong data-editable="true">Vite → GitHub Pages</strong><span data-editable="true">网页代码、主页与展示页</span></div>
+              <div class="arch-node arch-resources"><strong data-editable="true">本地 public / Cloudflare R2</strong><span data-editable="true">模型、图片、音频、场景元数据</span></div>
             </div>
-            <p class="architecture-note" data-editable="true">App.tsx 连接开场、外景、内景、剧情弹层、跳脸管线和死亡/复活流程。CampusScene 与 Interior3D 各自维护渲染生命周期，通过 Store 和剧情引擎交换业务状态。</p>
           </div>
           <aside class="reveal" style="--i:2">
             <div class="data-flow-list">
@@ -744,7 +812,7 @@
       <section class="slide" data-title="项目成果与交付">
         <header class="slide-header reveal" style="--i:0">
           <div><div class="eyebrow" data-editable="true">10 · DELIVERY</div><h2 data-editable="true">项目成果与提交材料</h2></div>
-          <div class="header-summary" data-editable="true">本页汇总展示内容和提交材料，最终验收结论由软件团队学长给出。</div>
+          <div class="header-summary" data-editable="true">汇总项目的完成形态、工程规模以及已经整理好的代码与文档成果。</div>
         </header>
         <div class="result-strip reveal" style="--i:1">
           <div class="result-stat"><strong data-editable="true">114</strong><span data-editable="true">main 分支提交</span></div>
@@ -754,13 +822,13 @@
         </div>
         <div class="acceptance-columns">
           <div class="acceptance-column reveal" style="--i:2">
-            <h3 data-editable="true">验收视频重点展示</h3>
-            <ul class="show-list">
-              <li data-editable="true">项目解决的问题、背景设定与完整主线流程。</li>
-              <li data-editable="true">2.5D 校园道路移动、任务引导、热点和红鬼追逐。</li>
-              <li data-editable="true">第一人称 3D 场景中的移动、手电、碰撞、拾取和剧情触发。</li>
-              <li data-editable="true">角色属性、剧情道具、分支选择、死亡复活与结局解析。</li>
-              <li data-editable="true">团队分工、五次迭代、项目架构和关键实现机制。</li>
+            <h3 data-editable="true">项目成果</h3>
+            <ul class="achievement-list">
+              <li data-editable="true">完成从农医馆开场到小剧场终章的连续主线，以及属性、道具、关系和多结局闭环。</li>
+              <li data-editable="true">建立包含 26 栋建筑、8 个广场、15 条道路和 3 片水域的 2.5D 校园地图。</li>
+              <li data-editable="true">完成农医馆、白沙、医学院和小剧场等重点 3D 场景及 6 类主要内景玩法空间。</li>
+              <li data-editable="true">形成 React、Phaser、Three.js 与 Zustand 协作的浏览器游戏运行时。</li>
+              <li data-editable="true">支持桌面与移动浏览器，并完成 GitHub Pages + Cloudflare R2 双线发布。</li>
             </ul>
           </div>
           <div class="acceptance-column reveal" style="--i:3">
@@ -772,7 +840,7 @@
               <li data-editable="true">3D 资产合同、场景元数据、模型构建与检查工具。</li>
               <li data-editable="true">Cloudflare R2 资源部署说明与演示视频。</li>
             </ul>
-            <div class="delivery-note" data-editable="true">演示建议：先用本 HTML 讲清项目，再切入在线游戏完成农医馆调查、校园移动和重点场景片段。</div>
+            <div class="delivery-note" data-editable="true">代码、README、验收文档、玩法设计、资产合同和部署说明共同记录项目的设计、实现与交付过程。</div>
           </div>
         </div>
       </section>
@@ -957,11 +1025,11 @@
 
       saveEdits() {
         const values = Array.from(document.querySelectorAll('[data-editable="true"]')).map((node) => node.innerHTML);
-        localStorage.setItem('zju-night-scare-acceptance-v3', JSON.stringify(values));
+        localStorage.setItem('zju-night-scare-acceptance-v4', JSON.stringify(values));
       }
 
       restoreEdits() {
-        const raw = localStorage.getItem('zju-night-scare-acceptance-v3');
+        const raw = localStorage.getItem('zju-night-scare-acceptance-v4');
         if (!raw) return;
         try {
           const values = JSON.parse(raw);
