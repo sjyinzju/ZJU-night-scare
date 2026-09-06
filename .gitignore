@@ -43,3 +43,5 @@ public/audio/**/*.mp3
 /design
 
 /tmp
+
+.mp4

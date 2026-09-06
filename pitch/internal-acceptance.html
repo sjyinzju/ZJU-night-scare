@@ -361,32 +361,7 @@
     .loop-steps li::before { content: counter(loop); position: absolute; left: 4px; color: var(--crimson); font-family: var(--mono); font-weight: 600; }
     .control-note { margin-top: 28px; color: var(--gray-2); font-family: var(--mono); font-size: 20px; line-height: 1.7; }
 
-    /* === SLIDE 4: SCENE AND ATMOSPHERE DESIGN === */
-    .scene-table { border-top: 5px solid var(--crimson); }
-    .scene-row {
-      display: grid;
-      grid-template-columns: 250px 300px 1fr;
-      gap: 36px;
-      align-items: center;
-      min-height: 122px;
-      border-bottom: 1px solid var(--line);
-    }
-    .scene-row h3 { font-family: var(--display); font-size: 32px; }
-    .scene-row .role { color: var(--crimson); font-size: 23px; font-weight: 600; }
-    .scene-row p { font-size: 23px; line-height: 1.52; }
-    .scene-principle {
-      display: grid;
-      grid-template-columns: auto 1fr;
-      gap: 28px;
-      align-items: center;
-      margin-top: 30px;
-      padding-top: 25px;
-      border-top: 1px solid var(--line-strong);
-    }
-    .scene-principle strong { color: var(--white); font-family: var(--display); font-size: 36px; }
-    .scene-principle span { color: var(--gray-1); font-size: 25px; }
-
-    /* === SLIDE 5: GAME SYSTEMS === */
+    /* === SLIDE 4: GAME SYSTEMS === */
     .system-head,
     .system-row {
       display: grid;
@@ -401,7 +376,7 @@
     .system-row .experience { color: var(--white); font-size: 23px; line-height: 1.48; }
     .system-row .experience::before { content: "— "; color: var(--crimson); }
 
-    /* === SLIDE 6: PROJECT ARCHITECTURE ===
+    /* === SLIDE 5: PROJECT ARCHITECTURE ===
        The architecture page separates runtime layers from the three main data
        flows, so the audience can trace an interaction without reading code. */
     .architecture-layout { display: grid; grid-template-columns: 1.34fr 0.66fr; gap: 56px; }
@@ -458,7 +433,7 @@
     .data-flow-item h3 { margin-top: 8px; font-family: var(--display); font-size: 29px; }
     .data-flow-item p { margin-top: 9px; font-size: 21px; line-height: 1.52; }
 
-    /* === SLIDE 7: IMPLEMENTATION MECHANISMS ===
+    /* === SLIDE 6: IMPLEMENTATION MECHANISMS ===
        Six mechanisms expose the technical work behind scene switching, state,
        navigation, model integration, deployment and frame-loop performance. */
     .mechanism-head,
@@ -474,7 +449,7 @@
     .mechanism-row .path { color: var(--white); font-family: var(--mono); font-size: 20px; line-height: 1.52; }
     .mechanism-row p { font-size: 21px; line-height: 1.5; }
 
-    /* === SLIDE 8: TECHNOLOGY STACK ===
+    /* === SLIDE 7: TECHNOLOGY STACK ===
        Technologies are shown with their exact responsibility in this project,
        keeping the slide grounded in implementation rather than logo listing. */
     .stack-head,
@@ -491,7 +466,7 @@
     .stack-row .usage { color: var(--gray-1); font-size: 21px; line-height: 1.45; }
     .stack-row .files { color: var(--crimson); font-family: var(--mono); font-size: 18px; line-height: 1.42; }
 
-    /* === SLIDE 9: FIVE ITERATIONS === */
+    /* === SLIDE 8: FIVE ITERATIONS === */
     .iteration-head,
     .iteration-row {
       display: grid;
@@ -507,7 +482,7 @@
     .iteration-row p { font-size: 22px; line-height: 1.48; }
     .iteration-row.final { background: linear-gradient(90deg, rgba(199,25,45,0.10), transparent 76%); }
 
-    /* === SLIDE 10: TEAM RESPONSIBILITIES === */
+    /* === SLIDE 9: TEAM RESPONSIBILITIES === */
     .team-head,
     .team-row {
       display: grid;
@@ -522,7 +497,7 @@
     .team-row p { font-size: 22px; line-height: 1.48; }
     .team-row.external { background: linear-gradient(90deg, rgba(199,25,45,0.10), transparent 72%); }
 
-    /* === SLIDE 11: PROJECT RESULTS AND DELIVERY === */
+    /* === SLIDE 10: PROJECT RESULTS AND DELIVERY === */
     .result-strip { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); }
     .result-stat { min-height: 120px; padding: 23px 30px; border-right: 1px solid var(--line); }
     .result-stat:last-child { border-right: 0; }
@@ -535,7 +510,7 @@
     .achievement-list li::before, .deliverable-list li::before { content: ""; position: absolute; left: 2px; top: 30px; width: 9px; height: 9px; background: var(--crimson); }
     .delivery-note { margin-top: 26px; padding: 21px 26px; border-left: 5px solid var(--crimson); background: rgba(199,25,45,0.08); color: var(--white); font-size: 23px; line-height: 1.5; }
 
-    /* === SLIDE 12: CLOSING AND THANKS === */
+    /* === SLIDE 11: CLOSING AND THANKS === */
     .closing-slide { display: grid; grid-template-columns: 1.25fr 0.75fr; align-items: center; padding-left: 142px; }
     .closing-slide h2 { max-width: 1120px; font-size: 86px; line-height: 1.26; }
     .closing-copy { max-width: 1040px; margin-top: 32px; font-size: 28px; }
@@ -664,26 +639,10 @@
         </div>
       </section>
 
-      <!-- Speaker notes: 1:15–1:40。引用地图交接中的空间定位，解释氛围如何服务剧情。 -->
-      <section class="slide" data-title="场景设计">
-        <header class="slide-header reveal" style="--i:0">
-          <div><div class="eyebrow" data-editable="true">03 · SCENE DIRECTION</div><h2 data-editable="true">校园空间与氛围设计</h2></div>
-          <div class="header-summary" data-editable="true">惊悚感来自熟悉空间中的轻微偏差，环境会随着剧情阶段逐渐失真。</div>
-        </header>
-        <div class="scene-table">
-          <div class="scene-row reveal" style="--i:1"><h3 data-editable="true">农医馆</h3><div class="role" data-editable="true">故事开端 / 秩序裂缝</div><p data-editable="true">冷静、安静、档案感明确。手电、笔记本、小票、符咒、异常书架和灯下人物组成第一条调查链。</p></div>
-          <div class="scene-row reveal" style="--i:2"><h3 data-editable="true">医学院</h3><div class="role" data-editable="true">全图视觉核心</div><p data-editable="true">六楼冷窗、病床、巡查守则、车库封印与地下仓库逐层加深压力，承担主线证据的集中揭示。</p></div>
-          <div class="scene-row reveal" style="--i:3"><h3 data-editable="true">白沙学园</h3><div class="role" data-editable="true">日常生活崩坏</div><p data-editable="true">围绕 2 幢 123 室与 3 幢 216 室展开，房间调查、论坛信息和真假出口把生活空间转化为追逐场。</p></div>
-          <div class="scene-row reveal" style="--i:4"><h3 data-editable="true">启真湖</h3><div class="role" data-editable="true">记忆污染地点</div><p data-editable="true">保持可辨识的蓝色水面，通过低雾、错位倒影、延迟倒影与水草黑线表达记忆和现实的偏移。</p></div>
-          <div class="scene-row reveal" style="--i:5"><h3 data-editable="true">西区沼泽与小剧场</h3><div class="role" data-editable="true">异空间 / 终章入口</div><p data-editable="true">沼泽提供校园秩序外的迷失感；小剧场以旧海报、唱段、后台镜面和胶片放映完成故事收束。</p></div>
-        </div>
-        <div class="scene-principle reveal" style="--i:6"><strong data-editable="true">现实偏移系统</strong><span data-editable="true">玩家接近关键区域时，雾、灯光、标签、时间和局部异常会同步变化；五个剧情阶段拥有不同的基础失真强度。</span></div>
-      </section>
-
-      <!-- Speaker notes: 1:40–2:05。用实现方式和玩家感受对应讲解五类系统。 -->
+      <!-- Speaker notes: 1:15–1:45。用实现方式和玩家感受对应讲解五类系统。 -->
       <section class="slide" data-title="游戏系统">
         <header class="slide-header reveal" style="--i:0">
-          <div><div class="eyebrow" data-editable="true">04 · GAME SYSTEMS</div><h2 data-editable="true">核心游戏系统</h2></div>
+          <div><div class="eyebrow" data-editable="true">03 · GAME SYSTEMS</div><h2 data-editable="true">核心游戏系统</h2></div>
           <div class="header-summary" data-editable="true">18 项验收功能覆盖开场、外景、内景、剧情、音频、移动端和部署。</div>
         </header>
         <div class="system-head reveal" style="--i:1"><span>系统</span><span>实现内容</span><span>玩家体验</span></div>
@@ -694,10 +653,10 @@
         <div class="system-row reveal" style="--i:6"><h3 data-editable="true">视听与移动端</h3><div class="implementation" data-editable="true">环境音、程序化音效、跳脸时序、雾与暗角；虚拟摇杆、拖动视角和触控互动。</div><div class="experience" data-editable="true">桌面端保持沉浸感，移动端也能完成主流程。</div></div>
       </section>
 
-      <!-- Speaker notes: 2:05–2:35。先讲六层架构，再沿三条数据流解释模块如何连接。 -->
+      <!-- Speaker notes: 1:45–2:20。先讲总体架构，再沿三条数据流解释模块如何连接。 -->
       <section class="slide" data-title="项目架构">
         <header class="slide-header reveal" style="--i:0">
-          <div><div class="eyebrow" data-editable="true">05 · ARCHITECTURE</div><h2 data-editable="true">项目总体架构</h2></div>
+          <div><div class="eyebrow" data-editable="true">04 · ARCHITECTURE</div><h2 data-editable="true">项目总体架构</h2></div>
           <div class="header-summary" data-editable="true">React 持有流程编排权，两个游戏引擎负责不同空间，状态与资源层向两侧提供统一合同。</div>
         </header>
         <div class="architecture-layout">
@@ -749,10 +708,10 @@
         </div>
       </section>
 
-      <!-- Speaker notes: 2:35–3:05。用六个机制说明地图、内景、剧情、资源和性能如何落地。 -->
+      <!-- Speaker notes: 2:20–2:55。用六个机制说明地图、内景、剧情、资源和性能如何落地。 -->
       <section class="slide" data-title="实现机制">
         <header class="slide-header reveal" style="--i:0">
-          <div><div class="eyebrow" data-editable="true">06 · IMPLEMENTATION</div><h2 data-editable="true">关键实现机制</h2></div>
+          <div><div class="eyebrow" data-editable="true">05 · IMPLEMENTATION</div><h2 data-editable="true">关键实现机制</h2></div>
           <div class="header-summary" data-editable="true">技术重点集中在跨引擎协作、可维护的剧情状态、真实模型玩法化和浏览器运行效率。</div>
         </header>
         <div class="mechanism-head reveal" style="--i:1"><span>机制</span><span>运行路径</span><span>解决的问题</span></div>
@@ -764,10 +723,10 @@
         <div class="mechanism-row reveal" style="--i:7"><h3 data-editable="true">运行时性能控制</h3><div class="path" data-editable="true">snapshot reuse → 10 Hz sync<br>→ collider skip → batching</div><p data-editable="true">减少帧循环中的 Zustand 写入和重复分配；静止时跳过无效碰撞扫描，静态模型批处理时保留画质。</p></div>
       </section>
 
-      <!-- Speaker notes: 3:05–3:30。逐行说明每项技术在项目中的具体职责和对应代码区域。 -->
+      <!-- Speaker notes: 2:55–3:20。逐行说明每项技术在项目中的具体职责和对应代码区域。 -->
       <section class="slide" data-title="技术栈">
         <header class="slide-header reveal" style="--i:0">
-          <div><div class="eyebrow" data-editable="true">07 · TECHNOLOGY STACK</div><h2 data-editable="true">技术栈与实际落点</h2></div>
+          <div><div class="eyebrow" data-editable="true">06 · TECHNOLOGY STACK</div><h2 data-editable="true">技术栈与实际落点</h2></div>
           <div class="header-summary" data-editable="true">技术选择围绕浏览器游戏、多空间渲染、跨模块状态和大型 3D 资产发布展开。</div>
         </header>
         <div class="stack-head reveal" style="--i:1"><span>类别</span><span>技术</span><span>项目中的职责</span><span>主要代码区域</span></div>
@@ -780,10 +739,10 @@
         <div class="stack-row reveal" style="--i:8"><div class="category">构建与发布</div><div class="technology">Vite 6<br>Pages + R2</div><div class="usage" data-editable="true">本地开发与生产打包；网页代码走 GitHub Pages，大型运行时资源走 Cloudflare R2。</div><div class="files">vite.config.ts<br>.github/workflows</div></div>
       </section>
 
-      <!-- Speaker notes: 3:30–4:00。按五个版本讲清每次新增的能力、阶段问题和最终结果。 -->
+      <!-- Speaker notes: 3:20–3:50。按五个版本讲清每次新增的能力、阶段问题和最终结果。 -->
       <section class="slide" data-title="迭代过程">
         <header class="slide-header reveal" style="--i:0">
-          <div><div class="eyebrow" data-editable="true">08 · ITERATION</div><h2 data-editable="true">五个版本的迭代过程</h2></div>
+          <div><div class="eyebrow" data-editable="true">07 · ITERATION</div><h2 data-editable="true">五个版本的迭代过程</h2></div>
           <div class="header-summary" data-editable="true">每个版本验证一个核心问题，已有剧情和功能持续保留并进入下一阶段。</div>
         </header>
         <div class="iteration-head reveal" style="--i:1"><span>版本</span><span>时间</span><span>阶段目标</span><span>主要成果与问题处理</span></div>
@@ -794,10 +753,10 @@
         <div class="iteration-row final reveal" style="--i:6"><div class="version">V5</div><div class="date">08.23–09.05</div><h3 data-editable="true">定制 3D 与完整玩法</h3><p data-editable="true">完成农医馆、白沙、医学院和小剧场，集中修复道路、热点、剧情、音画同步、运行性能与线上资源流程。</p></div>
       </section>
 
-      <!-- Speaker notes: 4:00–4:25。按照验收文档的成员顺序介绍职责和可追溯成果。 -->
+      <!-- Speaker notes: 3:50–4:15。按照验收文档的成员顺序介绍职责和可追溯成果。 -->
       <section class="slide" data-title="项目分工">
         <header class="slide-header reveal" style="--i:0">
-          <div><div class="eyebrow" data-editable="true">09 · TEAM</div><h2 data-editable="true">小组分工与协作</h2></div>
+          <div><div class="eyebrow" data-editable="true">08 · TEAM</div><h2 data-editable="true">小组分工与协作</h2></div>
           <div class="header-summary" data-editable="true">前四位为正式软件小组成员，鲁沁旑学姐作为外部美术协作者提供定制 3D 建模支持。</div>
         </header>
         <div class="team-head reveal" style="--i:1"><span>成员</span><span>主要职责</span><span>可追溯成果</span></div>
@@ -808,10 +767,10 @@
         <div class="team-row external reveal" style="--i:6"><div class="identity" data-editable="true">鲁沁旑<br><span class="dim">外部协作者</span></div><p data-editable="true">精细定制 3D 建模、美术品质支持、场景模型交付与修改建议。</p><p data-editable="true">提供精美 3D 建筑与内景模型，提升最终版本的空间真实感和视觉完成度。</p></div>
       </section>
 
-      <!-- Speaker notes: 4:25–4:45。向验收学长汇总可展示成果和已经准备的提交材料。 -->
+      <!-- Speaker notes: 4:15–4:35。汇总项目成果和已经准备的提交材料。 -->
       <section class="slide" data-title="项目成果与交付">
         <header class="slide-header reveal" style="--i:0">
-          <div><div class="eyebrow" data-editable="true">10 · DELIVERY</div><h2 data-editable="true">项目成果与提交材料</h2></div>
+          <div><div class="eyebrow" data-editable="true">09 · DELIVERY</div><h2 data-editable="true">项目成果与提交材料</h2></div>
           <div class="header-summary" data-editable="true">汇总项目的完成形态、工程规模以及已经整理好的代码与文档成果。</div>
         </header>
         <div class="result-strip reveal" style="--i:1">
@@ -845,10 +804,10 @@
         </div>
       </section>
 
-      <!-- Speaker notes: 4:45–5:00。总结团队完成的跨学科协作并致谢，随后结束录屏。 -->
+      <!-- Speaker notes: 4:35–5:00。总结团队完成的跨学科协作并致谢，随后结束录屏。 -->
       <section class="slide closing-slide" data-title="总结与致谢">
         <div>
-          <div class="eyebrow reveal" style="--i:0" data-editable="true">11 · SUMMARY &amp; THANKS</div>
+          <div class="eyebrow reveal" style="--i:0" data-editable="true">10 · SUMMARY &amp; THANKS</div>
           <h2 class="reveal" style="--i:1" data-editable="true">从一段校园传说，<br>走进一座深夜校园。</h2>
           <p class="closing-copy reveal" style="--i:2" data-editable="true">项目经历文字原型、校园地图、程序化内景、外部模型接入和定制 3D 五个阶段，最终形成一条可运行、可展示、分工清楚的完整游戏流程。</p>
           <div class="closing-points reveal" style="--i:3">
@@ -871,7 +830,7 @@
        These controls never occupy slide content and can be hidden with H. -->
   <nav class="deck-controls" aria-label="幻灯片控制">
     <button type="button" id="prevButton" aria-label="上一页">‹</button>
-    <span class="deck-counter" id="deckCounter">1 / 12</span>
+    <span class="deck-counter" id="deckCounter">1 / 11</span>
     <button type="button" id="nextButton" aria-label="下一页">›</button>
   </nav>
   <div class="edit-hotzone" id="editHotzone" aria-hidden="true"></div>
@@ -1025,11 +984,11 @@
 
       saveEdits() {
         const values = Array.from(document.querySelectorAll('[data-editable="true"]')).map((node) => node.innerHTML);
-        localStorage.setItem('zju-night-scare-acceptance-v4', JSON.stringify(values));
+        localStorage.setItem('zju-night-scare-acceptance-v5', JSON.stringify(values));
       }
 
       restoreEdits() {
-        const raw = localStorage.getItem('zju-night-scare-acceptance-v4');
+        const raw = localStorage.getItem('zju-night-scare-acceptance-v5');
         if (!raw) return;
         try {
           const values = JSON.parse(raw);
