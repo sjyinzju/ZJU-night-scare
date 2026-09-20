@@ -392,6 +392,9 @@ const ASSET_SOURCES: Record<string, InteriorAssetSource> = {
 let loader: import("three/examples/jsm/loaders/GLTFLoader.js").GLTFLoader | undefined;
 const binaryAssetPromises = new Map<string, Promise<ArrayBuffer>>();
 const metaAssetPromises = new Map<string, Promise<InteriorAssetMeta | undefined>>();
+const ASSET_REQUEST_TIMEOUT_MS = 180_000;
+const META_REQUEST_TIMEOUT_MS = 30_000;
+const ASSET_REQUEST_ATTEMPTS = 2;
 
 async function getLoader(): Promise<import("three/examples/jsm/loaders/GLTFLoader.js").GLTFLoader> {
   if (!loader) {
@@ -409,15 +412,32 @@ function sourceAssetUrl(source: InteriorAssetSource, file: string): string {
   return assetUrl(`${source.rootPath}/${file}`, source.cacheVersion);
 }
 
+async function requestBinaryAsset(url: string): Promise<ArrayBuffer> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= ASSET_REQUEST_ATTEMPTS; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), ASSET_REQUEST_TIMEOUT_MS);
+    try {
+      const response = await fetch(url, { signal: controller.signal });
+      if (!response.ok) throw new Error(`Failed to preload ${url}: HTTP ${response.status}`);
+      return await response.arrayBuffer();
+    } catch (error) {
+      lastError = error;
+      if (attempt < ASSET_REQUEST_ATTEMPTS) {
+        await new Promise<void>((resolve) => window.setTimeout(resolve, attempt * 650));
+      }
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(`Failed to preload ${url}`);
+}
+
 function fetchBinaryAsset(url: string): Promise<ArrayBuffer> {
   const cached = binaryAssetPromises.get(url);
   if (cached) return cached;
 
-  const request = fetch(url)
-    .then((response) => {
-      if (!response.ok) throw new Error(`Failed to preload ${url}: HTTP ${response.status}`);
-      return response.arrayBuffer();
-    })
+  const request = requestBinaryAsset(url)
     .catch((error) => {
       binaryAssetPromises.delete(url);
       throw error;
@@ -426,20 +446,37 @@ function fetchBinaryAsset(url: string): Promise<ArrayBuffer> {
   return request;
 }
 
+async function requestMetaAsset(url: string): Promise<InteriorAssetMeta> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= ASSET_REQUEST_ATTEMPTS; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), META_REQUEST_TIMEOUT_MS);
+    try {
+      const response = await fetch(url, { signal: controller.signal });
+      if (!response.ok) throw new Error(`Failed to load ${url}: HTTP ${response.status}`);
+      return (await response.json()) as InteriorAssetMeta;
+    } catch (error) {
+      lastError = error;
+      if (attempt < ASSET_REQUEST_ATTEMPTS) {
+        await new Promise<void>((resolve) => window.setTimeout(resolve, attempt * 450));
+      }
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(`Failed to load ${url}`);
+}
+
 function loadMeta(source: InteriorAssetSource): Promise<InteriorAssetMeta | undefined> {
   if (!source.metaFile) return Promise.resolve(undefined);
   const url = sourceAssetUrl(source, source.metaFile);
   const cached = metaAssetPromises.get(url);
   if (cached) return cached;
 
-  const request = fetch(url)
-    .then(async (response) => {
-      if (!response.ok) throw new Error(`Failed to load ${url}: HTTP ${response.status}`);
-      return (await response.json()) as InteriorAssetMeta;
-    })
-    .catch(() => {
+  const request = requestMetaAsset(url)
+    .catch((error) => {
       metaAssetPromises.delete(url);
-      return undefined;
+      throw error;
     });
   metaAssetPromises.set(url, request);
   return request;
@@ -475,7 +512,13 @@ export async function preloadInteriorAsset(req: InteriorAssetRequest): Promise<v
   ]);
   const meta = await metaPromise;
   const resolvedFiles = resolveModelFiles(req, source, meta);
-  await Promise.all(resolvedFiles.map((file) => fetchBinaryAsset(sourceAssetUrl(source, file))));
+  const runtimeModels = req.buildingId === "little-theater" && meta?.theaterGameplay
+    ? [meta.theaterGameplay.ghost.model, meta.theaterGameplay.photoFrame.model]
+    : [];
+  await Promise.all([
+    ...resolvedFiles.map((file) => fetchBinaryAsset(sourceAssetUrl(source, file))),
+    ...runtimeModels.map(preloadInteriorRuntimeAsset),
+  ]);
 }
 
 const MEDICAL_SEGMENT_ORDER: MedicalInteriorSegment[] = ["top", "garage", "basement"];
@@ -501,7 +544,7 @@ export async function preloadNextMedicalInteriorSegment(
   const currentIndex = MEDICAL_SEGMENT_ORDER.indexOf(current);
   const next = MEDICAL_SEGMENT_ORDER[currentIndex + 1];
   if (!next) return;
-  await preloadInteriorAsset({ ...req, medicalSegment: next });
+  await preloadMedicalInteriorSegment(req, next);
 }
 
 const MEDICAL_TOP_ROOT = "models/interiors/medical-school";
@@ -514,6 +557,57 @@ function medicalTopAuxiliaryUrl(file: string): string {
 /** Preload one independently streamed top-floor room/prop package. */
 export async function preloadMedicalTopAuxiliary(file: string): Promise<void> {
   await Promise.all([getLoader(), fetchBinaryAsset(medicalTopAuxiliaryUrl(file))]);
+}
+
+function medicalSegmentAuxiliaryModels(
+  meta: InteriorAssetMeta | undefined,
+  segment: MedicalInteriorSegment,
+): string[] {
+  if (segment === "top" && meta?.medicalTopGameplay) {
+    return [
+      meta.medicalTopGameplay.bed.model,
+      ...Object.values(meta.medicalTopGameplay.rooms).map((room) => room.model),
+    ];
+  }
+  if (segment === "garage" && meta?.medicalGarageGameplay) {
+    return [meta.medicalGarageGameplay.propsModel];
+  }
+  if (segment === "basement" && meta?.medicalBasementGameplay) {
+    return [meta.medicalBasementGameplay.propsModel];
+  }
+  return [];
+}
+
+/** Preload one medical floor plus every GLB that its setup path awaits. */
+export async function preloadMedicalInteriorSegment(
+  req: Omit<InteriorAssetRequest, "medicalSegment">,
+  segment: MedicalInteriorSegment,
+): Promise<void> {
+  const source = ASSET_SOURCES[assetKey(req)];
+  if (!source) return;
+  const metaPromise = loadMeta(source);
+  await preloadInteriorAsset({ ...req, medicalSegment: segment });
+  const meta = await metaPromise;
+  await Promise.all(medicalSegmentAuxiliaryModels(meta, segment).map(preloadMedicalTopAuxiliary));
+}
+
+/**
+ * Warm all authored medical floors while the player is still in the previous
+ * chapter. Sequential floor downloads avoid starving the currently visible
+ * scene while still filling the shared ArrayBuffer cache well before a lift or
+ * stair transition.
+ */
+export async function preloadAllMedicalInteriorAssets(
+  req: Omit<InteriorAssetRequest, "medicalSegment">,
+): Promise<void> {
+  for (const segment of MEDICAL_SEGMENT_ORDER) {
+    await preloadMedicalInteriorSegment(req, segment);
+  }
+}
+
+/** Download a cross-scene prop model without parsing it yet. */
+export async function preloadInteriorRuntimeAsset(relativePath: string): Promise<void> {
+  await Promise.all([getLoader(), fetchBinaryAsset(assetUrl(relativePath))]);
 }
 
 /**

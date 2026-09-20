@@ -13,8 +13,10 @@ import {
 } from "./proceduralAudio";
 import { assetUrl } from "../assetPath";
 
-// 本地开发走 public/ 目录，生产构建走 Cloudflare R2 CDN
-const BASE = assetUrl("");
+// Query-version every file because R2 publishes these objects with immutable
+// cache metadata. Bump this when any same-name audio asset changes.
+const AUDIO_CACHE_VERSION = "game-audio-v1";
+const audioAssetUrl = (relativePath: string) => assetUrl(`audio/${relativePath}`, AUDIO_CACHE_VERSION);
 
 type EndingKind = NonNullable<StoryScene["ending"]>;
 type AudibleHorrorEffect = Exclude<HorrorEffect, "whisper">;
@@ -32,31 +34,31 @@ const FADE_MS = 950;
 
 // ── BGM 播放列表: score-1 → score-2 → loop ──
 const mainBgmTracks: AudioTrack[] = [
-  { howl: new Howl({ src: [`${BASE}audio/bgm/score-1.mp3`], loop: false, volume: 0, preload: true }) },
-  { howl: new Howl({ src: [`${BASE}audio/bgm/score-2.mp3`], loop: false, volume: 0, preload: true }) },
+  { howl: new Howl({ src: [audioAssetUrl("bgm/score-1.mp3")], loop: false, volume: 0, preload: true }) },
+  { howl: new Howl({ src: [audioAssetUrl("bgm/score-2.mp3")], loop: false, volume: 0, preload: true }) },
 ];
 
 // ── 保留的旧环境音 (可选低调混合) ──
-const ambientWind = new Howl({ src: [`${BASE}audio/ambient/wind.wav`], loop: true, volume: 0, preload: true });
+const ambientWind = new Howl({ src: [audioAssetUrl("ambient/wind.wav")], loop: true, volume: 0, preload: true });
 
 // ── SFX ──
 const oneShots: Record<OneShotKey, Howl> = {
-  shake: new Howl({ src: [`${BASE}audio/sfx/shake.wav`], volume: 0.52, preload: true }),
-  jumpscare: new Howl({ src: [`${BASE}audio/sfx/jumpscare.wav`], volume: 0.72, preload: true }),
-  reveal: new Howl({ src: [`${BASE}audio/sfx/reveal.wav`], volume: 0.42, preload: true }),
-  ending: new Howl({ src: [`${BASE}audio/sfx/ending.wav`], volume: 0.5, preload: true }),
-  choiceSelect: new Howl({ src: [`${BASE}audio/sfx/choice-select.wav`], volume: 0.24, preload: true }),
-  hover: new Howl({ src: [`${BASE}audio/sfx/hover.wav`], volume: 0.18, preload: true }),
-  item: new Howl({ src: [`${BASE}audio/sfx/item.wav`], volume: 0.34, preload: true }),
-  ghostHit: new Howl({ src: [`${BASE}audio/sfx/ghost-hit.wav`], volume: 0.58, preload: true }),
-  death: new Howl({ src: [`${BASE}audio/sfx/death.wav`], volume: 0.72, preload: true }),
+  shake: new Howl({ src: [audioAssetUrl("sfx/shake.wav")], volume: 0.52, preload: true }),
+  jumpscare: new Howl({ src: [audioAssetUrl("sfx/jumpscare.wav")], volume: 0.72, preload: true }),
+  reveal: new Howl({ src: [audioAssetUrl("sfx/reveal.wav")], volume: 0.42, preload: true }),
+  ending: new Howl({ src: [audioAssetUrl("sfx/ending.wav")], volume: 0.5, preload: true }),
+  choiceSelect: new Howl({ src: [audioAssetUrl("sfx/choice-select.wav")], volume: 0.24, preload: true }),
+  hover: new Howl({ src: [audioAssetUrl("sfx/hover.wav")], volume: 0.18, preload: true }),
+  item: new Howl({ src: [audioAssetUrl("sfx/item.wav")], volume: 0.34, preload: true }),
+  ghostHit: new Howl({ src: [audioAssetUrl("sfx/ghost-hit.wav")], volume: 0.58, preload: true }),
+  death: new Howl({ src: [audioAssetUrl("sfx/death.wav")], volume: 0.72, preload: true }),
 };
 
 // ── 翻页/剧情推进音 ──
 const pageTurnSprites = ["turn1", "turn2", "turn3", "turn4", "turn5", "turn6"] as const;
 type PageTurnSprite = (typeof pageTurnSprites)[number];
 const pageTurnSound = new Howl({
-  src: [`${BASE}audio/sfx/story-open.mp3`],
+  src: [audioAssetUrl("sfx/story-open.mp3")],
   volume: 0.36,
   preload: true,
   sprite: {
@@ -68,6 +70,63 @@ const pageTurnSound = new Howl({
     turn6: [6500, 520],
   } satisfies Record<PageTurnSprite, [number, number]>,
 });
+
+const preloadHowls = [
+  ...mainBgmTracks.map((track) => track.howl),
+  ambientWind,
+  ...Object.values(oneShots),
+  pageTurnSound,
+];
+const howlLoadPromises = new WeakMap<Howl, Promise<boolean>>();
+let audioBankReady: Promise<boolean[]> | null = null;
+
+function ensureHowlLoaded(howl: Howl, timeoutMs = 120_000): Promise<boolean> {
+  if (howl.state() === "loaded") return Promise.resolve(true);
+  const cached = howlLoadPromises.get(howl);
+  if (cached) return cached;
+
+  const request = new Promise<boolean>((resolve) => {
+    let settled = false;
+    const finish = (loaded: boolean) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      howl.off("load", handleLoad);
+      howl.off("loaderror", handleLoadError);
+      if (!loaded) howlLoadPromises.delete(howl);
+      resolve(loaded);
+    };
+    const handleLoad = () => finish(true);
+    const handleLoadError = () => finish(false);
+    const timeout = window.setTimeout(() => finish(false), timeoutMs);
+    howl.once("load", handleLoad);
+    howl.once("loaderror", handleLoadError);
+    if (howl.state() === "unloaded") howl.load();
+  });
+  howlLoadPromises.set(howl, request);
+  return request;
+}
+
+/**
+ * Await the complete file-audio bank and retry transient CDN failures once.
+ * This only downloads/decodes; playback still waits for the player's gesture.
+ */
+export function preloadGameAudio(): Promise<boolean[]> {
+  if (audioBankReady) return audioBankReady;
+  audioBankReady = (async () => {
+    const firstPass = await Promise.all(preloadHowls.map((howl) => ensureHowlLoaded(howl)));
+    const retryIndexes = firstPass.flatMap((loaded, index) => loaded ? [] : [index]);
+    if (retryIndexes.length === 0) return firstPass;
+    const retries = await Promise.all(
+      retryIndexes.map((index) => ensureHowlLoaded(preloadHowls[index])),
+    );
+    const result = [...firstPass];
+    retryIndexes.forEach((index, retryIndex) => { result[index] = retries[retryIndex]; });
+    if (result.some((loaded) => !loaded)) audioBankReady = null;
+    return result;
+  })();
+  return audioBankReady;
+}
 
 const effectCooldownMs: Partial<Record<OneShotKey, number>> = {
   shake: 500,

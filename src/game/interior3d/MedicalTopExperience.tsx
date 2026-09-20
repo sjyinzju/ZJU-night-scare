@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type MutableRefObject } from "react";
 import { assetUrl } from "../assetPath";
+import { MEDICAL_CCTV_IMAGE_VERSION, preloadMedicalTopVisualAssets } from "../imagePreloader";
 import type { Interior3D } from "./Interior3D";
 import {
   MEDICAL_601_ANOMALIES,
@@ -59,16 +60,7 @@ export default function MedicalTopExperience({
 
   useEffect(() => {
     if (!active) return;
-    const files = [...CCTV_NORMAL, ...CCTV_PACK.A, ...CCTV_PACK.B];
-    const images = files.map((file) => {
-      const image = new Image();
-      image.decoding = "async";
-      image.src = assetUrl(`images/medical-cctv/${file}`, "medical-cctv-v3-webp");
-      return image;
-    });
-    return () => {
-      for (const image of images) image.src = "";
-    };
+    void preloadMedicalTopVisualAssets();
   }, [active]);
 
   useEffect(() => {
@@ -137,7 +129,7 @@ export default function MedicalTopExperience({
   };
 
   const cctvImages = modal?.kind === "cctv"
-    ? [...CCTV_NORMAL, ...CCTV_PACK[modal.pack]].map((file) => assetUrl(`images/medical-cctv/${file}`, "medical-cctv-v3-webp"))
+    ? [...CCTV_NORMAL, ...CCTV_PACK[modal.pack]].map((file) => assetUrl(`images/medical-cctv/${file}`, MEDICAL_CCTV_IMAGE_VERSION))
     : [];
   const selectedCctvChoice = modal?.kind === "cctv" && selectedCctvChoiceId
     ? MEDICAL_605_CHOICES[modal.pack].find((choice) => choice.id === selectedCctvChoiceId)

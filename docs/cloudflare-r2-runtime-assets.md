@@ -1,8 +1,8 @@
 # Cloudflare R2 运行时资源发布
 
-## 为什么必须换掉 `r2.dev`
+## 生产资源域名
 
-当前生产环境仍指向 `pub-...r2.dev/public`。Cloudflare 将 `r2.dev` 定义为非生产入口，会限流，而且该入口不能使用 Cloudflare Cache。正式游戏应给现有 R2 bucket 绑定同账号、已接入 Cloudflare 的自定义域名，例如 `assets.example.com`。
+生产环境已使用 R2 自定义域名 `assets.sjyinzju.top`。不要退回 `pub-...r2.dev`：Cloudflare 将 `r2.dev` 定义为非生产入口，会限流，而且该入口不能使用 Cloudflare Cache。
 
 绑定完成后，把 `.env.production` 改为：
 
@@ -20,10 +20,12 @@ VITE_ASSET_CDN_URL=https://assets.example.com/public
 npm run assets:prepare:r2
 ```
 
-也可以只处理一个场景：
+也可以只处理一个场景或音频库：
 
 ```bash
 node tools/prepare_r2_runtime_assets.mjs --scene=baisha
+node tools/prepare_r2_runtime_assets.mjs --scene=medical
+node tools/prepare_r2_runtime_assets.mjs --scene=audio
 ```
 
 小剧场模型、元数据和全部放映/镜面图片可单独准备：
@@ -39,9 +41,9 @@ node tools/prepare_r2_runtime_assets.mjs --scene=theater
 - `Content-Encoding: br`
 - `Cache-Control: public, max-age=31536000, immutable`
 
-缺少 `Content-Encoding: br` 会让浏览器把压缩字节当 GLB 解析并失败。小剧场的元数据 JSON 与 PNG 也会原样复制进 `.r2-upload/` 并写入 manifest；这些文件必须使用 manifest 中的 `Content-Type` 与 `Cache-Control`，但不能设置 `Content-Encoding`。
+缺少 `Content-Encoding: br` 会让浏览器把压缩字节当 GLB 解析并失败。元数据、PNG、WebP、MP3 与 WAV 会原样复制进 `.r2-upload/` 并写入 manifest；这些文件必须使用 manifest 中的 `Content-Type` 与 `Cache-Control`，但不能设置 `Content-Encoding`。
 
-小剧场图片请求带有版本查询参数，因此可以安全使用 manifest 中的一年 immutable 浏览器缓存。每次替换同名图片时，必须同时更新 `THEATER_IMAGE_CACHE_VERSION`，否则已缓存的旧图不会立即失效。
+运行时模型、剧情图片、跳脸图片和文件音频都带版本查询参数，因此可以安全使用 manifest 中的一年 immutable 浏览器缓存。每次替换同名资源时，必须同时更新对应的缓存版本常量，否则已缓存的旧资源不会立即失效。
 
 ## Cloudflare 缓存规则
 
@@ -83,5 +85,7 @@ curl -I "https://assets.example.com/public/models/interiors/baisha/baisha.glb?v=
 - `content-encoding: br`
 - 第二次请求的 `cf-cache-status: HIT`
 - `age` 随后增长
+
+如果模型仍显示原始文件大小、没有 `content-encoding: br`、没有 `cache-control`，且连续请求仍为 `cf-cache-status: DYNAMIC`，说明上传时没有采用 `.r2-upload/manifest.json` 的压缩字节/对象元数据，或自定义域名的 Cache Rule 尚未生效；这不是前端 CORS 问题。
 
 最后重新执行 `npm run build`、合并到 `main` 并等待 GitHub Pages 部署。仅上传 R2 不会更新已经构建进 JavaScript 的 CDN 域名或场景版本号。

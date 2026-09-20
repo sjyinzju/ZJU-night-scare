@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactElement } from "react";
 import { assetUrl } from "../assetPath";
 import { audioManager } from "../audio/audioManager";
+import {
+  MEDICAL_BASEMENT_IMAGE_VERSION,
+  preloadMedicalBasementVisualAssets,
+} from "../imagePreloader";
 import { JumpscarePipeline } from "../JumpscarePipeline";
 import type { Interior3D } from "./Interior3D";
 import {
@@ -22,12 +26,11 @@ interface MedicalBasementExperienceProps {
   onModalClosed: () => void;
 }
 
-const BASEMENT_IMAGE_VERSION = "medical-basement-v2";
 const EVIDENCE_IDS: MedicalBasementEvidenceId[] = ["registry", "rope", "protocol"];
 const ARCHIVE_PAGE_COUNT = MEDICAL_BASEMENT_NOTEBOOK_PAGES.length;
 
 function archiveImageUrl(file: string): string {
-  return assetUrl(`images/medical-basement/${file}`, BASEMENT_IMAGE_VERSION);
+  return assetUrl(`images/medical-basement/${file}`, MEDICAL_BASEMENT_IMAGE_VERSION);
 }
 
 export default function MedicalBasementExperience({
@@ -57,21 +60,7 @@ export default function MedicalBasementExperience({
 
   useEffect(() => {
     if (!active) return;
-    const files = [
-      "suwan-door-v1.png",
-      "archive-intake-v1.png",
-      "archive-anomaly-v1.png",
-      "archive-blood-stain-v1.png",
-      "archive-notebook-spread-v1.png",
-    ];
-    const images = files.map((file) => {
-      const image = new Image();
-      image.decoding = "async";
-      image.fetchPriority = "high";
-      image.src = archiveImageUrl(file);
-      return image;
-    });
-    return () => images.forEach((image) => { image.src = ""; });
+    void preloadMedicalBasementVisualAssets();
   }, [active]);
 
   useEffect(() => {

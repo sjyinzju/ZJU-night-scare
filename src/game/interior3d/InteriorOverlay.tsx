@@ -42,6 +42,7 @@ export interface InteriorOverlayProps {
   /** Keeps the renderer hidden until authored static visuals are attached. */
   blockUntilAssetReady?: boolean;
   onAssetStateChange?: (state: InteriorAssetState) => void;
+  onAssetRetry?: () => void;
   onMedicalTopComplete?: (detail: { hasFuse: boolean; evidence?: string }) => void;
   onMedicalGarageComplete?: () => void;
   onMedicalBasementComplete?: (detail: {
@@ -120,6 +121,7 @@ export default function InteriorOverlay({
   isMobile = false,
   blockUntilAssetReady = false,
   onAssetStateChange,
+  onAssetRetry,
   onMedicalTopComplete,
   onMedicalGarageComplete,
   onMedicalBasementComplete,
@@ -802,19 +804,26 @@ export default function InteriorOverlay({
           role="status"
           aria-live="polite"
         >
-          <span style={styles.assetCurtainText}>
-            {building.id === "medical-college"
-              ? assetState === "failed"
-                ? "医学院 / 场景读取失败，请刷新后重试"
-                : "医学院 / 黑暗中有什么正在显现"
-              : building.id === "little-theater"
+          <div style={styles.assetCurtainContent}>
+            <span style={styles.assetCurtainText}>
+              {building.id === "medical-college"
                 ? assetState === "failed"
-                  ? "小剧场 / 场景读取失败，请刷新后重试"
-                  : "小剧场 / 最后一场演出正在装片"
-              : assetState === "failed"
-                ? "白沙宿舍 / 场景读取失败，请刷新后重试"
-                : "白沙宿舍 / 正在适应黑暗"}
-          </span>
+                  ? "医学院 / 场景读取失败"
+                  : "医学院 / 黑暗中有什么正在显现"
+                : building.id === "little-theater"
+                  ? assetState === "failed"
+                    ? "小剧场 / 场景读取失败"
+                    : "小剧场 / 最后一场演出正在装片"
+                  : assetState === "failed"
+                    ? "白沙宿舍 / 场景读取失败"
+                    : "白沙宿舍 / 正在适应黑暗"}
+            </span>
+            {assetState === "failed" && onAssetRetry ? (
+              <button type="button" style={styles.assetRetry} onClick={onAssetRetry}>
+                重新加载场景
+              </button>
+            ) : null}
+          </div>
         </div>
       )}
 
@@ -1251,6 +1260,23 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 12,
     letterSpacing: "0.28em",
     animation: "baishaLoadingPulse 1.8s ease-in-out infinite",
+  },
+  assetCurtainContent: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 18,
+  },
+  assetRetry: {
+    border: "1px solid rgba(178, 47, 60, 0.72)",
+    borderRadius: 2,
+    padding: "9px 18px",
+    color: "rgba(238, 222, 213, 0.9)",
+    background: "rgba(58, 4, 10, 0.34)",
+    fontFamily: FONT_STACK,
+    fontSize: 12,
+    letterSpacing: "0.18em",
+    cursor: "pointer",
   },
   // 暗角：四周压暗，聚焦画面中心，和外层 .vignette 呼应。
   vignette: {

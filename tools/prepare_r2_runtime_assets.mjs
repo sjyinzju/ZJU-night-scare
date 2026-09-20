@@ -16,6 +16,11 @@ const scenes = {
       "public/models/interiors/library/library.glb",
       "public/models/interiors/library/library-scene01-props.glb",
     ],
+    staticFiles: [
+      "public/models/interiors/library/scene01.meta.json",
+      "public/images/jumpscares/library-shelf-ghost.png",
+      "public/images/jumpscares/library-fall-ghost.png",
+    ],
   },
   baisha: {
     version: "baisha-scene01-v2",
@@ -25,9 +30,15 @@ const scenes = {
       "public/models/interiors/baisha/baisha-corridor-props.glb",
       "public/models/interiors/baisha/baisha-chase-props.glb",
     ],
+    staticFiles: [
+      "public/models/interiors/baisha/scene01.meta.json",
+      "public/images/baisha/dorm-photo-normal-v1.png",
+      "public/images/baisha/dorm-photo-corrupt-v1.png",
+      "public/images/baisha/balcony-silhouette-v1.png",
+    ],
   },
   medical: {
-    version: "medical-top-gameplay-v7",
+    version: "medical-school-v17-basement-door-wall",
     files: [
       "public/models/interiors/medical-school/medical-top.glb",
       "public/models/interiors/medical-school/medical-garage.glb",
@@ -36,6 +47,24 @@ const scenes = {
       "public/models/interiors/medical-school/medical-top-603.glb",
       "public/models/interiors/medical-school/medical-top-605.glb",
       "public/models/interiors/medical-school/medical-top-props.glb",
+      "public/models/interiors/medical-school/medical-garage-props.glb",
+      "public/models/interiors/medical-school/medical-basement-props.glb",
+    ],
+    staticFiles: [
+      "public/models/interiors/medical-school/top-gameplay.meta.json",
+      "public/images/jumpscares/medical-garage-ghost.png",
+      "public/images/medical-cctv/normal-01.webp",
+      "public/images/medical-cctv/normal-02.webp",
+      "public/images/medical-cctv/normal-03.webp",
+      "public/images/medical-cctv/abnormal-a-01.webp",
+      "public/images/medical-cctv/abnormal-a-02.webp",
+      "public/images/medical-cctv/abnormal-b-01.webp",
+      "public/images/medical-cctv/abnormal-b-02.webp",
+      "public/images/medical-basement/suwan-door-v1.png",
+      "public/images/medical-basement/archive-intake-v1.png",
+      "public/images/medical-basement/archive-anomaly-v1.png",
+      "public/images/medical-basement/archive-blood-stain-v1.png",
+      "public/images/medical-basement/archive-notebook-spread-v1.png",
     ],
   },
   theater: {
@@ -62,10 +91,28 @@ const scenes = {
       "public/images/theater/theater-stage-suwan-flash.png",
     ],
   },
+  audio: {
+    version: "game-audio-v1",
+    staticFiles: [
+      "public/audio/bgm/score-1.mp3",
+      "public/audio/bgm/score-2.mp3",
+      "public/audio/ambient/wind.wav",
+      "public/audio/sfx/shake.wav",
+      "public/audio/sfx/jumpscare.wav",
+      "public/audio/sfx/reveal.wav",
+      "public/audio/sfx/ending.wav",
+      "public/audio/sfx/choice-select.wav",
+      "public/audio/sfx/hover.wav",
+      "public/audio/sfx/item.wav",
+      "public/audio/sfx/ghost-hit.wav",
+      "public/audio/sfx/death.wav",
+      "public/audio/sfx/story-open.mp3",
+    ],
+  },
 };
 
 if (requestedScene !== "all" && !(requestedScene in scenes)) {
-  throw new Error(`Unknown scene "${requestedScene}". Use --scene=library, --scene=baisha, --scene=medical, --scene=theater, or --scene=all.`);
+  throw new Error(`Unknown scene "${requestedScene}". Use --scene=library, --scene=baisha, --scene=medical, --scene=theater, --scene=audio, or --scene=all.`);
 }
 
 const selectedScenes = requestedScene === "all"
@@ -142,7 +189,15 @@ async function prepareStaticFile(sceneName, version, relativePath) {
   ]);
   if (sourceSha256 !== artifactSha256) throw new Error(`Copy verification failed for ${relativePath}`);
   const normalizedRelativePath = relativePath.replaceAll("\\", "/");
-  const contentType = relativePath.endsWith(".json") ? "application/json; charset=utf-8" : "image/png";
+  const extension = path.extname(relativePath).toLowerCase();
+  const contentTypes = {
+    ".json": "application/json; charset=utf-8",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+  };
+  const contentType = contentTypes[extension] ?? "application/octet-stream";
   return {
     scene: sceneName,
     version,
@@ -163,7 +218,7 @@ async function prepareStaticFile(sceneName, version, relativePath) {
 await rm(outputRoot, { recursive: true, force: true });
 const files = [];
 for (const [sceneName, scene] of selectedScenes) {
-  for (const relativePath of scene.files) {
+  for (const relativePath of scene.files ?? []) {
     files.push(await compressRuntimeFile(sceneName, scene.version, relativePath));
   }
   for (const relativePath of scene.staticFiles ?? []) {

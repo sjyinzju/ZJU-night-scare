@@ -8,6 +8,7 @@ import {
   type UIEvent,
 } from "react";
 import { assetUrl } from "../assetPath";
+import { BAISHA_IMAGE_CACHE_VERSION, preloadBaishaVisualAssets } from "../imagePreloader";
 import {
   playBaishaThunder,
   playBaishaWindowKnocks,
@@ -58,9 +59,9 @@ interface BalconyChoice {
   log: string;
 }
 
-const NORMAL_PHOTO = assetUrl("images/baisha/dorm-photo-normal-v1.png");
-const CORRUPT_PHOTO = assetUrl("images/baisha/dorm-photo-corrupt-v1.png");
-const BALCONY_SILHOUETTE = assetUrl("images/baisha/balcony-silhouette-v1.png");
+const NORMAL_PHOTO = assetUrl("images/baisha/dorm-photo-normal-v1.png", BAISHA_IMAGE_CACHE_VERSION);
+const CORRUPT_PHOTO = assetUrl("images/baisha/dorm-photo-corrupt-v1.png", BAISHA_IMAGE_CACHE_VERSION);
+const BALCONY_SILHOUETTE = assetUrl("images/baisha/balcony-silhouette-v1.png", BAISHA_IMAGE_CACHE_VERSION);
 
 const FORUM_REPLIES: ForumReply[] = [
   {
@@ -218,13 +219,8 @@ export default function BaishaDormExperience({
   useEffect(() => {
     if (!active) return;
     let cancelled = false;
-    Promise.all([NORMAL_PHOTO, CORRUPT_PHOTO, BALCONY_SILHOUETTE].map((src) => new Promise<void>((resolve) => {
-      const image = new Image();
-      image.onload = () => resolve();
-      image.onerror = () => resolve();
-      image.src = src;
-    }))).then(() => {
-      if (!cancelled) setPhotosReady(true);
+    void preloadBaishaVisualAssets().then((loaded) => {
+      if (!cancelled) setPhotosReady(loaded.every(Boolean));
     });
     return () => { cancelled = true; };
   }, [active]);

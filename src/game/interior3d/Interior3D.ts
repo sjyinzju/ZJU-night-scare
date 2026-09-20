@@ -17,6 +17,7 @@ import { CameraController } from "./CameraController";
 import { FlashlightSystem } from "./FlashlightSystem";
 import { getInteriorNpcRevealSceneIds } from "../storyEngine";
 import { assetUrl } from "../assetPath";
+import { MEDICAL_BASEMENT_IMAGE_VERSION } from "../imagePreloader";
 import {
   getMedicalInteriorSegment,
   getInteriorAssetObject,
@@ -2413,7 +2414,7 @@ export class Interior3D {
 
     const [props, apparitionTexture] = await Promise.all([
       loadMedicalTopAuxiliary(meta.propsModel),
-      new THREE.TextureLoader().loadAsync(assetUrl(meta.apparition.image, "medical-basement-v1")),
+      new THREE.TextureLoader().loadAsync(assetUrl(meta.apparition.image, MEDICAL_BASEMENT_IMAGE_VERSION)),
     ]);
     if (this.disposed) {
       props.dispose();

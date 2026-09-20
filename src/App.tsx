@@ -19,7 +19,10 @@ import { CampusScene, type GameHudEvent, type GameMiniMapEvent } from "./game/Ca
 import InteriorOverlay from "./game/interior3d/InteriorOverlay";
 import type { InteriorAssetState } from "./game/interior3d/Interior3D";
 import type { MedicalBasementConclusionId, MedicalBasementEvidenceId } from "./game/interior3d/medicalBasementData";
-import { preloadInteriorAsset } from "./game/interior3d/InteriorAssetLoader";
+import {
+  preloadAllMedicalInteriorAssets,
+  preloadInteriorAsset,
+} from "./game/interior3d/InteriorAssetLoader";
 import { shouldUseBaishaDirectChaseTest } from "./game/interior3d/baishaDebug";
 import LaunchSequence, { type LaunchSequenceMode } from "./LaunchSequence";
 import { campusBuildings, campusRoads, ROAD, type IsoPoint } from "./game/mapData";
@@ -38,7 +41,7 @@ import {
   type StorySceneId,
 } from "./game/storyData";
 import { useGameAudio } from "./game/audio/useGameAudio";
-import { audioManager } from "./game/audio/audioManager";
+import { audioManager, preloadGameAudio } from "./game/audio/audioManager";
 import { playImpactBang } from "./game/audio/proceduralAudio";
 import { assetUrl } from "./game/assetPath";
 import { shouldUseMedicalDevelopmentStart } from "./game/developmentMode";
@@ -53,6 +56,11 @@ import {
   prepareJumpscareSprite,
   type JumpscareSpriteId,
 } from "./game/jumpscareAssets";
+import {
+  preloadBaishaVisualAssets,
+  preloadMedicalVisualAssets,
+  preloadTheaterVisualAssets,
+} from "./game/imagePreloader";
 import {
   advanceStory,
   applyGhostDamage,
@@ -75,6 +83,12 @@ const initialHud: GameHudEvent = {
 
 const MINI_MAP_W = 42;
 const MINI_MAP_D = 34;
+
+function runBackgroundPreload(label: string, request: Promise<unknown>): void {
+  void request.catch((error) => {
+    console.warn(`[App] ${label} background preload was unavailable; scene entry will retry.`, error);
+  });
+}
 
 type MiniMapSnapshot = {
   player: IsoPoint;
@@ -375,12 +389,18 @@ function App() {
   const isMobile = useIsMobile();
 
   useEffect(() => {
-    // Start downloads at app mount and retain the decoded images for the whole
-    // session. Howler also preloads, but this gives the jumpscare coordinator a
-    // concrete readiness promise before it starts a one-shot beat.
-    void preloadJumpscareSprites();
-    void audioManager.prepareJumpscare();
-  }, []);
+    // Warm the opening scene while the title is visible. All three preloaders
+    // retain their resolved transport/decode state and are reused on entry.
+    runBackgroundPreload("opening assets", Promise.all([
+      preloadInteriorAsset({
+        buildingId: "medical-library",
+        roomKind: "library",
+        isMobile,
+      }),
+      preloadJumpscareSprites(),
+      preloadGameAudio(),
+    ]));
+  }, [isMobile]);
 
   useEffect(() => () => {
     if (effectClearTimerRef.current !== null) window.clearTimeout(effectClearTimerRef.current);
@@ -409,6 +429,43 @@ function App() {
   const setWorld = useGameStore((s) => s.setWorld);
   const resetAll = useGameStore((s) => s.resetAll);
   const setPlayerIso = useGameStore((s) => s.setPlayerIso);
+
+  useEffect(() => {
+    if (launchAssetState !== "ready" || !interiorBuilding) return;
+
+    if (interiorBuilding.id === "medical-library") {
+      runBackgroundPreload("Baisha chapter", Promise.all([
+        preloadInteriorAsset({ buildingId: "dorm-baisha", roomKind: "dorm", isMobile }),
+        preloadBaishaVisualAssets(),
+      ]));
+      return;
+    }
+
+    if (interiorBuilding.id === "dorm-baisha") {
+      runBackgroundPreload(
+        "medical-school chapters",
+        preloadAllMedicalInteriorAssets({
+          buildingId: "medical-college",
+          roomKind: "medical",
+          isMobile,
+        }).then(() => preloadMedicalVisualAssets()),
+      );
+      return;
+    }
+
+    if (interiorBuilding.id === "medical-college") {
+      // The theater payload is roughly 104 MB, so begin it during the lengthy
+      // medical-school chapter rather than after the theater door is opened.
+      runBackgroundPreload(
+        "theater chapter",
+        preloadInteriorAsset({
+          buildingId: "little-theater",
+          roomKind: "hall",
+          isMobile,
+        }).then(() => preloadTheaterVisualAssets()),
+      );
+    }
+  }, [interiorBuilding, isMobile, launchAssetState]);
 
   // ── View-only Zustand subscriptions. ──
   const zHudPlace = useGameStore((s) => s.hudPlace);
@@ -1214,11 +1271,14 @@ function App() {
       // a second request and it deliberately postpones CPU/GPU parsing until
       // the player actually enters the dorm.
       if (nextScene.id === "library_police" || nextScene.id === "dorm_baiqiu") {
-        void preloadInteriorAsset({
-          buildingId: "dorm-baisha",
-          roomKind: "dorm",
-          isMobile,
-        }).catch((error) => {
+        void Promise.all([
+          preloadInteriorAsset({
+            buildingId: "dorm-baisha",
+            roomKind: "dorm",
+            isMobile,
+          }),
+          preloadBaishaVisualAssets(),
+        ]).catch((error) => {
           console.warn("[App] Baisha background preload was unavailable; entry will retry.", error);
         });
       }
@@ -1239,7 +1299,10 @@ function App() {
           setPhaserReady(true);
         } else if (command.kind === "enter-building") {
           const building = getStoryBuildingForHotspot(command.hotspotId);
-          if (building) openInterior(building);
+          if (building) {
+            setLaunchAssetState("loading");
+            openInterior(building);
+          }
         } else if (command.kind === "show-objective") {
           setNextObjectiveCue({ place: command.place, objective: command.objective });
         } else if (command.kind === "set-active-scene") {
@@ -1689,6 +1752,7 @@ function App() {
           canExit={canExitInterior}
           blockUntilAssetReady={launchMode !== null || baishaStillLoading}
           onAssetStateChange={setLaunchAssetState}
+          onAssetRetry={handleLaunchRetry}
           onMedicalTopComplete={handleMedicalTopComplete}
           onMedicalGarageComplete={handleMedicalGarageComplete}
           onMedicalBasementComplete={handleMedicalBasementComplete}

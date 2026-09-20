@@ -11,6 +11,7 @@
     "test:exterior-interaction": "node tools/verify-exterior-interaction.mjs",
     "test:road-movement": "node tools/verify-road-movement-contract.mjs",
     "test:theater-runtime": "node tools/verify-theater-runtime.mjs",
+    "test:asset-preload": "node tools/verify-asset-preload.mjs",
     "assets:prepare:r2": "node tools/prepare_r2_runtime_assets.mjs"
   },
   "dependencies": {

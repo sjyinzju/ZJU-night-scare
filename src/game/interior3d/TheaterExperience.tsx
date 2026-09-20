@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { assetUrl } from "../assetPath";
 import { audioManager } from "../audio/audioManager";
+import { preloadTheaterVisualAssets } from "../imagePreloader";
 import { JumpscarePipeline } from "../JumpscarePipeline";
 import { prepareJumpscareSprite } from "../jumpscareAssets";
 import { useGameStore } from "../store";
@@ -149,7 +150,6 @@ export default function TheaterExperience({
   const mirrorStartedAt = useRef(0);
   const endingStartedAt = useRef(0);
   const mirrorScareTriggered = useRef(false);
-  const preloadedImages = useRef<HTMLImageElement[]>([]);
   const baiqiuBond = useGameStore((state) => Boolean(state.storyState.flags.baiqiuBond));
 
   const projectionImages = useMemo(() => [
@@ -170,17 +170,9 @@ export default function TheaterExperience({
 
   useEffect(() => {
     if (!active) return;
-    preloadedImages.current = MIRROR_IMAGES.map((relativePath) => {
-      const image = new Image();
-      image.crossOrigin = "anonymous";
-      image.decoding = "async";
-      image.src = assetUrl(relativePath, THEATER_IMAGE_CACHE_VERSION);
-      void image.decode().catch((error) => console.warn(`[Theater] Image preload failed: ${relativePath}`, error));
-      return image;
-    });
+    void preloadTheaterVisualAssets();
     void prepareJumpscareSprite(THEATER_SUWAN_JUMPSCARE_SPRITE);
     void audioManager.prepareJumpscare();
-    return () => { preloadedImages.current = []; };
   }, [active]);
 
   const theaterRuntimeReady = snapshot !== null;
