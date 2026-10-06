@@ -406,7 +406,7 @@ export default function TheaterExperience({
 
       {modal === "mirror" && (
         <section className="theaterImageSequence" onClick={advanceMirror} aria-label={`镜中照片 ${mirrorIndex + 1}/3`}>
-          <img crossOrigin="anonymous" src={assetUrl(MIRROR_IMAGES[mirrorIndex], THEATER_IMAGE_CACHE_VERSION)} alt={["镜中只有玩家视角与身后的戏服架", "苏婉出现在镜中视线中央", "视线边缘贴近一张不应存在的脸"][mirrorIndex]} />
+          <img src={assetUrl(MIRROR_IMAGES[mirrorIndex], THEATER_IMAGE_CACHE_VERSION)} alt={["镜中只有玩家视角与身后的戏服架", "苏婉出现在镜中视线中央", "视线边缘贴近一张不应存在的脸"][mirrorIndex]} />
           <span>{mirrorIndex + 1} / 3</span>
           {mirrorIndex < 2 && <p>点击任意位置或按任意键继续</p>}
         </section>

@@ -15,7 +15,7 @@ type ImageAssetRecord = {
 export const MEDICAL_CCTV_IMAGE_VERSION = "medical-cctv-v3-webp";
 export const MEDICAL_BASEMENT_IMAGE_VERSION = "medical-basement-v2";
 export const BAISHA_IMAGE_CACHE_VERSION = "baisha-images-v1";
-export const JUMPSCARE_IMAGE_CACHE_VERSION = "jumpscare-images-v2";
+export const JUMPSCARE_IMAGE_CACHE_VERSION = "jumpscare-images-v3";
 
 const imageAssetRecords = new Map<string, ImageAssetRecord>();
 
@@ -71,8 +71,13 @@ const THEATER_VISUAL_ASSETS: readonly ImageAssetDescriptor[] = [
 }));
 
 function createImageAssetRecord(descriptor: ImageAssetDescriptor): ImageAssetRecord {
+  // Deliberately NO crossOrigin: the DOM <img> render targets fetch these URLs
+  // without CORS, and the browser caches the two request modes as separate
+  // variants (Vary: Origin). A CORS-mode preload warms a variant the renderer
+  // never uses, and once the no-cors variant is cached the CORS request can be
+  // failed outright for the rest of the session. decode()/naturalWidth need no
+  // CORS access.
   const image = new Image();
-  image.crossOrigin = "anonymous";
   image.decoding = "async";
   image.fetchPriority = descriptor.priority ?? "auto";
   const url = assetUrl(descriptor.path, descriptor.version);
@@ -81,13 +86,18 @@ function createImageAssetRecord(descriptor: ImageAssetDescriptor): ImageAssetRec
     image.onload = () => {
       void image.decode().then(
         () => resolve(true),
-        () => resolve(image.complete && image.naturalWidth > 0),
+        () => {
+          const usable = image.complete && image.naturalWidth > 0;
+          // A false result must never persist in the record map, or every
+          // later scare in the session falls back to the procedural face.
+          // The group preloader retries once immediately; a later scene
+          // entry can retry again if connectivity returned in the meantime.
+          if (!usable) imageAssetRecords.delete(url);
+          resolve(usable);
+        },
       );
     };
     image.onerror = () => {
-      // A failed CDN response must not poison the whole session. The group
-      // preloader retries once immediately, and a later scene entry can retry
-      // again if connectivity returned in the meantime.
       imageAssetRecords.delete(url);
       resolve(false);
     };
