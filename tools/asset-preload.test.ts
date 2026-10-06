@@ -77,6 +77,8 @@ const {
   preloadInteriorAsset,
 } = await import("../src/game/interior3d/InteriorAssetLoader");
 const {
+  preloadBaishaVisualAssets,
+  preloadExteriorCampusAssets,
   preloadMedicalVisualAssets,
   preloadTheaterVisualAssets,
 } = await import("../src/game/imagePreloader");
@@ -92,6 +94,7 @@ await preloadAllMedicalInteriorAssets({
   isMobile: false,
 });
 await preloadMedicalVisualAssets();
+await preloadBaishaVisualAssets();
 await preloadJumpscareSprites();
 await preloadInteriorAsset({
   buildingId: "little-theater",
@@ -99,6 +102,7 @@ await preloadInteriorAsset({
   isMobile: false,
 });
 await preloadTheaterVisualAssets();
+await preloadExteriorCampusAssets();
 
 const requestedUrls = [...requestCounts.keys()];
 for (const requiredFile of [
@@ -129,6 +133,35 @@ assert(
   requestCounts.get(basementJumpscareUrl!) === 1,
   "Medical-basement apparition and jumpscare must reuse one decoded image URL",
 );
+for (const baishaFile of [
+  "dorm-photo-normal-v1.png",
+  "dorm-photo-corrupt-v1.png",
+  "balcony-silhouette-v1.png",
+]) {
+  assert(
+    requestedUrls.some((url) => url.includes(baishaFile)),
+    `Missing Baisha photo-anomaly preload request for ${baishaFile}`,
+  );
+}
+const exteriorUrls = requestedUrls.filter((url) => url.includes("assets/exterior/"));
+assert(
+  exteriorUrls.length >= 28,
+  `Expected all campus building sprites to be warmed, got ${exteriorUrls.length}`,
+);
+for (const url of exteriorUrls) {
+  // CampusScene loads sprites without a version param; a versioned preloader
+  // URL would miss that cache entry and still stall on first map render.
+  assert(
+    /\/assets\/exterior\/([^/?]+)\/\1\.png$/.test(url),
+    `Exterior sprite URL must match CampusScene's unversioned shape: ${url}`,
+  );
+}
+for (const buildingId of ["medical-library", "dorm-baisha", "crescent-building", "admin-center"]) {
+  assert(
+    requestedUrls.some((url) => url.endsWith(`/assets/exterior/${buildingId}/${buildingId}.png`)),
+    `Missing exterior sprite preload for ${buildingId}`,
+  );
+}
 
 const requestCountAfterFirstPass = [...requestCounts.values()].reduce((sum, count) => sum + count, 0);
 await preloadAllMedicalInteriorAssets({
@@ -137,6 +170,7 @@ await preloadAllMedicalInteriorAssets({
   isMobile: false,
 });
 await preloadMedicalVisualAssets();
+await preloadBaishaVisualAssets();
 await preloadJumpscareSprites();
 await preloadInteriorAsset({
   buildingId: "little-theater",
@@ -144,6 +178,7 @@ await preloadInteriorAsset({
   isMobile: false,
 });
 await preloadTheaterVisualAssets();
+await preloadExteriorCampusAssets();
 const requestCountAfterSecondPass = [...requestCounts.values()].reduce((sum, count) => sum + count, 0);
 assert(
   requestCountAfterSecondPass === requestCountAfterFirstPass,

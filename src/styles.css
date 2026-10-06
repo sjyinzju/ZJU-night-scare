@@ -1905,12 +1905,18 @@ button {
 }
 
 .baishaPhoto {
+  grid-area: 1 / 1;
   display: block;
   width: min(86vw, calc(82vh * 4 / 3));
   max-height: 82vh;
   object-fit: contain;
   filter: drop-shadow(0 28px 72px rgba(0,0,0,0.9));
   animation: baishaPhotoDevelop 1.25s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* The stacked corrupt frame stays painted but unseen until the flash swap. */
+.baishaPhoto.is-hidden {
+  visibility: hidden;
 }
 
 .baishaExperience.is-dissolving,
@@ -2584,6 +2590,19 @@ button {
   z-index: 100;
   background: #000;
   animation: medicalBlackout .45s ease-in both;
+}
+
+/* Offscreen decode warmup for the archive notebook images. Sized and painted
+   (opacity 0) so the browser actually decodes them; never visible or hit-testable. */
+.medicalBasementWarmup {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 0;
+  width: 300px;
+  height: 210px;
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* Medical documents deliberately reuse the same borderless story language as

@@ -391,10 +391,18 @@ export default function BaishaDormExperience({
           onClick={continuePhoto}
           aria-label={corruptVisible ? "发生异变的校园合照" : "校园合照"}
         >
+          {/* Both photos stay mounted so the corrupt frame is already decoded
+              when the flash lands: the anomaly must appear in the same instant,
+              not one network/decode beat later. */}
           <img
-            className="baishaPhoto"
-            src={corruptVisible ? CORRUPT_PHOTO : NORMAL_PHOTO}
-            alt={corruptVisible ? "林伟的位置变成鬼影，其余同学都失去了五官" : "六名学生在启真湖边的合照"}
+            className={`baishaPhoto${corruptVisible ? " is-hidden" : ""}`}
+            src={NORMAL_PHOTO}
+            alt="六名学生在启真湖边的合照"
+          />
+          <img
+            className={`baishaPhoto${corruptVisible ? "" : " is-hidden"}`}
+            src={CORRUPT_PHOTO}
+            alt="林伟的位置变成鬼影，其余同学都失去了五官"
           />
           {stage === "photo_ready" && <p className="baishaContinue baishaContinue--bottom">按任意键或点击任意位置继续</p>}
         </section>

@@ -58,6 +58,7 @@ import {
 } from "./game/jumpscareAssets";
 import {
   preloadBaishaVisualAssets,
+  preloadExteriorCampusAssets,
   preloadMedicalVisualAssets,
   preloadTheaterVisualAssets,
 } from "./game/imagePreloader";
@@ -437,19 +438,22 @@ function App() {
       runBackgroundPreload("Baisha chapter", Promise.all([
         preloadInteriorAsset({ buildingId: "dorm-baisha", roomKind: "dorm", isMobile }),
         preloadBaishaVisualAssets(),
-      ]));
+      ]).then(() => preloadExteriorCampusAssets()));
       return;
     }
 
     if (interiorBuilding.id === "dorm-baisha") {
-      runBackgroundPreload(
-        "medical-school chapters",
+      // The basement notebook/photo PNGs are small next to the medical GLBs;
+      // downloading them in parallel means they are always resident by the
+      // time the player reaches the underground archive.
+      runBackgroundPreload("medical-school chapters", Promise.all([
         preloadAllMedicalInteriorAssets({
           buildingId: "medical-college",
           roomKind: "medical",
           isMobile,
-        }).then(() => preloadMedicalVisualAssets()),
-      );
+        }),
+        preloadMedicalVisualAssets(),
+      ]));
       return;
     }
 

@@ -70,6 +70,46 @@ const THEATER_VISUAL_ASSETS: readonly ImageAssetDescriptor[] = [
   version: THEATER_IMAGE_CACHE_VERSION,
 }));
 
+// Must stay in sync with CampusScene.preload(): same folders, same URL shape
+// (no version param), so a warmed browser cache is a hit for Phaser's loader.
+const EXTERIOR_BUILDING_IDS = [
+  "main-gate",
+  "dorm-lantian",
+  "dorm-danyang",
+  "dorm-cuibai",
+  "medical-library",
+  "medical-college",
+  "dorm-baisha",
+  "little-theater",
+  "linhu-canteen",
+  "west-teaching",
+  "ocean-building",
+  "qiushi-auditorium",
+  "marine-lab",
+  "engineering-lab",
+  "agri-life",
+  "library",
+  "east-teaching-1",
+  "east-teaching-2",
+  "east-teaching-3",
+  "east-teaching-4",
+  "east-teaching-5",
+  "east-teaching-6",
+  "east-teaching-7",
+  "gym",
+  "life-science",
+  "environment-college",
+] as const;
+
+const EXTERIOR_CAMPUS_ASSETS: readonly ImageAssetDescriptor[] = [
+  ...EXTERIOR_BUILDING_IDS.map((buildingId) => ({
+    path: `assets/exterior/${buildingId}/${buildingId}.png`,
+    priority: "low" as const,
+  })),
+  { path: "assets/exterior/crescent-building/crescent-building.png", priority: "low" as const },
+  { path: "assets/exterior/admin-center/admin-center.png", priority: "low" as const },
+];
+
 function createImageAssetRecord(descriptor: ImageAssetDescriptor): ImageAssetRecord {
   // Deliberately NO crossOrigin: the DOM <img> render targets fetch these URLs
   // without CORS, and the browser caches the two request modes as separate
@@ -156,4 +196,13 @@ export function preloadMedicalVisualAssets(): Promise<boolean[][]> {
 
 export function preloadTheaterVisualAssets(): Promise<boolean[]> {
   return preloadImageAssets(THEATER_VISUAL_ASSETS);
+}
+
+/**
+ * Warm the 2.5D campus building sprites while the player is still inside the
+ * opening interior, so leaving the building does not pay the full exterior
+ * download before Phaser can draw the map.
+ */
+export function preloadExteriorCampusAssets(): Promise<boolean[]> {
+  return preloadImageAssets(EXTERIOR_CAMPUS_ASSETS);
 }

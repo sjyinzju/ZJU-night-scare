@@ -741,6 +741,19 @@ export class Interior3D {
     this.outsideRedLight.intensity = 0;
     this.outsideWhiteLight.intensity = this.roomKind === "library" ? 2.8 : 0;
     this.outsideWhiteLight.visible = this.outsideWhiteLight.intensity > 0;
+    if (this.roomKind === "library") {
+      // Exterior-only lights join the scene from the very first frame with
+      // zero intensity. Toggling their visible flag mid-session changes the
+      // light counts baked into every material program, forcing Three.js to
+      // recompile the whole library and freezing movement for seconds right
+      // when the player walks back in from the courtyard.
+      this.outsideRedLight.visible = true;
+      this.outsideCeilingLight.visible = true;
+      // Same rule for the return-pursuit light: it switches on when the
+      // player crosses z = 3.4 heading back to the shelves, which must not
+      // recompile anything mid-walk. Intensity stays 0 until then.
+      this.libraryPursuitLight.visible = true;
+    }
     if (this.roomKind === "dorm" && options.buildingId === "dorm-baisha") {
       this.scene.background = new THREE.Color(0x0b0103);
       this.scene.fog = new THREE.Fog(0x110104, 4, 30);
@@ -4461,7 +4474,9 @@ export class Interior3D {
     this.scene.add(this.fallSpotlightTarget);
     this.fallSpotlight = new THREE.SpotLight(0xff101d, this.fallRevealed ? 120 : 0, 21, 0.31, 0.36, 1.38);
     this.fallSpotlight.name = "library_fall_crimson_spotlight";
-    this.fallSpotlight.visible = this.fallRevealed;
+    // Visible from creation (intensity 0 until the reveal) so switching the
+    // cone on never changes the light count embedded in compiled materials.
+    this.fallSpotlight.visible = true;
     this.fallSpotlight.position.copy(lampPosition);
     this.fallSpotlight.target = this.fallSpotlightTarget;
     if (!this.isMobile) {
@@ -4478,7 +4493,7 @@ export class Interior3D {
     // visually it belongs to the streetlamp pool and has no visible fixture.
     this.fallBodyFill = new THREE.PointLight(0xb90716, this.fallRevealed ? 4.2 : 0, 5.5, 1.9);
     this.fallBodyFill.name = "library_fall_body_bounce";
-    this.fallBodyFill.visible = this.fallRevealed;
+    this.fallBodyFill.visible = true;
     this.fallBodyFill.position.set(revealTarget.x, revealTarget.y + 0.9, revealTarget.z);
     this.scene.add(this.fallBodyFill);
   }
@@ -4489,17 +4504,14 @@ export class Interior3D {
     this.hasLeftShelfAfterFall = true;
     this.setFallenLinweiAppearance(true);
     this.outsideRedLight.intensity = 1.35;
-    this.outsideRedLight.visible = true;
     // Keep navigational storm light alive; the spotlight supplies the crimson
     // focus without switching the handheld beam or the courtyard off.
     this.outsideWhiteLight.intensity = 5.2;
     if (this.fallSpotlight) {
-      this.fallSpotlight.visible = true;
       this.fallSpotlight.intensity = 120;
       this.fallSpotlight.shadow.needsUpdate = true;
     }
     if (this.fallBodyFill) {
-      this.fallBodyFill.visible = true;
       this.fallBodyFill.intensity = 4.2;
     }
     const reveal = this.assetHandle?.meta?.fallReveal;
@@ -5980,7 +5992,6 @@ export class Interior3D {
     this.updateLibraryCeilingLights(t);
     this.updateBaishaLighting(t);
     this.updateLibraryReturnPursuit(dt, t);
-    this.outsideRedLight.visible = this.outsideRedLight.intensity > 0.01;
   }
 
   private isMedicalTopBlackout(t: number): boolean {
@@ -6027,7 +6038,6 @@ export class Interior3D {
     const ceilingTarget = exterior ? (lightning ? 11 : 2.7) : 0;
     this.outsideWhiteLight.intensity = THREE.MathUtils.lerp(this.outsideWhiteLight.intensity, whiteTarget, 0.18);
     this.outsideCeilingLight.intensity = THREE.MathUtils.lerp(this.outsideCeilingLight.intensity, ceilingTarget, 0.2);
-    this.outsideCeilingLight.visible = this.outsideCeilingLight.intensity > 0.01;
   }
 
   private updateLibraryCeilingLights(t: number): void {
@@ -6082,14 +6092,14 @@ export class Interior3D {
       && this.camera.position.z > 3.4;
 
     if (!active) {
+      // Intensity-only fade: the light itself never leaves the scene (see
+      // init), so crossing the z = 3.4 boundary cannot trigger a recompile.
       this.libraryPursuitLight.intensity = THREE.MathUtils.lerp(this.libraryPursuitLight.intensity, 0, 0.18);
-      this.libraryPursuitLight.visible = false;
       this.lastPursuitZ = this.camera.position.z;
       this.pursuitDistance = 7.2;
       return;
     }
 
-    this.libraryPursuitLight.visible = true;
     const dz = this.camera.position.z - this.lastPursuitZ;
     this.lastPursuitZ = this.camera.position.z;
     const movingTowardExit = dz < -0.018;

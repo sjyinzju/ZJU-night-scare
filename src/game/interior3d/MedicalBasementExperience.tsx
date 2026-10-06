@@ -195,6 +195,16 @@ export default function MedicalBasementExperience({
       {snapshot?.loadingText ? <div className="medicalGarageLoading">{snapshot.loadingText}</div> : null}
       {snapshot?.stage === "transition" ? <div className="medicalGarageBlackout" aria-hidden="true" /> : null}
 
+      {/* Same offscreen-mount decode trick as the jumpscare sprites: these
+          four images are everything the notebook paints, so keeping them
+          decoded for the whole basement visit makes the first open show the
+          aged paper instantly instead of the plain yellow backing. */}
+      {(
+        ["archive-notebook-spread-v1.png", "archive-intake-v1.png", "archive-anomaly-v1.png", "archive-blood-stain-v1.png"] as const
+      ).map((file) => (
+        <img key={file} className="medicalBasementWarmup" src={archiveImageUrl(file)} alt="" aria-hidden="true" />
+      ))}
+
       {modal?.kind === "clutter" ? (
         <div className="storyGlassBackdrop strong medicalStoryBackdrop">
           <section className="storyModal medicalStoryModal medicalBasementClutter" aria-modal="true" role="dialog">
