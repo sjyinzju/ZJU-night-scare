@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { RectAreaLightUniformsLib } from "three/examples/jsm/lights/RectAreaLightUniformsLib.js";
 import { buildRoom, classifyRoom, type AABB, type InteriorGuideNode, type RoomBuildResult, type RoomKind } from "./buildRoom";
 import { getInteriorBlueprint, type InteriorBlueprint } from "./interiorBlueprints";
 import {
@@ -71,6 +72,10 @@ import {
 } from "./medicalBasementData";
 import { TheaterGameplayRuntime } from "./TheaterGameplayRuntime";
 import { theaterFloorHeightAt, type TheaterModal, type TheaterSnapshot } from "./theaterData";
+
+// RectAreaLight participates from the first library frame, even at intensity
+// zero. Its shader requires LTC textures before any material is rendered.
+RectAreaLightUniformsLib.init();
 
 export type InteriorAssetState = "loading" | "ready" | "failed";
 export type BaishaGameplayPhase = "photo" | "balcony" | "computer" | "paused" | "complete";
@@ -4486,6 +4491,10 @@ export class Interior3D {
       // 1024px shadow once at reveal instead of resubmitting the full library
       // geometry to the shadow pass every frame while the player walks away.
       this.fallSpotlight.shadow.autoUpdate = false;
+      // The visible light already contributes a shadow sampler at intensity
+      // zero. Allocate its depth map on the first frame, before that sampler
+      // can fall back to a non-depth texture and invalidate desktop draws.
+      this.fallSpotlight.shadow.needsUpdate = true;
     }
     this.scene.add(this.fallSpotlight);
 
