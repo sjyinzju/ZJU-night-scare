@@ -269,8 +269,7 @@ export class Interior3D {
   private readonly nearFillLight: THREE.PointLight;
   private readonly bloodLight: THREE.PointLight;
   private readonly outsideRedLight: THREE.PointLight;
-  private readonly outsideWhiteLight: THREE.PointLight;
-  private readonly outsideCeilingLight: THREE.RectAreaLight;
+  private readonly outsideWindowLight: THREE.RectAreaLight;
   private readonly libraryPursuitLight: THREE.PointLight;
 
   private room: RoomBuildResult;
@@ -703,18 +702,14 @@ export class Interior3D {
     this.outsideRedLight.position.set(2.4, 1.25, 34.5);
     this.scene.add(this.outsideRedLight);
 
-    // A dim, cold wash keeps the exterior yard navigable before the fall
-    // reveal without exposing the hidden body or competing with the red lamp.
-    this.outsideWhiteLight = new THREE.PointLight(0xdbe5f2, 0, 29, 1.45);
-    this.outsideWhiteLight.position.set(1.8, 4.2, 32.5);
-    this.scene.add(this.outsideWhiteLight);
-    // Invisible ceiling-sized source: reads as storm light leaking down from
-    // above, without adding a visible lamp model to the authored courtyard.
-    this.outsideCeilingLight = new THREE.RectAreaLight(0xe7efff, 0, 17, 43);
-    this.outsideCeilingLight.visible = false;
-    this.outsideCeilingLight.position.set(4.3, 8.2, 36.5);
-    this.outsideCeilingLight.lookAt(4.3, 0, 36.5);
-    this.scene.add(this.outsideCeilingLight);
+    // Graze the authored window facade at x = 11.13 from just in front of it.
+    // The area light faces the windows; the yard and opposite wall lie behind
+    // its emitting plane and must not receive the former courtyard-wide wash.
+    this.outsideWindowLight = new THREE.RectAreaLight(0x8995ab, 0, 17, 5);
+    this.outsideWindowLight.visible = false;
+    this.outsideWindowLight.position.set(10.83, 3.8, 40.0);
+    this.outsideWindowLight.lookAt(11.13, 3.8, 40.0);
+    this.scene.add(this.outsideWindowLight);
 
     this.libraryPursuitLight = new THREE.PointLight(0xff1025, 0, 7.5, 1.85);
     this.libraryPursuitLight.name = "library_return_pursuit_light";
@@ -744,8 +739,6 @@ export class Interior3D {
     this.roomKind = classifyRoom(options.buildingId, options.zone);
     this.bloodLightEnabled = this.roomKind === "library";
     this.outsideRedLight.intensity = 0;
-    this.outsideWhiteLight.intensity = this.roomKind === "library" ? 2.8 : 0;
-    this.outsideWhiteLight.visible = this.outsideWhiteLight.intensity > 0;
     if (this.roomKind === "library") {
       // Exterior-only lights join the scene from the very first frame with
       // zero intensity. Toggling their visible flag mid-session changes the
@@ -753,7 +746,7 @@ export class Interior3D {
       // recompile the whole library and freezing movement for seconds right
       // when the player walks back in from the courtyard.
       this.outsideRedLight.visible = true;
-      this.outsideCeilingLight.visible = true;
+      this.outsideWindowLight.visible = true;
       // Same rule for the return-pursuit light: it switches on when the
       // player crosses z = 3.4 heading back to the shelves, which must not
       // recompile anything mid-walk. Intensity stays 0 until then.
@@ -4513,9 +4506,6 @@ export class Interior3D {
     this.hasLeftShelfAfterFall = true;
     this.setFallenLinweiAppearance(true);
     this.outsideRedLight.intensity = 1.35;
-    // Keep navigational storm light alive; the spotlight supplies the crimson
-    // focus without switching the handheld beam or the courtyard off.
-    this.outsideWhiteLight.intensity = 5.2;
     if (this.fallSpotlight) {
       this.fallSpotlight.intensity = 120;
       this.fallSpotlight.shadow.needsUpdate = true;
@@ -6043,10 +6033,8 @@ export class Interior3D {
     }
 
     const lightning = exterior && t < this.lightningFlashUntil;
-    const whiteTarget = exterior ? (lightning ? 16 : 5.2) : 2.8;
-    const ceilingTarget = exterior ? (lightning ? 11 : 2.7) : 0;
-    this.outsideWhiteLight.intensity = THREE.MathUtils.lerp(this.outsideWhiteLight.intensity, whiteTarget, 0.18);
-    this.outsideCeilingLight.intensity = THREE.MathUtils.lerp(this.outsideCeilingLight.intensity, ceilingTarget, 0.2);
+    const windowTarget = exterior ? (lightning ? 1.8 : 0.45) : 0;
+    this.outsideWindowLight.intensity = THREE.MathUtils.lerp(this.outsideWindowLight.intensity, windowTarget, 0.2);
   }
 
   private updateLibraryCeilingLights(t: number): void {
